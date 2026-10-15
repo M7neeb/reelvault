@@ -38,11 +38,33 @@
       "expo-video",
       "expo-sqlite",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "ReelVault uses Face ID to unlock your private videos."
+        }
+      ]
     ],
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      },
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f9139cd3-bb87-46bf-8a97-a60c2665423d"
+      }
+    },
+    "owner": "m7neeb"
   }
 }
