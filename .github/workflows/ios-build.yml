@@ -1,0 +1,87 @@
+# Builds an unsigned ReelVault.ipa and attaches it to a GitHub release.
+# The .ipa is signed on the phone when it is installed (e.g. with SideStore).
+#
+# Run it: Actions tab -> "iOS build" -> "Run workflow". Pushing a tag like v1.2.0 also runs it.
+# The Simkl client id (public) comes from the repository variable SIMKL_CLIENT_ID, if set.
+
+name: iOS build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      EXPO_PUBLIC_SIMKL_CLIENT_ID: ${{ vars.SIMKL_CLIENT_ID }}
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate the Xcode project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Build (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild -version
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Building $SCHEME from $WORKSPACE"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -quiet \
+            build
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+
+      - name: Package the .ipa
+        run: |
+          APP="build/Build/Products/Release-iphoneos/$SCHEME.app"
+          test -d "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry ReelVault.ipa Payload
+          ls -lh ReelVault.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReelVault-ipa
+          path: ReelVault.ipa
+          retention-days: 14
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('ios-build-{0}', github.run_number) }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || format('iOS build {0}', github.run_number) }}
+          body: |
+            Unsigned iPhone build from commit ${{ github.sha }}.
+            Install ReelVault.ipa with SideStore. Install updates over the existing app; never delete it first.
+          files: ReelVault.ipa
+          make_latest: true
