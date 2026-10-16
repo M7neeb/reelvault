@@ -10,7 +10,8 @@
  * screenshot of the app never contains anything personal.
  */
 
-import type { ThumbSource, UiTag, VaultItem } from './types';
+import { groupDuplicates } from './logic';
+import type { SmartFilter, ThumbSource, UiStatus, UiTag, VaultItem } from './types';
 
 // Reuse the template's bundled images as stand-in thumbnails. Real pixels, so
 // the grid can be judged honestly - tile size, gaps, badge legibility.
@@ -57,6 +58,21 @@ const TAG_SETS: string[][] = [
   [],
 ];
 
+const STATUS_SET: (UiStatus | null)[] = [
+  'completed',
+  'plantowatch',
+  null,
+  'completed',
+  'watching',
+  null,
+  'plantowatch',
+  null,
+  null,
+  'hold',
+  'completed',
+  'plantowatch',
+];
+
 const NAMES = Array.from(
   new Set(TAG_SETS.flat())
 ).sort((a, b) => a.localeCompare(b));
@@ -77,6 +93,49 @@ export const FIXTURE_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   importedAt: Date.UTC(2026, 9, 13, 18, 30) - i * 26 * 60 * 60 * 1000,
   tagCount: TAG_SETS[i].length,
   tagNames: TAG_SETS[i],
+  deletedAt: null,
+  status: STATUS_SET[i],
+}));
+
+/** A couple of saved searches for the sidebar. */
+export const FIXTURE_SMART_FILTERS: SmartFilter[] = [
+  { id: 1, name: 'Best of holiday', rule: { minRating: 8, tags: ['holiday'] } },
+  { id: 2, name: 'Still to watch', rule: { status: 'plantowatch' } },
+];
+
+/**
+ * Pretend content keys: two pairs of the fixture videos are "the same video",
+ * so the Duplicates view has something to show. Run through the real grouping.
+ */
+const FIXTURE_KEYS: Record<string, string> = {
+  'fixture-3': 'same-a',
+  'fixture-9': 'same-a',
+  'fixture-7': 'same-b',
+  'fixture-11': 'same-b',
+};
+export const FIXTURE_DUPLICATE_GROUPS: string[][] = groupDuplicates(
+  FIXTURE_ITEMS.map((v) => ({ ...v, contentKey: FIXTURE_KEYS[v.id] ?? null }))
+);
+
+const DELETED_NAMES = ['old_screenrec_2026-09-20.mp4', 'IMG_4301_blurry.mp4', 'clip_2026-09-02_test.mp4'];
+const DELETED_DAYS_AGO = [2, 11, 27];
+
+/** Recently Deleted, newest deletion first - 28, 19 and 3 days left. */
+export const FIXTURE_DELETED: VaultItem[] = DELETED_NAMES.map((filename, i) => ({
+  id: `fixture-deleted-${i + 1}`,
+  filename,
+  uri: '',
+  thumbSource: PLACEHOLDERS[(i + 2) % PLACEHOLDERS.length],
+  sizeBytes: Math.round([18.4, 6.1, 52.7][i] * 1024 * 1024),
+  durationMs: [33, 9, 140][i] * 1000,
+  rating: 0,
+  width: 1920,
+  height: 1080,
+  importedAt: Date.UTC(2026, 8, 1, 12, 0),
+  tagCount: 0,
+  tagNames: [],
+  deletedAt: Date.now() - DELETED_DAYS_AGO[i] * 24 * 60 * 60 * 1000 - 60 * 60 * 1000,
+  status: null,
 }));
 
 /** name -> ids, the same shape the native layer hands over. */

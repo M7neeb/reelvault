@@ -35,7 +35,16 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fmtDateTime, fmtDuration, fmtSize } from './format';
-import type { ThumbSource, UiTag, VaultItem, VaultScreenProps } from './types';
+import { RECENTLY_DELETED_DAYS } from './logic';
+import {
+  STATUSES,
+  statusLabel,
+  type ThumbSource,
+  type UiStatus,
+  type UiTag,
+  type VaultItem,
+  type VaultScreenProps,
+} from './types';
 
 const FRAME_W = 52;
 const FRAME_H = 36;
@@ -83,6 +92,7 @@ export default function ViewerModal({
   });
 
   const [rating, setRating] = useState(item.rating);
+  const [watch, setWatch] = useState<UiStatus | null>(item.status);
   const [videoTags, setVideoTags] = useState<UiTag[]>([]);
   const [draft, setDraft] = useState('');
   const [frames, setFrames] = useState<ThumbSource[]>([]);
@@ -162,6 +172,13 @@ export default function ViewerModal({
     console.log(`[RATE] ${item.filename} → ${next}`);
   }
 
+  async function onStatus(next: UiStatus) {
+    const value = next === watch ? null : next;
+    setWatch(value);
+    await actions.onSetStatus([item.id], value);
+    console.log(`[STATUS] ${item.filename} → ${value ?? 'none'}`);
+  }
+
   async function onAddTag() {
     const name = draft.trim();
     if (!name) return;
@@ -177,12 +194,16 @@ export default function ViewerModal({
   }
 
   function confirmDelete() {
-    confirmDestructive('Delete video?', item.filename, () => {
-      actions
-        .onDeleteOne(item)
-        .then(onClose)
-        .catch((e) => console.log(`[DELETE] failed: ${String(e)}`));
-    });
+    confirmDestructive(
+      'Delete video?',
+      `It moves to Recently Deleted for ${RECENTLY_DELETED_DAYS} days.`,
+      () => {
+        actions
+          .onDeleteOne(item)
+          .then(onClose)
+          .catch((e) => console.log(`[DELETE] failed: ${String(e)}`));
+      }
+    );
   }
 
   const isFavourite = rating >= FAVOURITE_RATING;
@@ -367,6 +388,20 @@ export default function ViewerModal({
 
                 <Text style={styles.infoMuted}>No Location Data</Text>
 
+                <Text style={styles.section}>Status</Text>
+                <View style={styles.pills}>
+                  {STATUSES.map((s) => (
+                    <TouchableOpacity
+                      key={s.key}
+                      style={[styles.statusChip, watch === s.key && styles.statusChipOn]}
+                      onPress={() => void onStatus(s.key)}>
+                      <Text style={[styles.statusChipText, watch === s.key && styles.statusChipTextOn]}>
+                        {s.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
                 <Text style={styles.section}>Keywords</Text>
                 <View style={styles.pills}>
                   {videoTags.length === 0 && <Text style={styles.infoMuted}>No keywords yet.</Text>}
@@ -416,6 +451,14 @@ export default function ViewerModal({
                 onPress={() => {
                   setMenuOpen(false);
                   void onRate(isFavourite ? 0 : FAVOURITE_RATING);
+                }}
+              />
+              <MenuRow
+                label="Status"
+                hint={statusLabel(watch)}
+                onPress={() => {
+                  setMenuOpen(false);
+                  setInfoOpen(true);
                 }}
               />
               <MenuRow
@@ -598,6 +641,17 @@ const styles = StyleSheet.create({
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: { backgroundColor: '#2f9ee0', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
   pillText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  statusChip: {
+    borderWidth: 1,
+    borderColor: '#2c2c30',
+    backgroundColor: '#1c1c1e',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  statusChipOn: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
+  statusChipText: { color: '#e7e9ec', fontSize: 13, fontWeight: '600' },
+  statusChipTextOn: { color: '#fff' },
   addRow: { flexDirection: 'row', gap: 8 },
   input: {
     flex: 1,
