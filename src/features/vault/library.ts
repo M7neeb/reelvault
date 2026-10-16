@@ -86,6 +86,15 @@ export async function setStatusMany(ids: string[], status: WatchStatus | null): 
   ]);
 }
 
+export async function setPrivateMany(ids: string[], isPrivate: boolean): Promise<void> {
+  if (!ids.length) return;
+  const db = await getDb();
+  await db.runAsync(`UPDATE videos SET is_private = ? WHERE id IN (${marks(ids.length)});`, [
+    isPrivate ? 1 : 0,
+    ...ids,
+  ]);
+}
+
 export async function addTagMany(ids: string[], name: string): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {

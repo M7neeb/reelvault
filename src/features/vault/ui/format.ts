@@ -3,7 +3,9 @@
  * preview as well as on device.
  */
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+import type { ThumbInfo } from './types';
+
+const MONTHS =['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** `1:05` / `1:02:03`. Null when there is no duration yet. */
 export function fmtDuration(ms: number | null): string | null {
@@ -35,4 +37,42 @@ export const gbFromBytes = (bytes: number): number => Math.round((bytes / GB) * 
 export function fmtSize(bytes: number): string {
   if (bytes >= GB) return `${gbFromBytes(bytes).toFixed(1)} GB`;
   return `${Math.round(bytes / 1024 / 1024)} MB`;
+}
+
+/** `MP4` from `clip.mp4`. */
+export function fmtFormat(filename: string): string | null {
+  const i = filename.lastIndexOf('.');
+  return i > 0 && i < filename.length - 1 ? filename.slice(i + 1).toUpperCase() : null;
+}
+
+type InfoSource = {
+  filename: string;
+  sizeBytes: number;
+  durationMs: number | null;
+  width: number | null;
+  height: number | null;
+  importedAt: number;
+  tagNames: string[];
+};
+
+/** The label a thumbnail shows for the chosen Thumbnail Info, or null for none. */
+export function fmtThumbInfo(item: InfoSource, info: ThumbInfo): string | null {
+  switch (info) {
+    case 'duration':
+      return fmtDuration(item.durationMs);
+    case 'size':
+      return fmtSize(item.sizeBytes);
+    case 'date':
+      return fmtDateTime(item.importedAt).date;
+    case 'dimensions':
+      return item.width && item.height ? `${item.width}×${item.height}` : null;
+    case 'format':
+      return fmtFormat(item.filename);
+    case 'filename':
+      return item.filename;
+    case 'keywords':
+      return item.tagNames.length ? item.tagNames.map((t) => `#${t}`).join(' ') : null;
+    default:
+      return null;
+  }
 }

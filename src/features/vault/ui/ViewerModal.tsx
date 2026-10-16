@@ -18,24 +18,15 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { fmtDateTime, fmtDuration, fmtSize } from './format';
+import { confirmAction } from './confirm';
+import { fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './format';
 import { RECENTLY_DELETED_DAYS } from './logic';
+import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
   STATUSES,
   statusLabel,
@@ -52,19 +43,6 @@ const FRAME_GAP = 3;
 
 /** The vault's own definition of a favourite (see the sidebar). */
 const FAVOURITE_RATING = 8;
-
-function confirmDestructive(title: string, message: string | undefined, onConfirm: () => void) {
-  if (Platform.OS === 'web') {
-    const text = message ? `${title}\n\n${message}` : title;
-    // eslint-disable-next-line no-alert
-    if (typeof window === 'undefined' || window.confirm(text)) onConfirm();
-    return;
-  }
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: onConfirm },
-  ]);
-}
 
 export default function ViewerModal({
   item,
@@ -83,12 +61,13 @@ export default function ViewerModal({
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { height: screenHeight } = useWindowDimensions();
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
 
-  const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (p) => {
-    p.loop = false;
-    if (enableVideo) p.play();
-    p.timeUpdateEventInterval = 0.2;
+  const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (pl) => {
+    pl.loop = false;
+    if (enableVideo) pl.play();
+    pl.timeUpdateEventInterval = 0.2;
   });
 
   const [rating, setRating] = useState(item.rating);
@@ -126,11 +105,11 @@ export default function ViewerModal({
     const sub = player.addListener('timeUpdate', (payload) => {
       const total = player.duration || (item.durationMs ?? 0) / 1000;
       if (!total) return;
-      const p = Math.min(1, Math.max(0, payload.currentTime / total));
-      setProgress(p);
+      const fraction = Math.min(1, Math.max(0, payload.currentTime / total));
+      setProgress(fraction);
       const count = framesRef.current.length;
       if (count) {
-        const idx = Math.min(count - 1, Math.floor(p * count));
+        const idx = Math.min(count - 1, Math.floor(fraction * count));
         if (idx !== lastIdx.current) {
           lastIdx.current = idx;
           stripRef.current?.scrollTo({
@@ -194,7 +173,7 @@ export default function ViewerModal({
   }
 
   function confirmDelete() {
-    confirmDestructive(
+    confirmAction(
       'Delete video?',
       `It moves to Recently Deleted for ${RECENTLY_DELETED_DAYS} days.`,
       () => {
@@ -206,21 +185,25 @@ export default function ViewerModal({
     );
   }
 
+  /** Moving a video in or out of Private takes it out of the current view, so close. */
+  function togglePrivate() {
+    actions
+      .onSetPrivate([item.id], !item.isPrivate)
+      .then(onClose)
+      .catch((e) => console.log(`[PRIVATE] failed: ${String(e)}`));
+  }
+
   const isFavourite = rating >= FAVOURITE_RATING;
+  const format = fmtFormat(item.filename);
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.viewer}>
         {/* ── media ─────────────────────────────────────────────────────── */}
-        <View style={[styles.stage, { marginBottom: 0 }]}>
+        <View style={styles.stage}>
           <TouchableOpacity activeOpacity={1} onPress={togglePlay} style={styles.stageTouch}>
             {enableVideo ? (
-              <VideoView
-                player={player}
-                style={styles.video}
-                contentFit="contain"
-                nativeControls={false}
-              />
+              <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} />
             ) : (
               <View style={styles.videoPlaceholder}>
                 <Text style={styles.videoPlaceholderText}>video</Text>
@@ -245,13 +228,13 @@ export default function ViewerModal({
               style={[styles.circle, infoOpen && styles.circleOn]}
               onPress={() => setInfoOpen((v) => !v)}
               accessibilityLabel="Info">
-              <Text style={styles.circleIcon}>ⓘ</Text>
+              <Text style={[styles.circleIcon, infoOpen && styles.circleIconOn]}>ⓘ</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.circle, menuOpen && styles.circleOn]}
               onPress={() => setMenuOpen(true)}
               accessibilityLabel="More">
-              <Text style={styles.circleIcon}>≡</Text>
+              <Text style={[styles.circleIcon, menuOpen && styles.circleIconOn]}>≡</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -264,9 +247,7 @@ export default function ViewerModal({
               <Text style={styles.scrubIcon}>{playing ? '❚❚' : '▶'}</Text>
             </TouchableOpacity>
 
-            <View
-              style={styles.scrubTrack}
-              onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
+            <View style={styles.scrubTrack} onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
               <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
               <View style={[styles.scrubThumb, { left: progress * Math.max(0, trackW - 3) }]} />
             </View>
@@ -302,19 +283,14 @@ export default function ViewerModal({
               <Text style={[styles.toolIcon, isFavourite && styles.toolIconOn]}>★</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.tool}
-              onPress={() => onRate(0)}
-              accessibilityLabel="Clear rating">
+            <TouchableOpacity style={styles.tool} onPress={() => onRate(0)} accessibilityLabel="Clear rating">
               <Text style={[styles.toolIcon, !rating && styles.toolIconDim]}>☆</Text>
             </TouchableOpacity>
 
             <View style={styles.stars}>
               {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                 <TouchableOpacity key={n} onPress={() => onRate(n)} hitSlop={4}>
-                  <Text style={[styles.star, n <= rating && styles.starOn]}>
-                    {n <= rating ? '★' : '☆'}
-                  </Text>
+                  <Text style={[styles.star, n <= rating && styles.starOn]}>{n <= rating ? '★' : '☆'}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -323,10 +299,7 @@ export default function ViewerModal({
               <Text style={styles.toolIcon}>•••</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.tool}
-              onPress={confirmDelete}
-              accessibilityLabel="Delete">
+            <TouchableOpacity style={styles.tool} onPress={confirmDelete} accessibilityLabel="Delete">
               <Text style={styles.toolDanger}>⌫</Text>
             </TouchableOpacity>
           </View>
@@ -335,11 +308,7 @@ export default function ViewerModal({
         {/* ── info panel ────────────────────────────────────────────────── */}
         {infoOpen && (
           <View style={styles.infoRoot}>
-            <TouchableOpacity
-              style={styles.infoBackdrop}
-              activeOpacity={1}
-              onPress={() => setInfoOpen(false)}
-            />
+            <TouchableOpacity style={styles.infoBackdrop} activeOpacity={1} onPress={() => setInfoOpen(false)} />
             <View style={[styles.infoSheet, { paddingBottom: insets.bottom + 16 }]}>
               <View style={styles.infoHeader}>
                 <TouchableOpacity style={styles.circle} onPress={() => setInfoOpen(false)}>
@@ -366,7 +335,9 @@ export default function ViewerModal({
                 <Text style={styles.infoMuted}>No Caption</Text>
 
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoValue}>{dt.date} at {dt.time}</Text>
+                  <Text style={styles.infoValue}>
+                    {dt.date} at {dt.time}
+                  </Text>
                 </View>
 
                 <Text style={styles.infoMuted}>No camera information</Text>
@@ -384,6 +355,11 @@ export default function ViewerModal({
                   <View style={styles.chip}>
                     <Text style={styles.chipText}>{item.durationMs ? fmtDuration(item.durationMs) : '--:--'}</Text>
                   </View>
+                  {format && (
+                    <View style={styles.chip}>
+                      <Text style={styles.chipText}>{format}</Text>
+                    </View>
+                  )}
                 </View>
 
                 <Text style={styles.infoMuted}>No Location Data</Text>
@@ -415,12 +391,13 @@ export default function ViewerModal({
                   <TextInput
                     style={styles.input}
                     placeholder="add a keyword…"
-                    placeholderTextColor="#5b6472"
+                    placeholderTextColor={p.textMuted}
                     value={draft}
                     onChangeText={setDraft}
                     onSubmitEditing={onAddTag}
                     autoCapitalize="none"
                     returnKeyType="done"
+                    keyboardAppearance={p.scheme}
                   />
                   <TouchableOpacity style={styles.addBtn} onPress={onAddTag}>
                     <Text style={styles.addBtnText}>Add</Text>
@@ -434,11 +411,7 @@ export default function ViewerModal({
         {/* ── actions sheet ─────────────────────────────────────────────── */}
         {menuOpen && (
           <View style={styles.infoRoot}>
-            <TouchableOpacity
-              style={styles.infoBackdrop}
-              activeOpacity={1}
-              onPress={() => setMenuOpen(false)}
-            />
+            <TouchableOpacity style={styles.infoBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)} />
             <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 12 }]}>
               <View style={styles.grabber} />
               <Text style={styles.menuTitle} numberOfLines={1}>
@@ -478,6 +451,14 @@ export default function ViewerModal({
                 }}
               />
               <MenuRow
+                label={item.isPrivate ? 'Remove from Private' : 'Move to Private'}
+                hint={item.isPrivate ? '' : 'Face ID'}
+                onPress={() => {
+                  setMenuOpen(false);
+                  togglePrivate();
+                }}
+              />
+              <MenuRow
                 label="Delete"
                 danger
                 hint=""
@@ -505,6 +486,7 @@ function MenuRow({
   danger?: boolean;
   onPress: () => void;
 }) {
+  const styles = useStyles(makeStyles);
   return (
     <TouchableOpacity style={styles.menuRow} onPress={onPress}>
       <Text style={[styles.menuLabel, danger && styles.menuLabelDanger]}>{label}</Text>
@@ -513,179 +495,181 @@ function MenuRow({
   );
 }
 
-const styles = StyleSheet.create({
-  viewer: { flex: 1, backgroundColor: '#000' },
-  stage: { flex: 1 },
-  stageTouch: { flex: 1, justifyContent: 'center' },
-  video: { width: '100%', height: '100%' },
-  videoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  videoPlaceholderText: { color: '#2a2a2e', fontSize: 13, fontWeight: '700', letterSpacing: 1 },
+const makeStyles = (p: Palette) =>
+  sheet({
+    viewer: { flex: 1, backgroundColor: p.bg },
+    stage: { flex: 1 },
+    stageTouch: { flex: 1, justifyContent: 'center' },
+    video: { width: '100%', height: '100%' },
+    videoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    videoPlaceholderText: { color: p.textMuted, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
 
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingBottom: 8,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  titleWrap: { alignItems: 'center' },
-  titleDate: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  titleTime: { color: '#9aa0a6', fontSize: 13 },
-  headerRight: { flexDirection: 'row', gap: 8 },
-  circle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(120,120,128,0.32)',
-  },
-  circleGhost: { width: 34, height: 34 },
-  circleOn: { backgroundColor: '#0A84FF' },
-  circleIcon: { color: '#fff', fontSize: 15, fontWeight: '700' },
+    header: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      paddingBottom: 8,
+      paddingHorizontal: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    titleWrap: { alignItems: 'center' },
+    titleDate: { color: p.text, fontSize: 17, fontWeight: '700' },
+    titleTime: { color: p.textSecondary, fontSize: 13 },
+    headerRight: { flexDirection: 'row', gap: 8 },
+    circle: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: p.circle,
+    },
+    circleGhost: { width: 34, height: 34 },
+    circleOn: { backgroundColor: p.accent },
+    circleIcon: { color: p.icon, fontSize: 15, fontWeight: '700' },
+    circleIconOn: { color: '#fff' },
 
-  bottom: { backgroundColor: '#0b0b0d' },
-  scrub: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  scrubIcon: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  scrubTrack: {
-    flex: 1,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    justifyContent: 'center',
-  },
-  scrubFill: { height: 3, borderRadius: 2, backgroundColor: '#fff' },
-  scrubThumb: {
-    position: 'absolute',
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: '#fff',
-  },
-  scrubTime: { color: '#9aa0a6', fontSize: 11, fontVariant: ['tabular-nums'] },
+    bottom: { backgroundColor: p.viewerBar },
+    scrub: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    scrubIcon: { color: p.text, fontSize: 13, fontWeight: '700' },
+    scrubTrack: {
+      flex: 1,
+      height: 3,
+      borderRadius: 2,
+      backgroundColor: p.border,
+      justifyContent: 'center',
+    },
+    scrubFill: { height: 3, borderRadius: 2, backgroundColor: p.text },
+    scrubThumb: {
+      position: 'absolute',
+      width: 9,
+      height: 9,
+      borderRadius: 5,
+      backgroundColor: p.text,
+    },
+    scrubTime: { color: p.textSecondary, fontSize: 11, fontVariant: ['tabular-nums'] },
 
-  strip: { gap: FRAME_GAP, paddingHorizontal: 14, paddingBottom: 8, alignItems: 'center' },
-  stripFrame: { width: FRAME_W, height: FRAME_H, backgroundColor: '#1a1a1c' },
+    strip: { gap: FRAME_GAP, paddingHorizontal: 14, paddingBottom: 8, alignItems: 'center' },
+    stripFrame: { width: FRAME_W, height: FRAME_H, backgroundColor: p.tile },
 
-  toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    gap: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.12)',
-  },
-  tool: { paddingVertical: 4, paddingHorizontal: 2 },
-  toolIcon: { color: '#e7e9ec', fontSize: 17, fontWeight: '600' },
-  toolIconOn: { color: '#F5A623' },
-  toolIconDim: { color: '#5b6472' },
-  toolDanger: { color: '#ff6b6b', fontSize: 17, fontWeight: '700' },
-  stars: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 },
-  star: { color: '#4a4a4e', fontSize: 14 },
-  starOn: { color: '#F5A623' },
+    toolbar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingTop: 10,
+      gap: 10,
+      borderTopWidth: 1,
+      borderTopColor: p.separator,
+    },
+    tool: { paddingVertical: 4, paddingHorizontal: 2 },
+    toolIcon: { color: p.textSoft, fontSize: 17, fontWeight: '600' },
+    toolIconOn: { color: p.rating },
+    toolIconDim: { color: p.textMuted },
+    toolDanger: { color: p.dangerText, fontSize: 17, fontWeight: '700' },
+    stars: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 },
+    star: { color: p.starOff, fontSize: 14 },
+    starOn: { color: p.rating },
 
-  infoRoot: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  infoBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' },
-  infoSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    maxHeight: '88%',
-    backgroundColor: '#151517',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-  },
-  infoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 8,
-  },
-  infoTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  infoBody: { paddingHorizontal: 16, paddingBottom: 24, gap: 10 },
-  thumbWrap: { alignItems: 'center' },
-  thumbPreview: { width: 120, height: 120, backgroundColor: '#1a1a1c' },
-  fileBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#0A84FF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-  },
-  fileBarIcon: { color: '#fff', fontSize: 11 },
-  fileBarText: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
-  infoPlaceholder: { color: '#4aa8ff', fontSize: 14 },
-  infoMuted: { color: '#7d838d', fontSize: 13 },
-  infoValue: { color: '#e7e9ec', fontSize: 13 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { backgroundColor: '#232326', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
-  chipText: { color: '#c9ccd1', fontSize: 12 },
-  section: { color: '#8e939b', fontSize: 12, fontWeight: '700', letterSpacing: 0.5, paddingTop: 4 },
-  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: { backgroundColor: '#2f9ee0', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
-  pillText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  statusChip: {
-    borderWidth: 1,
-    borderColor: '#2c2c30',
-    backgroundColor: '#1c1c1e',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-  },
-  statusChipOn: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  statusChipText: { color: '#e7e9ec', fontSize: 13, fontWeight: '600' },
-  statusChipTextOn: { color: '#fff' },
-  addRow: { flexDirection: 'row', gap: 8 },
-  input: {
-    flex: 1,
-    backgroundColor: '#1c1c1e',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#fff',
-  },
-  addBtn: { backgroundColor: '#0A84FF', paddingHorizontal: 18, justifyContent: 'center', borderRadius: 10 },
-  addBtnText: { color: '#fff', fontWeight: '700' },
+    infoRoot: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+    infoBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: p.backdrop },
+    infoSheet: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      maxHeight: '88%',
+      backgroundColor: p.panel,
+      borderTopLeftRadius: 18,
+      borderTopRightRadius: 18,
+    },
+    infoHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingTop: 14,
+      paddingBottom: 8,
+    },
+    infoTitle: { color: p.text, fontSize: 17, fontWeight: '700' },
+    infoBody: { paddingHorizontal: 16, paddingBottom: 24, gap: 10 },
+    thumbWrap: { alignItems: 'center' },
+    thumbPreview: { width: 120, height: 120, backgroundColor: p.tile },
+    fileBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: p.accent,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+    },
+    fileBarIcon: { color: '#fff', fontSize: 11 },
+    fileBarText: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
+    infoPlaceholder: { color: p.link, fontSize: 14 },
+    infoMuted: { color: p.textSecondary, fontSize: 13 },
+    infoValue: { color: p.textSoft, fontSize: 13 },
+    infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    chip: { backgroundColor: p.card, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
+    chipText: { color: p.textSoft, fontSize: 12 },
+    section: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, paddingTop: 4 },
+    pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    pill: { backgroundColor: p.keyword, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+    pillText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+    statusChip: {
+      borderWidth: 1,
+      borderColor: p.border,
+      backgroundColor: p.card,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 999,
+    },
+    statusChipOn: { backgroundColor: p.accent, borderColor: p.accent },
+    statusChipText: { color: p.textSoft, fontSize: 13, fontWeight: '600' },
+    statusChipTextOn: { color: '#fff' },
+    addRow: { flexDirection: 'row', gap: 8 },
+    input: {
+      flex: 1,
+      backgroundColor: p.card,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: p.text,
+    },
+    addBtn: { backgroundColor: p.accent, paddingHorizontal: 18, justifyContent: 'center', borderRadius: 10 },
+    addBtnText: { color: '#fff', fontWeight: '700' },
 
-  menuSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#151517',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    paddingTop: 10,
-    paddingHorizontal: 8,
-  },
-  grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#48484a' },
-  menuTitle: { color: '#8e939b', fontSize: 12, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    borderRadius: 10,
-  },
-  menuLabel: { color: '#e7e9ec', fontSize: 16 },
-  menuLabelDanger: { color: '#ff6b6b' },
-  menuHint: { color: '#7d838d', fontSize: 14 },
-});
+    menuSheet: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: p.panel,
+      borderTopLeftRadius: 18,
+      borderTopRightRadius: 18,
+      paddingTop: 10,
+      paddingHorizontal: 8,
+    },
+    grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: p.grabber },
+    menuTitle: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 },
+    menuRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 14,
+      borderRadius: 10,
+    },
+    menuLabel: { color: p.textSoft, fontSize: 16 },
+    menuLabelDanger: { color: p.dangerText },
+    menuHint: { color: p.textSecondary, fontSize: 14 },
+  });

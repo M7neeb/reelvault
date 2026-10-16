@@ -2,120 +2,58 @@
  * VaultScreen - the entire ReelVault UI, as a pure presentational component.
  *
  * RULE: no native imports in this file or anything it pulls in. No expo-sqlite,
- * no expo-file-system, no expo-document-picker. It receives plain data and
- * callbacks, which is what allows the identical component to be rendered in a
- * browser (`src/app/preview.tsx`) for design checks.
+ * no expo-file-system, no expo-document-picker, no expo-local-authentication.
+ * It receives plain data and callbacks, which is what allows the identical
+ * component to be rendered in a browser (`src/app/preview.tsx`) for design checks.
  *
  * `expo-video` is the one exception: it has a real web implementation, and the
  * viewer needs it for playback. `enableVideo=false` skips mounting it, which is
  * what the browser preview does.
+ *
+ * Layout of this file: the theme wrapper, then the screen (state + what is
+ * shown), then the header pieces. The grid, sidebar and sheets live in their
+ * own files next to this one.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { Image } from 'expo-image';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import ViewerModal from './ViewerModal';
+import { confirmAction, notify, plural } from './confirm';
+import { filterLabel, isSpecial, type Filter } from './filters';
+import Grid, { type GridMode } from './Grid';
+import { nextSize } from './layout';
+import { describeRule, extraCopies, matchesRule, RECENTLY_DELETED_DAYS, resolveScheme, safeBatchGb } from './logic';
+import SearchSheet from './SearchSheet';
 import { BulkEditSheet, newSmartFilterDraft, SmartFilterSheet, ViewOptionsSheet } from './sheets';
+import Sidebar from './Sidebar';
+import { paletteFor, sheet, ThemeContext, useStyles, type Palette } from './theme';
+import { SORTS, type SmartRule, type VaultItem, type VaultScreenProps, type ViewOptions } from './types';
+import ViewerModal from './ViewerModal';
 
-import { fmtDuration, gbFromBytes } from './format';
-import {
-  daysLeft,
-  describeRule,
-  extraCopies,
-  matchesRule,
-  RECENTLY_DELETED_DAYS,
-  safeBatchGb,
-} from './logic';
-import {
-  SORTS,
-  STATUSES,
-  type SmartFilter,
-  type SmartRule,
-  type UiStatus,
-  type UiTag,
-  type VaultItem,
-  type VaultScreenProps,
-  type ViewOptions,
-} from './types';
+/** Glyph on the round thumbnail-size button, per size. */
+const SIZE_GLYPH: Record<ViewOptions['size'], string> = {
+  small: '▪',
+  medium: '▩',
+  large: '▦',
+  xlarge: '▤',
+  fit: '▬',
+};
 
-const COLUMN_OPTIONS: ViewOptions['columns'][] = [3, 4, 5];
-/** Gap between grid tiles, in px. Tiles are sized explicitly from this. */
-const GRID_GAP = 3;
-const FRAME_W = 52;
-const FRAME_H = 36;
-const FRAME_GAP = 3;
-const SHEET_COLLAPSED = 132;
-
-type Filter =
-  | { kind: 'all' }
-  | { kind: 'favorites' }
-  | { kind: 'rated' }
-  | { kind: 'untagged' }
-  | { kind: 'tag'; tag: string }
-  | { kind: 'status'; status: UiStatus }
-  | { kind: 'smart'; id: number }
-  | { kind: 'duplicates' }
-  | { kind: 'deleted' };
-
-function filterLabel(f: Filter, smartFilters: SmartFilter[]): string {
-  switch (f.kind) {
-    case 'status':
-      return STATUSES.find((s) => s.key === f.status)?.label ?? 'Status';
-    case 'smart':
-      return smartFilters.find((s) => s.id === f.id)?.name ?? 'Smart Filter';
-    case 'all':
-      return 'All Videos';
-    case 'favorites':
-      return 'Favorites';
-    case 'rated':
-      return 'Rated';
-    case 'untagged':
-      return 'Untagged';
-    case 'tag':
-      return `# ${f.tag}`;
-    case 'duplicates':
-      return 'Duplicates';
-    case 'deleted':
-      return 'Recently Deleted';
-  }
+/** Picks the light or dark colours, then renders the screen inside them. */
+export default function VaultScreen(props: VaultScreenProps) {
+  const system = useColorScheme();
+  const palette = paletteFor(resolveScheme(props.viewOptions.theme, system));
+  return (
+    <ThemeContext.Provider value={palette}>
+      <StatusBar style={palette.scheme === 'dark' ? 'light' : 'dark'} />
+      <VaultScreenBody {...props} />
+    </ThemeContext.Provider>
+  );
 }
 
-/** Alert.alert does not exist on web, so route the confirm through whatever fits. */
-function confirmAction(
-  title: string,
-  message: string | undefined,
-  onConfirm: () => void,
-  { label = 'Delete', destructive = true }: { label?: string; destructive?: boolean } = {}
-) {
-  if (Platform.OS === 'web') {
-    const text = message ? `${title}\n\n${message}` : title;
-    // eslint-disable-next-line no-alert
-    if (typeof window === 'undefined' || window.confirm(text)) onConfirm();
-    return;
-  }
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: label, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
-  ]);
-}
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-export default function VaultScreen({
+function VaultScreenBody({
   items,
   allTags,
   tagMap,
@@ -131,6 +69,7 @@ export default function VaultScreen({
   devInitialState,
 }: VaultScreenProps) {
   const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VaultItem[] | null>(null);
@@ -140,11 +79,13 @@ export default function VaultScreen({
   const [sidebarOpen, setSidebarOpen] = useState(devInitialState?.sidebarOpen ?? false);
   const [viewOptionsOpen, setViewOptionsOpen] = useState(devInitialState?.viewOptionsOpen ?? false);
   const [bulkOpen, setBulkOpen] = useState(devInitialState?.bulkOpen ?? false);
+  const [privateUnlocked, setPrivateUnlocked] = useState(devInitialState?.privateUnlocked ?? false);
   /** The smart filter being edited (`id` set) or created; null when the editor is closed. */
   const [editingSmart, setEditingSmart] = useState<{ id?: number; name: string; rule: SmartRule } | null>(
-    devInitialState?.smartEditorOpen ? { name: 'Best travel clips', rule: { minRating: 8, tags: ['holiday'] } } : null
+    devInitialState?.smartEditorOpen
+      ? { name: 'Best travel clips', rule: { minRating: 8, tags: ['holiday'] } }
+      : null
   );
-  const cols = viewOptions.columns;
   const [filter, setFilter] = useState<Filter>(
     devInitialState?.filter ? { kind: devInitialState.filter } : { kind: 'all' }
   );
@@ -174,48 +115,89 @@ export default function VaultScreen({
     };
   }, [query, actions]);
 
-  /** id -> position inside its duplicate group (0 = the original). */
+  /* ------------------------------------------------- what may be seen at all */
+
+  const inPrivate = filter.kind === 'private';
+  const special = isSpecial(filter);
+
+  // Private videos never appear anywhere except the unlocked Private album:
+  // not in lists, counts, search, duplicates or smart filters.
+  const publicItems = useMemo(() => items.filter((v) => !v.isPrivate), [items]);
+  const privateItems = useMemo(() => items.filter((v) => v.isPrivate), [items]);
+  const publicIds = useMemo(() => new Set(publicItems.map((v) => v.id)), [publicItems]);
+
+  const visibleGroups = useMemo(
+    () =>
+      duplicateGroups
+        .map((g) => g.filter((id) => publicIds.has(id)))
+        .filter((g) => g.length > 1),
+    [duplicateGroups, publicIds]
+  );
   const dupRank = useMemo(() => {
     const m = new Map<string, number>();
-    for (const group of duplicateGroups) group.forEach((id, i) => m.set(id, i));
+    for (const group of visibleGroups) group.forEach((id, i) => m.set(id, i));
     return m;
-  }, [duplicateGroups]);
+  }, [visibleGroups]);
 
-  const special = filter.kind === 'deleted' || filter.kind === 'duplicates';
-  const base = results && !special ? results : items;
+  const tagCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [name, ids] of Object.entries(tagMap)) out[name] = ids.filter((id) => publicIds.has(id)).length;
+    return out;
+  }, [tagMap, publicIds]);
+
+  const visibleTrash = useMemo(
+    () => deletedItems.filter((v) => privateUnlocked || !v.isPrivate),
+    [deletedItems, privateUnlocked]
+  );
+  const hiddenTrash = deletedItems.length - visibleTrash.length;
+
+  /* ------------------------------------------------------ what is shown now */
+
+  const pool = useMemo(() => {
+    if (inPrivate) {
+      if (!privateUnlocked) return [];
+      return results ? results.filter((v) => v.isPrivate) : privateItems;
+    }
+    return results && !special ? results.filter((v) => !v.isPrivate) : publicItems;
+  }, [inPrivate, privateUnlocked, results, special, privateItems, publicItems]);
+
   const shown = useMemo(() => {
     switch (filter.kind) {
       case 'deleted':
-        return deletedItems;
+        return visibleTrash;
       case 'duplicates': {
-        const byId = new Map(items.map((v) => [v.id, v]));
-        return duplicateGroups.flat().flatMap((id) => {
+        const byId = new Map(publicItems.map((v) => [v.id, v]));
+        return visibleGroups.flat().flatMap((id) => {
           const v = byId.get(id);
           return v ? [v] : [];
         });
       }
       case 'favorites':
-        return base.filter((v) => v.rating >= 8);
+        return pool.filter((v) => v.rating >= 8);
       case 'rated':
-        return base.filter((v) => v.rating > 0);
+        return pool.filter((v) => v.rating > 0);
       case 'untagged':
-        return base.filter((v) => !(v.tagCount > 0));
+        return pool.filter((v) => !(v.tagCount > 0));
       case 'tag': {
         const ids = new Set(tagMap[filter.tag] ?? []);
-        return base.filter((v) => ids.has(v.id));
+        return pool.filter((v) => ids.has(v.id));
       }
       case 'status':
-        return base.filter((v) => v.status === filter.status);
+        return pool.filter((v) => v.status === filter.status);
       case 'smart': {
         const rule = smartFilters.find((s) => s.id === filter.id)?.rule;
-        return rule ? base.filter((v) => matchesRule(v, rule)) : [];
+        return rule ? pool.filter((v) => matchesRule(v, rule)) : [];
       }
       default:
-        return base;
+        return pool;
     }
-  }, [base, filter, tagMap, items, deletedItems, duplicateGroups, smartFilters]);
+  }, [filter, pool, visibleTrash, visibleGroups, publicItems, tagMap, smartFilters]);
 
   const activeSmart = filter.kind === 'smart' ? smartFilters.find((s) => s.id === filter.id) : undefined;
+  const mode: GridMode =
+    filter.kind === 'deleted' ? 'trash' : filter.kind === 'duplicates' ? 'duplicates' : 'normal';
+
+  /* ----------------------------------------------------------------- actions */
 
   function setViewOptions(next: ViewOptions) {
     actions.onViewOptionsChange(next).catch((e) => console.log(`[VIEW] save failed: ${String(e)}`));
@@ -230,11 +212,48 @@ export default function VaultScreen({
     setSelected([]);
   }
 
+  async function openPrivate() {
+    setSidebarOpen(false);
+    if (!privateUnlocked) {
+      const res = await actions.unlockPrivate();
+      if (!res.ok) {
+        if (res.message) notify('Private stays locked', res.message);
+        return;
+      }
+      setPrivateUnlocked(true);
+    }
+    setFilter({ kind: 'private' });
+    exitSelect();
+  }
+
   function pickFilter(f: Filter) {
+    if (f.kind === 'private') {
+      void openPrivate();
+      return;
+    }
     setFilter(f);
     exitSelect();
     setSidebarOpen(false);
   }
+
+  function lockPrivate() {
+    setPrivateUnlocked(false);
+    setFilter((f) => (f.kind === 'private' ? { kind: 'all' } : f));
+    setPlaying((v) => (v?.isPrivate ? null : v));
+    setSelected((ids) => ids.filter((id) => publicIds.has(id)));
+  }
+
+  // Leaving the app locks the Private album again.
+  const lockRef = useRef(lockPrivate);
+  useEffect(() => {
+    lockRef.current = lockPrivate;
+  });
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') lockRef.current();
+    });
+    return () => sub.remove();
+  }, []);
 
   const selectedItems = shown.filter((v) => selected.includes(v.id));
 
@@ -278,7 +297,7 @@ export default function VaultScreen({
   /** Select every copy except the original in each duplicate group. */
   function selectCopies() {
     setSelectMode(true);
-    setSelected(extraCopies(duplicateGroups));
+    setSelected(extraCopies(visibleGroups));
   }
 
   /** Space check before the picker opens: the picker itself needs room for a temp copy. */
@@ -289,11 +308,9 @@ export default function VaultScreen({
     }
     const batch = safeBatchGb(freeGb);
     if (batch < 0.1) {
-      confirmAction(
+      notify(
         'Not enough free space',
-        `Only ${freeGb} GB is free. Free up some space on your iPhone first, then import.`,
-        () => {},
-        { label: 'OK', destructive: false }
+        `Only ${freeGb} GB is free. Free up some space on your iPhone first, then import.`
       );
       return;
     }
@@ -306,175 +323,110 @@ export default function VaultScreen({
     );
   }
 
-  const title = results && !special ? 'Search' : filterLabel(filter, smartFilters);
-  const now = Date.now();
+  function onPressTile(item: VaultItem) {
+    if (mode === 'trash') {
+      // Deleted videos are not played - tapping selects them for restore.
+      setSelectMode(true);
+      toggleSelect(item.id);
+    } else if (selectMode) toggleSelect(item.id);
+    else {
+      console.log(`[VAULT] open ${item.filename}`);
+      setPlaying(item);
+    }
+  }
 
-  // Explicit tile maths, instead of `flex: 1` + `aspectRatio: 1`.
-  //
-  // With flex the row came out wider than the screen on web: the last column was
-  // clipped, and because that stretched the screen container, every right-anchored
-  // control - Import, the select toggle, the search button, the viewer's info
-  // button - was pushed off-screen. Sizing each tile from the measured container
-  // makes the row sum to exactly the viewport, and makes the tiles genuinely
-  // square, which is the whole point of the reference app's grid.
-  //
-  // The width comes from onLayout rather than useWindowDimensions: the measured
-  // container is the truth, and a window-vs-container mismatch silently produced
-  // 1px tiles once already.
-  const [gridW, setGridW] = useState(0);
-  const tileSize = gridW > 0 ? Math.floor((gridW - GRID_GAP * (cols - 1)) / cols) : 0;
+  const title = results && !special ? 'Search' : filterLabel(filter, smartFilters);
+  const sortLabel = SORTS.find((s) => s.key === viewOptions.sort)?.label ?? 'Recent';
+
+  /* ---------------------------------------------------------------- render */
+
+  const listHeader = (
+    <View style={[styles.listHeader, { paddingTop: insets.top + 56 }]}>
+      <View style={styles.subRow}>
+        <Text style={styles.subText}>
+          {plural(shown.length, 'video')}
+          {freeGb !== null ? ` · ${freeGb} GB free` : ''}
+        </Text>
+        <HeaderPill
+          filter={filter}
+          hasCopies={visibleGroups.length > 0}
+          hasTrash={visibleTrash.length > 0}
+          smartEditable={!!activeSmart}
+          busy={busy}
+          onSelectCopies={selectCopies}
+          onDeleteAll={() => confirmPurge(visibleTrash)}
+          onEditSmart={() => activeSmart && setEditingSmart({ ...activeSmart })}
+          onLock={lockPrivate}
+          onImport={startImport}
+        />
+      </View>
+      {!!status && <Text style={styles.note}>{status}</Text>}
+      {activeSmart && <Text style={styles.note}>{describeRule(activeSmart.rule)}</Text>}
+      {filter.kind === 'deleted' && (
+        <Text style={styles.note}>
+          Videos stay here for {RECENTLY_DELETED_DAYS} days, then they are removed for good. Tap
+          videos to select them.
+          {hiddenTrash > 0 ? ` ${plural(hiddenTrash, 'private video')} hidden - unlock Private to see.` : ''}
+        </Text>
+      )}
+      {filter.kind === 'duplicates' && (
+        <Text style={styles.note}>
+          {visibleGroups.length
+            ? `${plural(visibleGroups.length, 'group')} of the same video. The first in each group ` +
+              'is the original; the others are marked Copy.'
+            : 'No duplicates found.'}
+        </Text>
+      )}
+      {inPrivate && (
+        <Text style={styles.note}>
+          Only you can see these. Private locks again when you leave the app.
+        </Text>
+      )}
+      {!results && !special && (
+        <View style={styles.sortRow}>
+          <TouchableOpacity style={styles.chip} onPress={() => setViewOptionsOpen(true)}>
+            <Text style={styles.chipText}>Sorted by {sortLabel} ›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+
+  const empty = (
+    <Text style={styles.empty}>
+      {filter.kind === 'deleted'
+        ? 'Recently Deleted is empty.'
+        : filter.kind === 'duplicates'
+          ? ''
+          : inPrivate
+            ? 'No private videos yet. Select videos, tap Edit, then Move to Private.'
+            : results
+              ? 'No matches.'
+              : 'Nothing here yet.'}
+    </Text>
+  );
 
   return (
     <View style={styles.screen}>
-      <FlatList
-        data={shown}
-        key={cols}
-        keyExtractor={(v) => v.id}
-        style={styles.list}
-        onLayout={(e) => setGridW(e.nativeEvent.layout.width)}
-        numColumns={cols}
-        columnWrapperStyle={{ gap: GRID_GAP }}
-        contentContainerStyle={styles.grid}
-        keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <View style={[styles.listHeader, { paddingTop: insets.top + 56 }]}>
-            <View style={styles.subRow}>
-              <Text style={styles.subText}>
-                {plural(shown.length, 'video')}
-                {freeGb !== null ? ` · ${freeGb} GB free` : ''}
-              </Text>
-              {filter.kind === 'duplicates' && duplicateGroups.length > 0 ? (
-                <TouchableOpacity style={styles.importPill} onPress={selectCopies}>
-                  <Text style={styles.importPillText}>Select copies</Text>
-                </TouchableOpacity>
-              ) : filter.kind === 'deleted' ? (
-                deletedItems.length > 0 && (
-                  <TouchableOpacity
-                    style={styles.dangerPill}
-                    onPress={() => confirmPurge(deletedItems)}>
-                    <Text style={styles.importPillText}>Delete all</Text>
-                  </TouchableOpacity>
-                )
-              ) : activeSmart ? (
-                <TouchableOpacity
-                  style={styles.importPill}
-                  onPress={() => setEditingSmart({ ...activeSmart })}>
-                  <Text style={styles.importPillText}>Edit filter</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.importPill} onPress={startImport} disabled={busy}>
-                  <Text style={styles.importPillText}>{busy ? '…' : '+ Import'}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            {!!status && <Text style={styles.statusText}>{status}</Text>}
-            {activeSmart && <Text style={styles.statusText}>{describeRule(activeSmart.rule)}</Text>}
-            {filter.kind === 'deleted' && (
-              <Text style={styles.statusText}>
-                Videos stay here for {RECENTLY_DELETED_DAYS} days, then they are removed for good.
-                Tap videos to select them.
-              </Text>
-            )}
-            {filter.kind === 'duplicates' && (
-              <Text style={styles.statusText}>
-                {duplicateGroups.length
-                  ? `${plural(duplicateGroups.length, 'group')} of the same video. The first in each ` +
-                    'group is the original; the others are marked Copy.'
-                  : 'No duplicates found.'}
-              </Text>
-            )}
-            {!results && !special && (
-              <View style={styles.sortRow}>
-                <TouchableOpacity style={styles.chip} onPress={() => setViewOptionsOpen(true)}>
-                  <Text style={styles.chipText}>
-                    Sorted by {SORTS.find((s) => s.key === viewOptions.sort)?.label ?? 'Recent'} ›
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        }
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            {filter.kind === 'deleted'
-              ? 'Recently Deleted is empty.'
-              : filter.kind === 'duplicates'
-                ? ''
-                : results
-                  ? 'No matches.'
-                  : 'Nothing here yet.'}
-          </Text>
-        }
-        renderItem={({ item }) => {
-          const dur = fmtDuration(item.durationMs);
-          const isSel = selected.includes(item.id);
-          const inTrash = filter.kind === 'deleted';
-          const copyRank = filter.kind === 'duplicates' ? dupRank.get(item.id) : undefined;
-          return (
-            <TouchableOpacity
-              style={[styles.cell, { width: tileSize, height: tileSize }]}
-              activeOpacity={0.8}
-              onPress={() => {
-                if (inTrash) {
-                  // Deleted videos are not played - tapping selects them for restore.
-                  setSelectMode(true);
-                  toggleSelect(item.id);
-                } else if (selectMode) toggleSelect(item.id);
-                else {
-                  console.log(`[VAULT] open ${item.filename}`);
-                  setPlaying(item);
-                }
-              }}>
-              <Image
-                source={item.thumbSource}
-                style={[styles.thumb, inTrash && styles.thumbDimmed]}
-                contentFit="cover"
-              />
-              {viewOptions.showDuration && dur && <Text style={styles.durBadge}>{dur}</Text>}
-              {viewOptions.showKeywords && item.tagCount > 0 && (
-                <View style={styles.tagBadge}>
-                  <Text style={styles.tagBadgeText}>#</Text>
-                </View>
-              )}
-              {viewOptions.showRating && item.rating > 0 && (
-                <Text style={styles.rateBadge}>{item.rating}/10</Text>
-              )}
-              {inTrash && item.deletedAt !== null && (
-                <Text style={[styles.daysBadge, selectMode && styles.badgeBesideCheck]}>
-                  {plural(daysLeft(item.deletedAt, now), 'day')}
-                </Text>
-              )}
-              {copyRank !== undefined && (
-                <Text
-                  style={[
-                    styles.daysBadge,
-                    copyRank === 0 && styles.originalBadge,
-                    selectMode && styles.badgeBesideCheck,
-                  ]}>
-                  {copyRank === 0 ? 'Original' : 'Copy'}
-                </Text>
-              )}
-              {selectMode && (
-                <View style={[styles.check, isSel && styles.checkOn]}>
-                  {isSel && <Text style={styles.checkMark}>✓</Text>}
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        }}
+      <Grid
+        items={shown}
+        viewOptions={viewOptions}
+        header={listHeader}
+        empty={empty}
+        resetKey={JSON.stringify(filter)}
+        selectMode={selectMode}
+        selected={selected}
+        mode={mode}
+        dupRank={dupRank}
+        onPressTile={onPressTile}
       />
 
-      <View
-        style={[styles.floatingHeader, { paddingTop: insets.top + 8 }]}
-        pointerEvents="box-none">
+      <View style={[styles.floatingHeader, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
         <TouchableOpacity
           style={styles.circleBtn}
           accessibilityLabel="Thumbnail size"
-          onPress={() => {
-            const i = COLUMN_OPTIONS.indexOf(cols);
-            setViewOptions({ ...viewOptions, columns: COLUMN_OPTIONS[(i + 1) % COLUMN_OPTIONS.length] });
-          }}>
-          <Text style={styles.circleIcon}>{cols === 3 ? '▦' : cols === 4 ? '▩' : '▪'}</Text>
+          onPress={() => setViewOptions({ ...viewOptions, size: nextSize(viewOptions.size) })}>
+          <Text style={styles.circleIcon}>{SIZE_GLYPH[viewOptions.size]}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
@@ -488,6 +440,7 @@ export default function VaultScreen({
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.circleBtn}
+            accessibilityLabel={selectMode ? 'Cancel selection' : 'Select'}
             onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
             <Text style={styles.circleIcon}>{selectMode ? '✕' : '✓'}</Text>
           </TouchableOpacity>
@@ -497,7 +450,7 @@ export default function VaultScreen({
       {selectMode ? (
         <View style={styles.actionBar}>
           <Text style={styles.actionCount}>{selected.length} selected</Text>
-          {filter.kind === 'deleted' ? (
+          {mode === 'trash' ? (
             <View style={styles.actionGroup}>
               <TouchableOpacity
                 style={[styles.actionBtnBlue, !selected.length && styles.actionDisabled]}
@@ -537,7 +490,10 @@ export default function VaultScreen({
             accessibilityLabel="Library">
             <Text style={styles.circleIcon}>•••</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.floatingSearch} onPress={() => setSearchOpen(true)}>
+          <TouchableOpacity
+            style={styles.floatingSearch}
+            onPress={() => setSearchOpen(true)}
+            accessibilityLabel="Search">
             <Text style={styles.circleIcon}>🔍</Text>
           </TouchableOpacity>
         </>
@@ -558,12 +514,13 @@ export default function VaultScreen({
 
       {sidebarOpen && (
         <Sidebar
-          items={items}
+          items={publicItems}
           tags={allTags}
-          tagMap={tagMap}
+          tagCounts={tagCounts}
           smartFilters={smartFilters}
-          deletedCount={deletedItems.length}
-          duplicateCount={duplicateGroups.flat().length}
+          deletedCount={visibleTrash.length}
+          duplicateCount={visibleGroups.flat().length}
+          privateCount={privateUnlocked ? privateItems.length : null}
           freeGb={freeGb}
           filter={filter}
           onPick={pickFilter}
@@ -591,9 +548,15 @@ export default function VaultScreen({
         <BulkEditSheet
           count={selected.length}
           tags={allTags}
+          privateAction={inPrivate ? 'remove' : 'add'}
           onRate={(n) => actions.onRateMany(selected, n)}
           onAddTag={(name) => actions.onAddTagMany(selected, name)}
           onStatus={(s) => actions.onSetStatus(selected, s)}
+          onPrivate={async () => {
+            await actions.onSetPrivate(selected, !inPrivate);
+            setBulkOpen(false);
+            exitSelect();
+          }}
           onClose={() => setBulkOpen(false)}
         />
       )}
@@ -602,7 +565,7 @@ export default function VaultScreen({
         <SmartFilterSheet
           initial={editingSmart}
           tags={allTags}
-          items={items}
+          items={publicItems}
           onSave={actions.onSaveSmartFilter}
           onDelete={async (id) => {
             await actions.onDeleteSmartFilter(id);
@@ -626,496 +589,152 @@ export default function VaultScreen({
   );
 }
 
-/* ------------------------------------------------------------------ sidebar */
-
-function DrawerRow({
-  label,
-  hint,
-  count,
-  f,
-  current,
-  onPick,
+/** The one pill at the top right of the list: what it does depends on the view. */
+function HeaderPill({
+  filter,
+  hasCopies,
+  hasTrash,
+  smartEditable,
+  busy,
+  onSelectCopies,
+  onDeleteAll,
+  onEditSmart,
+  onLock,
+  onImport,
 }: {
-  label: string;
-  /** Optional second line, e.g. what a smart filter checks. */
-  hint?: string;
-  count: number;
-  f: Filter;
-  current: Filter;
-  onPick: (f: Filter) => void;
+  filter: Filter;
+  hasCopies: boolean;
+  hasTrash: boolean;
+  smartEditable: boolean;
+  busy: boolean;
+  onSelectCopies: () => void;
+  onDeleteAll: () => void;
+  onEditSmart: () => void;
+  onLock: () => void;
+  onImport: () => void;
 }) {
-  const active = JSON.stringify(f) === JSON.stringify(current);
+  const styles = useStyles(makeStyles);
+  if (filter.kind === 'duplicates') {
+    return hasCopies ? (
+      <TouchableOpacity style={styles.pill} onPress={onSelectCopies}>
+        <Text style={styles.pillText}>Select copies</Text>
+      </TouchableOpacity>
+    ) : null;
+  }
+  if (filter.kind === 'deleted') {
+    return hasTrash ? (
+      <TouchableOpacity style={styles.dangerPill} onPress={onDeleteAll}>
+        <Text style={styles.pillText}>Delete all</Text>
+      </TouchableOpacity>
+    ) : null;
+  }
+  if (filter.kind === 'private') {
+    return (
+      <TouchableOpacity style={styles.dangerPill} onPress={onLock} accessibilityLabel="Lock Private">
+        <Text style={styles.pillText}>Lock</Text>
+      </TouchableOpacity>
+    );
+  }
+  if (smartEditable) {
+    return (
+      <TouchableOpacity style={styles.pill} onPress={onEditSmart}>
+        <Text style={styles.pillText}>Edit filter</Text>
+      </TouchableOpacity>
+    );
+  }
   return (
-    <TouchableOpacity style={[styles.drawerRow, active && styles.drawerRowOn]} onPress={() => onPick(f)}>
-      <View style={styles.drawerRowText}>
-        <Text style={[styles.drawerLabel, active && styles.drawerLabelOn]} numberOfLines={1}>
-          {label}
-        </Text>
-        {!!hint && (
-          <Text style={styles.drawerHint} numberOfLines={1}>
-            {hint}
-          </Text>
-        )}
-      </View>
-      <Text style={styles.drawerCount}>{count}</Text>
+    <TouchableOpacity style={styles.pill} onPress={onImport} disabled={busy}>
+      <Text style={styles.pillText}>{busy ? '…' : '+ Import'}</Text>
     </TouchableOpacity>
   );
 }
 
-function Sidebar({
-  items,
-  tags,
-  tagMap,
-  smartFilters,
-  deletedCount,
-  duplicateCount,
-  freeGb,
-  filter,
-  onPick,
-  onClose,
-  onNewSmart,
-  onImport,
-}: {
-  items: VaultItem[];
-  tags: UiTag[];
-  tagMap: Record<string, string[]>;
-  smartFilters: SmartFilter[];
-  deletedCount: number;
-  duplicateCount: number;
-  freeGb: number | null;
-  filter: Filter;
-  onPick: (f: Filter) => void;
-  onClose: () => void;
-  onNewSmart: () => void;
-  onImport: () => void;
-}) {
-  const favorites = items.filter((v) => v.rating >= 8).length;
-  const rated = items.filter((v) => v.rating > 0).length;
-  const untagged = items.filter((v) => v.tagCount === 0).length;
-  const totalBytes = items.reduce((sum, v) => sum + v.sizeBytes, 0);
-  const row = { current: filter, onPick };
+const makeStyles = (p: Palette) =>
+  sheet({
+    screen: { flex: 1, backgroundColor: p.bg, overflow: 'hidden' },
 
-  return (
-    <View style={styles.drawerRoot}>
-      <TouchableOpacity style={styles.drawerBackdrop} activeOpacity={1} onPress={onClose} />
-      <View style={styles.drawer}>
-        <Text style={styles.drawerTitle}>ReelVault</Text>
-        <ScrollView contentContainerStyle={styles.drawerScroll}>
-          <Text style={styles.drawerSection}>Library</Text>
-          <DrawerRow {...row} label="All Videos" count={items.length} f={{ kind: 'all' }} />
-          <DrawerRow {...row} label="★ Favorites" count={favorites} f={{ kind: 'favorites' }} />
-          <DrawerRow {...row} label="Rated" count={rated} f={{ kind: 'rated' }} />
-          <DrawerRow {...row} label="Untagged" count={untagged} f={{ kind: 'untagged' }} />
-          <DrawerRow {...row} label="Duplicates" count={duplicateCount} f={{ kind: 'duplicates' }} />
-          <DrawerRow {...row} label="Recently Deleted" count={deletedCount} f={{ kind: 'deleted' }} />
+    floatingHeader: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      paddingBottom: 8,
+      paddingHorizontal: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: p.headerBg,
+    },
+    headerTitle: { flex: 1, color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center', paddingHorizontal: 8 },
+    headerRight: { flexDirection: 'row', gap: 8 },
+    circleBtn: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: p.circle,
+    },
+    circleIcon: { color: p.icon, fontSize: 15, fontWeight: '700' },
 
-          <Text style={styles.drawerSection}>Smart Filters</Text>
-          {smartFilters.map((s) => (
-            <DrawerRow
-              {...row}
-              key={s.id}
-              label={s.name}
-              hint={describeRule(s.rule)}
-              count={items.filter((v) => matchesRule(v, s.rule)).length}
-              f={{ kind: 'smart', id: s.id }}
-            />
-          ))}
-          <TouchableOpacity style={styles.drawerRow} onPress={onNewSmart}>
-            <Text style={styles.drawerAdd}>+ New Smart Filter</Text>
-          </TouchableOpacity>
+    listHeader: { paddingBottom: 8, gap: 6 },
+    subRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 4,
+    },
+    subText: { color: p.textSecondary, fontSize: 13 },
+    pill: { backgroundColor: p.accent, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+    dangerPill: { backgroundColor: p.danger, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+    pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+    note: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 4 },
+    sortRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingHorizontal: 4, paddingTop: 2 },
+    chip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, backgroundColor: p.card },
+    chipText: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
+    empty: { color: p.textMuted, fontStyle: 'italic', textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
 
-          <Text style={styles.drawerSection}>Status</Text>
-          {STATUSES.map((s) => (
-            <DrawerRow
-              {...row}
-              key={s.key}
-              label={s.label}
-              count={items.filter((v) => v.status === s.key).length}
-              f={{ kind: 'status', status: s.key }}
-            />
-          ))}
-
-          <Text style={styles.drawerSection}>Keywords</Text>
-          {tags.length === 0 && <Text style={styles.muted}>No keywords yet.</Text>}
-          {tags.map((t) => (
-            <DrawerRow
-              {...row}
-              key={t.id}
-              label={`# ${t.name}`}
-              count={(tagMap[t.name] ?? []).length}
-              f={{ kind: 'tag', tag: t.name }}
-            />
-          ))}
-
-          <Text style={styles.drawerSection}>Storage</Text>
-          <Text style={styles.drawerStat}>{gbFromBytes(totalBytes)} GB in ReelVault</Text>
-          <Text style={styles.drawerStat}>
-            {freeGb !== null ? `${freeGb} GB free on device` : 'Device space unavailable'}
-          </Text>
-          {freeGb !== null && (
-            <Text style={styles.drawerStat}>Safe import batch: up to {safeBatchGb(freeGb)} GB</Text>
-          )}
-        </ScrollView>
-
-        <View style={styles.drawerFooter}>
-          <TouchableOpacity style={styles.drawerAction} onPress={onImport}>
-            <Text style={styles.drawerActionText}>+ Import</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.drawerActionGhost} onPress={onClose}>
-            <Text style={styles.drawerActionGhostText}>Close</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-/* ------------------------------------------------------------------- search */
-
-function SearchSheet({
-  value,
-  tags,
-  onChange,
-  onClose,
-  onSaveSmart,
-}: {
-  value: string;
-  tags: UiTag[];
-  onChange: (v: string) => void;
-  onClose: () => void;
-  /** Turn the current search into a Smart Filter. */
-  onSaveSmart: () => void;
-}) {
-  const [draft, setDraft] = useState(value);
-
-  function commit(next: string) {
-    setDraft(next);
-    onChange(next);
-  }
-
-  return (
-    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.kav}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.sheetBackdrop}>
-          <View style={styles.sheet}>
-            <View style={styles.sheetHeader}>
-              <TouchableOpacity style={styles.circleBtnDark} onPress={onClose}>
-                <Text style={styles.circleIcon}>✕</Text>
-              </TouchableOpacity>
-              <Text style={styles.sheetTitle}>Search</Text>
-              <TouchableOpacity style={styles.searchBtn} onPress={onClose}>
-                <Text style={styles.searchBtnText}>Search</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={styles.sheetInput}
-              placeholder="name, notes or keyword…"
-              placeholderTextColor="#5b6472"
-              value={draft}
-              onChangeText={commit}
-              autoCapitalize="none"
-              autoFocus
-              returnKeyType="search"
-              onSubmitEditing={onClose}
-            />
-
-            {!!draft.trim() && (
-              <TouchableOpacity style={styles.saveSmart} onPress={onSaveSmart}>
-                <Text style={styles.saveSmartText}>Save as Smart Filter</Text>
-              </TouchableOpacity>
-            )}
-
-            <Text style={styles.section}>Keywords</Text>
-            <ScrollView contentContainerStyle={styles.tagCloud} keyboardShouldPersistTaps="handled">
-              {tags.length === 0 && <Text style={styles.muted}>No keywords yet.</Text>}
-              {tags.map((t) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={styles.cloudChip}
-                  onPress={() => commit(draft ? `${draft} ${t.name}` : t.name)}>
-                  <Text style={styles.cloudChipText}>{t.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-/* -------------------------------------------------------------------- styles */
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#000', overflow: 'hidden' },
-  list: { flex: 1 },
-  kav: { flex: 1 },
-
-  floatingHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingTop: 56,
-    paddingBottom: 8,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  headerTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  headerRight: { flexDirection: 'row', gap: 8 },
-  circleBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(120,120,128,0.32)',
-  },
-  circleBtnDark: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(120,120,128,0.28)',
-  },
-  circleBtnOn: { backgroundColor: '#0A84FF' },
-  circleIcon: { color: '#fff', fontSize: 15, fontWeight: '700' },
-
-  listHeader: { paddingTop: 112, paddingBottom: 8, gap: 6 },
-  subRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-  },
-  subText: { color: '#8e939b', fontSize: 13 },
-  importPill: { backgroundColor: '#0A84FF', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
-  importPillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  dangerPill: { backgroundColor: '#c0392b', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
-  statusText: { color: '#8e939b', fontSize: 12, paddingHorizontal: 4 },
-  sortRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingHorizontal: 4, paddingTop: 2 },
-  chip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, backgroundColor: '#1c1c1e' },
-  chipActive: { backgroundColor: '#0A84FF' },
-  chipText: { color: '#8e939b', fontSize: 12, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-
-  grid: { paddingBottom: 110 },
-  cell: { backgroundColor: '#141416' },
-  thumb: { width: '100%', height: '100%' },
-  thumbDimmed: { opacity: 0.55 },
-  daysBadge: {
-    position: 'absolute',
-    bottom: 3,
-    left: 3,
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  originalBadge: { backgroundColor: '#0A84FF' },
-  /** Select mode puts its circle in the bottom-left corner; sit next to it. */
-  badgeBesideCheck: { left: 28, bottom: 5 },
-  durBadge: {
-    position: 'absolute',
-    bottom: 3,
-    right: 3,
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  tagBadge: {
-    position: 'absolute',
-    top: 3,
-    right: 3,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  tagBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  rateBadge: {
-    position: 'absolute',
-    top: 3,
-    left: 3,
-    color: '#000',
-    fontSize: 10,
-    fontWeight: '800',
-    backgroundColor: '#F5A623',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  check: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#fff',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkOn: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  checkMark: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  empty: { color: '#5b6472', fontStyle: 'italic', textAlign: 'center', marginTop: 40 },
-
-  floatingSearch: {
-    position: 'absolute',
-    right: 18,
-    bottom: 28,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(120,120,128,0.42)',
-  },
-  floatingLeft: {
-    position: 'absolute',
-    left: 18,
-    bottom: 28,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(120,120,128,0.42)',
-  },
-  actionBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingBottom: 30,
-    paddingTop: 12,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(18,18,20,0.96)',
-  },
-  actionCount: { color: '#fff', fontWeight: '600' },
-  actionGroup: { flexDirection: 'row', gap: 8 },
-  actionBtn: { backgroundColor: '#c0392b', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
-  actionBtnBlue: { backgroundColor: '#0A84FF', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
-  actionDisabled: { opacity: 0.4 },
-  actionBtnText: { color: '#fff', fontWeight: '700' },
-
-  drawerRoot: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 20 },
-  drawerBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  drawer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    width: 300,
-    backgroundColor: '#151517',
-    paddingTop: 62,
-    paddingBottom: 24,
-  },
-  drawerTitle: { color: '#fff', fontSize: 22, fontWeight: '800', paddingHorizontal: 18, paddingBottom: 12 },
-  drawerScroll: { paddingHorizontal: 12, paddingBottom: 24, gap: 2 },
-  drawerSection: {
-    color: '#8e939b',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    paddingHorizontal: 8,
-    paddingTop: 14,
-    paddingBottom: 6,
-  },
-  drawerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  drawerRowOn: { backgroundColor: 'rgba(10,132,255,0.22)' },
-  drawerRowText: { flex: 1, paddingRight: 8 },
-  drawerHint: { color: '#8e939b', fontSize: 12, marginTop: 2 },
-  drawerAdd: { color: '#4aa8ff', fontSize: 15, fontWeight: '600' },
-  drawerLabel: { color: '#e7e9ec', fontSize: 15 },
-  drawerLabelOn: { color: '#fff', fontWeight: '700' },
-  drawerCount: { color: '#8e939b', fontSize: 14 },
-  drawerStat: { color: '#8e939b', fontSize: 13, paddingHorizontal: 12, paddingVertical: 3 },
-  drawerFooter: { flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingTop: 10 },
-  drawerAction: { flex: 1, backgroundColor: '#0A84FF', padding: 12, borderRadius: 12, alignItems: 'center' },
-  drawerActionText: { color: '#fff', fontWeight: '700' },
-  drawerActionGhost: {
-    flex: 1,
-    backgroundColor: '#242427',
-    padding: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  drawerActionGhostText: { color: '#e7e9ec', fontWeight: '700' },
-
-  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  sheet: {
-    backgroundColor: '#151517',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 16,
-    gap: 12,
-    maxHeight: '75%',
-  },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sheetTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  searchBtn: { backgroundColor: '#0A84FF', paddingHorizontal: 18, paddingVertical: 9, borderRadius: 999 },
-  searchBtnText: { color: '#fff', fontWeight: '700' },
-  sheetInput: {
-    backgroundColor: '#1f1f22',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    color: '#fff',
-  },
-  section: { color: '#8e939b', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-  tagCloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 12 },
-  cloudChip: {
-    borderWidth: 1,
-    borderColor: '#0A84FF',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  cloudChipText: { color: '#4aa8ff', fontSize: 13, fontWeight: '600' },
-  saveSmart: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#1f1f22',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  saveSmartText: { color: '#4aa8ff', fontWeight: '700', fontSize: 13 },
-
-  muted: { color: '#5b6472', fontStyle: 'italic' },
-});
+    floatingSearch: {
+      position: 'absolute',
+      right: 18,
+      bottom: 28,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: p.floating,
+    },
+    floatingLeft: {
+      position: 'absolute',
+      left: 18,
+      bottom: 28,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: p.floating,
+    },
+    actionBar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      paddingBottom: 30,
+      paddingTop: 12,
+      paddingHorizontal: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: p.panel,
+      borderTopWidth: 1,
+      borderTopColor: p.separator,
+    },
+    actionCount: { color: p.text, fontWeight: '600' },
+    actionGroup: { flexDirection: 'row', gap: 8 },
+    actionBtn: { backgroundColor: p.danger, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
+    actionBtnBlue: { backgroundColor: p.accent, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
+    actionDisabled: { opacity: 0.4 },
+    actionBtnText: { color: '#fff', fontWeight: '700' },
+  });

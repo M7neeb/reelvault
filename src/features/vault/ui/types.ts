@@ -10,7 +10,7 @@
  * here rather than imported from `repo.ts`/`tags.ts` - those pull in sqlite.
  */
 
-export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size';
+export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
 
 export type UiTag = { id: number; name: string };
 
@@ -28,21 +28,76 @@ export const STATUSES: { key: UiStatus; label: string }[] = [
 export const statusLabel = (s: UiStatus | null): string =>
   STATUSES.find((x) => x.key === s)?.label ?? 'No status';
 
-/** How the grid looks. Saved in the settings table, so it survives a restart. */
+/** HashPhotos' four layout styles. */
+export type LayoutStyle = 'grid' | 'natural' | 'waterfall' | 'mosaic';
+
+export const LAYOUTS: { key: LayoutStyle; label: string }[] = [
+  { key: 'grid', label: 'Grid' },
+  { key: 'natural', label: 'Natural' },
+  { key: 'waterfall', label: 'Waterfall' },
+  { key: 'mosaic', label: 'Mosaic' },
+];
+
+/** HashPhotos' thumbnail sizes. Columns per size live in `layout.ts`. */
+export type ThumbSize = 'small' | 'medium' | 'large' | 'xlarge' | 'fit';
+
+export const THUMB_SIZES: { key: ThumbSize; label: string }[] = [
+  { key: 'small', label: 'Small' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'large', label: 'Large' },
+  { key: 'xlarge', label: 'Extra Large' },
+  { key: 'fit', label: 'Fit to screen' },
+];
+
+/** What the bottom-right label of every thumbnail shows. */
+export type ThumbInfo =
+  | 'duration'
+  | 'size'
+  | 'date'
+  | 'dimensions'
+  | 'format'
+  | 'filename'
+  | 'keywords'
+  | 'none';
+
+export const THUMB_INFOS: { key: ThumbInfo; label: string }[] = [
+  { key: 'duration', label: 'Duration' },
+  { key: 'size', label: 'File size' },
+  { key: 'date', label: 'Date' },
+  { key: 'dimensions', label: 'Dimensions' },
+  { key: 'format', label: 'Format' },
+  { key: 'filename', label: 'File name' },
+  { key: 'keywords', label: 'Keywords' },
+  { key: 'none', label: 'Nothing' },
+];
+
+export type ThemeMode = 'system' | 'light' | 'dark';
+
+export const THEMES: { key: ThemeMode; label: string }[] = [
+  { key: 'system', label: 'System' },
+  { key: 'light', label: 'Light' },
+  { key: 'dark', label: 'Dark' },
+];
+
+/** How the app looks. Saved in the settings table, so it survives a restart. */
 export type ViewOptions = {
-  columns: 3 | 4 | 5;
+  layout: LayoutStyle;
+  size: ThumbSize;
   sort: VaultSort;
+  info: ThumbInfo;
   showRating: boolean;
   showKeywords: boolean;
-  showDuration: boolean;
+  theme: ThemeMode;
 };
 
 export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
-  columns: 3,
+  layout: 'grid',
+  size: 'large',
   sort: 'recent',
+  info: 'duration',
   showRating: true,
   showKeywords: true,
-  showDuration: true,
+  theme: 'system',
 };
 
 /**
@@ -91,6 +146,8 @@ export type VaultItem = {
   /** Set while the video is in Recently Deleted (ms since epoch). */
   deletedAt: number | null;
   status: UiStatus | null;
+  /** In the Private album: hidden everywhere else, shown only after Face ID. */
+  isPrivate: boolean;
 };
 
 export const SORTS: { key: VaultSort; label: string }[] = [
@@ -99,6 +156,7 @@ export const SORTS: { key: VaultSort; label: string }[] = [
   { key: 'rating', label: 'Rating' },
   { key: 'name', label: 'Name' },
   { key: 'size', label: 'Size' },
+  { key: 'duration', label: 'Duration' },
 ];
 
 /** Everything the UI can ask the native layer to do. */
@@ -118,6 +176,10 @@ export type VaultActions = {
   onRateMany: (videoIds: string[], rating: number) => Promise<void>;
   onAddTagMany: (videoIds: string[], name: string) => Promise<void>;
   onSetStatus: (videoIds: string[], status: UiStatus | null) => Promise<void>;
+  /** Move videos into (true) or out of (false) the Private album. */
+  onSetPrivate: (videoIds: string[], isPrivate: boolean) => Promise<void>;
+  /** Ask for Face ID (or the phone's passcode). `message` explains a refusal. */
+  unlockPrivate: () => Promise<{ ok: boolean; message?: string }>;
   onViewOptionsChange: (options: ViewOptions) => Promise<void>;
   /** Saves a new smart filter, or replaces the one with `id`. */
   onSaveSmartFilter: (filter: { id?: number; name: string; rule: SmartRule }) => Promise<void>;
@@ -167,7 +229,9 @@ export type VaultScreenProps = {
     infoOpen?: boolean;
     menuOpen?: boolean;
     /** Start on one of the special library views. */
-    filter?: 'deleted' | 'duplicates';
+    filter?: 'deleted' | 'duplicates' | 'private';
+    /** Start with the Private album unlocked. */
+    privateUnlocked?: boolean;
     /** Pre-selected ids (select mode). */
     selectedIds?: string[];
     viewOptionsOpen?: boolean;

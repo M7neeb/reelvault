@@ -13,7 +13,7 @@
  * VIEWS below. Fixtures are neutral placeholders, never real videos.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 
 import {
@@ -27,6 +27,7 @@ import {
   fixtureSearch,
 } from '@/features/vault/ui/fixtures';
 import VaultScreen from '@/features/vault/ui/VaultScreen';
+import { parseViewOptions } from '@/features/vault/ui/logic';
 import {
   DEFAULT_VIEW_OPTIONS,
   type VaultActions,
@@ -54,11 +55,39 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   bulk: { selectMode: true, selectedIds: [first, FIXTURE_ITEMS[1].id], bulkOpen: true },
   'bulk-bar': { selectMode: true, selectedIds: [first, FIXTURE_ITEMS[1].id] },
   'smart-editor': { smartEditorOpen: true },
+  private: { filter: 'private', privateUnlocked: true },
+  'private-menu': { privateUnlocked: true, viewerId: 'fixture-private-1', menuOpen: true },
 };
 
+/**
+ * Look options can be set from the URL too, e.g.
+ * `/preview?view=grid&theme=light&layout=natural&size=medium&info=size`.
+ * The preview starts dark (the app's original look) unless `theme` says otherwise.
+ */
+function optionsFromUrl(params: Record<string, string | undefined>): ViewOptions {
+  return parseViewOptions(JSON.stringify({ ...DEFAULT_VIEW_OPTIONS, theme: 'dark', ...params }), {
+    ...DEFAULT_VIEW_OPTIONS,
+    theme: 'dark',
+  });
+}
+
 export default function PreviewRoute() {
-  const { view } = useLocalSearchParams<{ view?: string }>();
-  const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
+  const { view, theme, layout, size, info } = useLocalSearchParams<{
+    view?: string;
+    theme?: string;
+    layout?: string;
+    size?: string;
+    info?: string;
+  }>();
+  const [viewOptions, setViewOptions] = useState<ViewOptions>(() =>
+    optionsFromUrl({ theme, layout, size, info })
+  );
+
+  // The web export pre-renders this page once, without URL options. Hydrating
+  // that HTML with different options (e.g. the light theme) keeps the old
+  // colours on elements whose structure matches, so render only in the browser.
+  const [inBrowser, setInBrowser] = useState(false);
+  useEffect(() => setInBrowser(true), []);
 
   const actions = useMemo<VaultActions>(
     () => ({
@@ -82,6 +111,8 @@ export default function PreviewRoute() {
       onViewOptionsChange: async (next) => setViewOptions(next),
       onSaveSmartFilter: noop,
       onDeleteSmartFilter: noop,
+      onSetPrivate: noop,
+      unlockPrivate: async () => ({ ok: true }),
     }),
     []
   );
@@ -97,10 +128,14 @@ export default function PreviewRoute() {
         return list.sort((a, b) => a.filename.localeCompare(b.filename));
       case 'size':
         return list.sort((a, b) => b.sizeBytes - a.sizeBytes);
+      case 'duration':
+        return list.sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1));
       default:
         return list.sort((a, b) => b.importedAt - a.importedAt);
     }
   }, [viewOptions.sort]);
+
+  if (!inBrowser) return null;
 
   return (
     <VaultScreen
