@@ -10,7 +10,7 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import { File } from 'expo-file-system';
 
 import { insertVideo } from './repo';
-import { thumbsDir, videosDir } from './storage';
+import { coverFileName, thumbsDir, videosDir } from './storage';
 import type { Video } from './types';
 
 /** Opens the share sheet for one file. Resolves when the sheet closes. */
@@ -37,6 +37,10 @@ export async function duplicateVideo(video: Video): Promise<void> {
   try {
     const cover = new File(thumbsDir, `${video.id}.jpg`);
     if (cover.exists) await cover.copy(new File(thumbsDir, `${id}.jpg`));
+    if (video.coverAt) {
+      const custom = new File(thumbsDir, coverFileName(video.id, video.coverAt));
+      if (custom.exists) await custom.copy(new File(thumbsDir, coverFileName(id, video.coverAt)));
+    }
   } catch (e) {
     console.log(`[DUPLICATE] cover not copied: ${String(e)}`);
   }

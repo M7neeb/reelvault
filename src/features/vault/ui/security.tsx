@@ -9,9 +9,10 @@
 import { useEffect, useState } from 'react';
 import { Modal, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
+import { QUALITIES } from '../smaller';
 import { Chip, Section, SheetFrame, ToggleRow, Wrap } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
-import { PASSCODE_KINDS, type PasscodeKind, type SecurityState } from './types';
+import { PASSCODE_KINDS, type CompressQuality, type PasscodeKind, type SecurityState } from './types';
 
 const DIGITS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
 const MAX_TRIES = 5;
@@ -214,6 +215,9 @@ export function SettingsSheet({
   onImportFolder,
   onExportBackup,
   onImportBackup,
+  canMakeSmaller,
+  importQuality,
+  onImportQuality,
   onClose,
 }: {
   security: SecurityState | null;
@@ -226,6 +230,10 @@ export function SettingsSheet({
   onImportFolder: () => void;
   onExportBackup: () => void;
   onImportBackup: () => void;
+  canMakeSmaller: boolean;
+  /** Make Smaller quality for every import; null = off. */
+  importQuality: CompressQuality | null;
+  onImportQuality: (quality: CompressQuality | null) => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
@@ -276,6 +284,18 @@ export function SettingsSheet({
       <Section label="Import">
         <Chip label="Import a whole folder from Files…" onPress={onImportFolder} />
         <Text style={styles.hint}>Copies every video in the folder and its sub-folders; the originals stay where they are.</Text>
+        <Text style={styles.subLabel}>Make imported videos smaller</Text>
+        <Wrap>
+          <Chip label="Off" on={importQuality === null} onPress={() => onImportQuality(null)} />
+          {QUALITIES.map((q) => (
+            <Chip key={q.key} label={q.label} on={importQuality === q.key} onPress={() => onImportQuality(q.key)} />
+          ))}
+        </Wrap>
+        <Text style={styles.hint}>
+          {canMakeSmaller
+            ? 'Each video is re-encoded right after it comes in, before the next one, so the space is freed as the import goes. Videos that would not get at least 10% smaller stay as they are.'
+            : 'Needs the new app version (1.1) - until then imports keep their full size.'}
+        </Text>
       </Section>
 
       <Section label="Backup">

@@ -75,6 +75,18 @@ import {
   setPasscode,
 } from '@/features/vault/security';
 import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share';
+import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
+import { cancelMakeSmaller, canMakeSmaller, makeSmaller } from '@/features/vault/compress';
+import { parseQuality } from '@/features/vault/smaller';
+import {
+  clipboardUrl,
+  downloadVideo,
+  pickFromPhotos,
+  recordWithCamera,
+  saveToPhotos,
+  type PickedFile,
+} from '@/features/vault/sources';
+import { isHttpUrl, looksLikeVideoFile } from '@/features/vault/sourceNames';
 import { thumbnailUri } from '@/features/vault/storage';
 import { addTagToVideo, listTags, removeTagFromVideo, tagsForVideo, type Tag } from '@/features/vault/tags';
 import type { Video } from '@/features/vault/types';
@@ -83,6 +95,7 @@ import { gbFromBytes } from './ui/format';
 import { FREE_SPACE_RESERVE_GB, groupDuplicates, parseRule, parseViewOptions } from './ui/logic';
 import {
   DEFAULT_VIEW_OPTIONS,
+  type ImportSource,
   type SmartFilter,
   type UiAlbum,
   type UiFolder,
@@ -93,6 +106,8 @@ import {
 } from './ui/types';
 
 const VIEW_OPTIONS_KEY = 'viewOptions';
+/** Make Smaller quality applied to every import; missing = off. */
+const IMPORT_QUALITY_KEY = 'importQuality';
 
 const asUiTag = (t: Tag): UiTag => ({ id: t.id, name: t.name, pinned: t.pinned === 1 });
 
@@ -107,7 +122,7 @@ function toVaultItem(
     id: v.id,
     filename: v.filename,
     uri: v.uri,
-    thumbSource: thumbnailUri(v.id),
+    thumbSource: thumbnailUri(v.id, v.coverAt),
     sizeBytes: v.size,
     durationMs: v.durationMs,
     rating: v.rating,
@@ -126,6 +141,8 @@ function toVaultItem(
     title: v.title,
     notes: v.notes,
     meta: v.meta,
+    customCover: v.coverAt != null,
+    originalSizeBytes: v.originalSize,
     contentKey: v.contentKey,
   };
 }
@@ -305,34 +322,91 @@ export function useVaultData(): VaultData {
 
   const runImport = useCallback(
     async (assets: { uri: string; name: string; size?: number }[], keepOriginals: boolean) => {
+      const quality = canMakeSmaller() ? parseQuality(await getSetting(IMPORT_QUALITY_KEY)) : null;
+      let saved = 0;
       const summary = await importAssets(
         assets.map((a) => ({ uri: a.uri, name: a.name, size: a.size })),
         (done, total) => setStatus(`Importing ${Math.min(done + 1, total)} of ${total}…`),
-        { keepOriginals }
+        {
+          keepOriginals,
+          // Each video is made smaller before the next one comes in, so the space is freed as it goes.
+          afterEach: quality
+            ? async (video, index, total) => {
+                const result = await makeSmaller(video, quality, (f) =>
+                  setStatus(`Making ${index + 1} of ${total} smaller… ${Math.round(f * 100)}%`)
+                );
+                if (result.kind === 'done') saved += result.before - result.after;
+              }
+            : undefined,
+        }
       );
       await refresh();
-      setStatus(describeImport(summary, readFreeGb()));
+      const line = describeImport(summary, readFreeGb());
+      setStatus(saved > 0 ? `${line} · saved ${(saved / 1024 ** 3).toFixed(2)} GB` : line);
     },
     [refresh]
   );
 
-  const onImport = useCallback(async () => {
-    setBusy(true);
-    try {
-      const picked = await DocumentPicker.getDocumentAsync({
-        type: 'video/*',
-        multiple: true,
-        copyToCacheDirectory: true,
-      });
-      if (picked.canceled || !picked.assets?.length) return;
-      await runImport(picked.assets, false);
-    } catch (e) {
-      console.log(`[VAULT] import error: ${String(e)}`);
-      setStatus('Import failed - check the dev log');
-    } finally {
-      setBusy(false);
-    }
-  }, [runImport]);
+  const onImport = useCallback(
+    async (source: ImportSource) => {
+      setBusy(true);
+      try {
+        let files: PickedFile[] = [];
+        if (source === 'files') {
+          const picked = await DocumentPicker.getDocumentAsync({
+            type: 'video/*',
+            multiple: true,
+            copyToCacheDirectory: true,
+          });
+          if (!picked.canceled) files = picked.assets ?? [];
+        } else if (source === 'photos') {
+          files = await pickFromPhotos();
+        } else {
+          const recorded = await recordWithCamera();
+          if (recorded === null) {
+            Alert.alert('No camera access', 'Allow ReelVault to use the camera in Settings → ReelVault.');
+            return;
+          }
+          files = recorded;
+        }
+        if (!files.length) return;
+        await runImport(files, false);
+      } catch (e) {
+        console.log(`[VAULT] import (${source}) error: ${String(e)}`);
+        setStatus('Import failed - check the dev log');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [runImport]
+  );
+
+  const onImportLink = useCallback(
+    async (url: string) => {
+      if (!isHttpUrl(url)) {
+        Alert.alert('Not a link', 'Paste a link that starts with http:// or https://.');
+        return;
+      }
+      setBusy(true);
+      try {
+        setStatus('Downloading…');
+        const file = await downloadVideo(url);
+        await runImport([file], false);
+      } catch (e) {
+        console.log(`[VAULT] link import error: ${String(e)}`);
+        setStatus('Download failed');
+        Alert.alert(
+          'Could not download that',
+          looksLikeVideoFile(url)
+            ? String(e)
+            : 'The link has to point straight at a video file (ending in .mp4, .mov...). Pages like YouTube or Instagram do not work.'
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [runImport]
+  );
 
   /** Import Folder copies, so the whole folder has to fit next to the originals. */
   const onImportFolder = useCallback(async () => {
@@ -375,8 +449,21 @@ export function useVaultData(): VaultData {
 
   const actions = useMemo<VaultActions>(
     () => ({
-      onImport: () => {
-        void onImport();
+      onImport: (source) => {
+        void onImport(source);
+      },
+      onImportLink: (url) => {
+        void onImportLink(url);
+      },
+      readClipboardLink: clipboardUrl,
+      onSaveToPhotos: async (items) => {
+        const uris = items.map((i) => byId(i.id)?.uri).filter((u): u is string => !!u);
+        const saved = await saveToPhotos(uris);
+        if (saved === null) {
+          Alert.alert('No access to Photos', 'Allow ReelVault to add to Photos in Settings → ReelVault → Photos.');
+          return;
+        }
+        setStatus(`Saved ${saved} to Photos`);
       },
       onImportFolder: () => {
         void onImportFolder();
@@ -461,6 +548,35 @@ export function useVaultData(): VaultData {
         if (v) await duplicateVideo(v);
         await refresh();
       },
+      onSetCoverFrame: async (item, timeMs) => {
+        const v = byId(item.id);
+        if (v) await setCoverFromFrame(v, timeMs);
+        await refresh();
+      },
+      onPickCover: async (item) => {
+        const v = byId(item.id);
+        const picked = v ? await setCoverFromPhoto(v) : false;
+        if (picked) await refresh();
+        return picked;
+      },
+      onResetCover: async (item) => {
+        const v = byId(item.id);
+        if (v) await resetCover(v);
+        await refresh();
+      },
+      canMakeSmaller,
+      onMakeSmaller: async (item, quality, onProgress) => {
+        const v = byId(item.id);
+        if (!v) return { kind: 'failed', reason: 'not found' };
+        const result = await makeSmaller(v, quality, onProgress);
+        if (result.kind === 'done') await refresh();
+        return result;
+      },
+      onCancelMakeSmaller: cancelMakeSmaller,
+      getImportQuality: async () => parseQuality(await getSetting(IMPORT_QUALITY_KEY)),
+      setImportQuality: async (quality) => {
+        await setSetting(IMPORT_QUALITY_KEY, quality ?? 'off');
+      },
       onOpenMap: (lat, lon, label) => {
         const q = encodeURIComponent(label);
         Linking.openURL(`https://maps.apple.com/?ll=${lat},${lon}&q=${q}`).catch((e) =>
@@ -488,7 +604,7 @@ export function useVaultData(): VaultData {
       setFaceId: setFaceIdEnabled,
       checkPasscode,
     }),
-    [onImport, onImportFolder, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
+    [onImport, onImportFolder, onImportLink, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );
 
   return {

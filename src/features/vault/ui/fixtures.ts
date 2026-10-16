@@ -160,6 +160,8 @@ const PUBLIC_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   notes: i === 0 ? 'First warm evening of October.' : null,
   meta: META[i],
   contentKey: null,
+  customCover: false,
+  originalSizeBytes: null,
 }));
 
 const PRIVATE_NAMES = ['private_note_01.mp4', 'private_note_02.mp4', 'private_note_03.mp4'];
@@ -189,6 +191,8 @@ const PRIVATE_ITEMS: VaultItem[] = PRIVATE_NAMES.map((filename, i) => ({
   notes: null,
   meta: null,
   contentKey: null,
+  customCover: false,
+  originalSizeBytes: null,
 }));
 
 export const FIXTURE_ITEMS: VaultItem[] = [...PUBLIC_ITEMS, ...PRIVATE_ITEMS];
@@ -242,6 +246,8 @@ export const FIXTURE_DELETED: VaultItem[] = DELETED_NAMES.map((filename, i) => (
   notes: null,
   meta: null,
   contentKey: null,
+  customCover: false,
+  originalSizeBytes: null,
 }));
 
 const NAMES = Array.from(new Set(TAG_SETS.flat())).sort((a, b) => a.localeCompare(b));

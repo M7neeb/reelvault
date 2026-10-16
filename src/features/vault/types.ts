@@ -31,4 +31,9 @@ export type Video = {
   inTray: boolean;
   /** What the file says about itself; null until read. */
   meta: Mp4Meta | null;
+  /** When a custom cover was set; null = the frame made at import. */
+  coverAt: number | null;
+  /** Size and duplicate key before "Make Smaller"; null if never made smaller. */
+  originalSize: number | null;
+  originalKey: string | null;
 };

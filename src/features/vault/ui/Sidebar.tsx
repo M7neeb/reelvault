@@ -94,6 +94,7 @@ export type SidebarProps = {
   onCalendar: () => void;
   onTimeline: () => void;
   onOverview: () => void;
+  onMap: () => void;
   onSettings: () => void;
   onImport: () => void;
 };
@@ -258,6 +259,7 @@ export default function Sidebar(props: SidebarProps) {
           <Text style={styles.section}>Browse</Text>
           <ActionRow label="Calendar" onPress={props.onCalendar} />
           <ActionRow label="Timeline" onPress={props.onTimeline} />
+          <ActionRow label="Places (Map)" onPress={props.onMap} />
           <ActionRow label="Library Overview" onPress={props.onOverview} />
 
           <Text style={styles.section}>Storage</Text>

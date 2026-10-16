@@ -46,7 +46,9 @@ import Sidebar from './Sidebar';
 import { paletteFor, sheet, ThemeContext, useStyles, type Palette } from './theme';
 import {
   SORTS,
+  type CompressQuality,
   type GroupBy,
+  type ImportSource,
   type PasscodeKind,
   type SecurityState,
   type SmartFilter,
@@ -58,6 +60,8 @@ import {
   type VaultScreenProps,
   type ViewOptions,
 } from './types';
+import { MapModal } from './MapModal';
+import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
 
 /** Glyph on the round thumbnail-size button, per size. */
@@ -126,9 +130,14 @@ function VaultScreenBody({
   const [viewOptionsOpen, setViewOptionsOpen] = useState(dev?.viewOptionsOpen ?? false);
   const [bulkOpen, setBulkOpen] = useState(dev?.bulkOpen ?? false);
   const [settingsOpen, setSettingsOpen] = useState(dev?.settingsOpen ?? false);
+  const [smallerFor, setSmallerFor] = useState<VaultItem[] | null>(
+    dev?.smallerOpen && dev.selectedIds?.length ? items.filter((v) => (dev.selectedIds ?? []).includes(v.id)) : null
+  );
+  const [importQuality, setImportQualityState] = useState<CompressQuality | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(dev?.calendarOpen ?? false);
   const [timelineOpen, setTimelineOpen] = useState(dev?.timelineOpen ?? false);
   const [overviewOpen, setOverviewOpen] = useState(dev?.overviewOpen ?? false);
+  const [mapOpen, setMapOpen] = useState(dev?.mapOpen ?? false);
   const [privateUnlocked, setPrivateUnlocked] = useState(dev?.privateUnlocked ?? false);
   /** Opened with the fake passcode: Private looks empty. */
   const [decoy, setDecoy] = useState(false);
@@ -334,9 +343,19 @@ function VaultScreenBody({
     setSelected([]);
   }
 
+  useEffect(() => {
+    if (dev?.importMenuOpen) startImport();
+    // Preview only, once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function refreshSecurity() {
     actions.getSecurity().then(setSecurity).catch(fail('SECURITY'));
   }
+
+  useEffect(() => {
+    if (settingsOpen) actions.getImportQuality().then(setImportQualityState).catch(fail('SETTINGS'));
+  }, [settingsOpen, actions]);
 
   /** Face ID / passcode, then `then`. With a ReelVault passcode the passcode screen decides. */
   async function requestUnlock(then: () => void) {
@@ -443,9 +462,23 @@ function VaultScreenBody({
   }
 
   /** Space check before the picker opens: the picker itself needs room for a temp copy. */
+  /** "+ Import": where the videos come from. */
   function startImport() {
+    setOptions({
+      title: 'Import',
+      options: [
+        { label: 'From Photos', hint: 'Original files', onPress: () => importWithSpaceCheck('photos') },
+        { label: 'From Files', hint: 'HashPhotos exports', onPress: () => importWithSpaceCheck('files') },
+        { label: 'Record with Camera', onPress: () => actions.onImport('camera') },
+        { label: 'Paste Link…', hint: 'Direct video link', onPress: pasteLink },
+        { label: 'Whole Folder from Files…', hint: 'Copies', onPress: actions.onImportFolder },
+      ],
+    });
+  }
+
+  function importWithSpaceCheck(source: ImportSource) {
     if (freeGb === null) {
-      actions.onImport();
+      actions.onImport(source);
       return;
     }
     const batch = safeBatchGb(freeGb);
@@ -457,9 +490,25 @@ function VaultScreenBody({
       `Import up to ${batch} GB`,
       `${freeGb} GB is free. Pick at most ${batch} GB of videos this time, so the phone ` +
         "doesn't run full. Videos already in ReelVault are skipped.",
-      actions.onImport,
+      () => actions.onImport(source),
       { label: 'Choose videos', destructive: false }
     );
+  }
+
+  function pasteLink() {
+    actions
+      .readClipboardLink()
+      .catch(() => null)
+      .then((initial) =>
+        setPrompt({
+          title: 'Paste Link',
+          message: 'A link straight to a video file (.mp4, .mov…). Pages like YouTube or Instagram do not work.',
+          initial: initial ?? '',
+          placeholder: 'https://…',
+          confirmLabel: 'Download',
+          onSubmit: (url) => actions.onImportLink(url.trim()),
+        })
+      );
   }
 
   function onPressTile(item: VaultItem) {
@@ -638,6 +687,8 @@ function VaultScreenBody({
     if (list.length) {
       opts.push({ label: 'Slideshow', onPress: () => setSlideshow({ items: list, start: 0 }) });
       opts.push({ label: 'Adjust date & time…', onPress: () => setDateFor(list.map((v) => v.id)) });
+      opts.push({ label: 'Save to Photos', hint: 'Copies', onPress: () => actions.onSaveToPhotos(list).catch(fail('PHOTOS')) });
+      opts.push({ label: 'Make Smaller…', onPress: () => setSmallerFor(list) });
     }
     if (list.length && activeAlbum) {
       opts.push({
@@ -933,6 +984,10 @@ function VaultScreenBody({
             setSidebarOpen(false);
             setOverviewOpen(true);
           }}
+          onMap={() => {
+            setSidebarOpen(false);
+            setMapOpen(true);
+          }}
           onSettings={() => {
             setSidebarOpen(false);
             refreshSecurity();
@@ -972,7 +1027,21 @@ function VaultScreenBody({
             setBulkOpen(false);
             exitSelect();
           }}
+          onMakeSmaller={() => {
+            setBulkOpen(false);
+            setSmallerFor(selectedItems);
+          }}
           onClose={() => setBulkOpen(false)}
+        />
+      )}
+
+      {smallerFor && (
+        <SmallerSheet
+          items={smallerFor}
+          available={actions.canMakeSmaller()}
+          onMakeSmaller={actions.onMakeSmaller}
+          onCancel={actions.onCancelMakeSmaller}
+          onClose={() => setSmallerFor(null)}
         />
       )}
 
@@ -1015,6 +1084,17 @@ function VaultScreenBody({
 
       {timelineOpen && <TimelineSheet items={publicItems} onJump={jumpToPeriod} onClose={() => setTimelineOpen(false)} />}
 
+      {mapOpen && (
+        <MapModal
+          items={publicItems}
+          onOpen={(item) => {
+            setMapOpen(false);
+            setPlaying(item);
+          }}
+          onClose={() => setMapOpen(false)}
+        />
+      )}
+
       {overviewOpen && <OverviewSheet items={publicItems} onClose={() => setOverviewOpen(false)} />}
 
       {settingsOpen && (
@@ -1051,6 +1131,12 @@ function VaultScreenBody({
           }}
           onExportBackup={() => actions.onExportBackup().catch(fail('BACKUP'))}
           onImportBackup={() => actions.onImportBackup().catch(fail('BACKUP'))}
+          canMakeSmaller={actions.canMakeSmaller()}
+          importQuality={importQuality}
+          onImportQuality={(q) => {
+            setImportQualityState(q);
+            actions.setImportQuality(q).catch(fail('SETTINGS'));
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -1063,6 +1149,7 @@ function VaultScreenBody({
           enableVideo={enableVideo}
           initialInfoOpen={dev?.infoOpen}
           initialMenuOpen={dev?.menuOpen}
+          initialSmallerOpen={dev?.smallerOpen}
           onSlideshow={(item) => {
             const start = Math.max(0, shown.findIndex((v) => v.id === item.id));
             setPlaying(null);

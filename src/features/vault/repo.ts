@@ -22,6 +22,9 @@ type Row = {
   flag: number;
   in_tray: number;
   meta_json: string | null;
+  cover_at: number | null;
+  original_size: number | null;
+  original_key: string | null;
 };
 
 function parseMeta(json: string | null): Mp4Meta | null {
@@ -55,6 +58,9 @@ function toVideo(r: Row): Video {
     flag: r.flag === 1 ? 1 : r.flag === -1 ? -1 : 0,
     inTray: r.in_tray === 1,
     meta: parseMeta(r.meta_json),
+    coverAt: r.cover_at ?? null,
+    originalSize: r.original_size ?? null,
+    originalKey: r.original_key ?? null,
   };
 }
 
@@ -69,8 +75,9 @@ export async function insertVideo(v: Video): Promise<void> {
   await db.runAsync(
     `INSERT INTO videos
        (id, uri, filename, size, duration_ms, width, height, rating, title, notes,
-        created_at, imported_at, status, deleted_at, is_private, content_key, flag, in_tray, meta_json)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+        created_at, imported_at, status, deleted_at, is_private, content_key, flag, in_tray, meta_json,
+        cover_at, original_size, original_key)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
     [
       v.id,
       v.uri,
@@ -91,6 +98,9 @@ export async function insertVideo(v: Video): Promise<void> {
       v.flag,
       v.inTray ? 1 : 0,
       v.meta ? JSON.stringify(v.meta) : null,
+      v.coverAt,
+      v.originalSize,
+      v.originalKey,
     ]
   );
 }
@@ -173,6 +183,33 @@ export async function setContentKey(videoId: string, key: string): Promise<void>
   await db.runAsync('UPDATE videos SET content_key = ? WHERE id = ?;', [key, videoId]);
 }
 
+/** Points the video at a custom cover (or back to the import frame with null). */
+export async function setCoverAt(videoId: string, coverAt: number | null): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE videos SET cover_at = ? WHERE id = ?;', [coverAt, videoId]);
+}
+
+/**
+ * After "Make Smaller" replaced the file: the new size, key and shape. The first
+ * original size and key are kept, so a second pass still remembers the import.
+ */
+export async function recordSmaller(
+  videoId: string,
+  next: { size: number; contentKey: string; width: number | null; height: number | null; metaJson: string | null }
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE videos SET
+       original_size = COALESCE(original_size, size),
+       original_key  = COALESCE(original_key, content_key),
+       size = ?, content_key = ?,
+       width = COALESCE(?, width), height = COALESCE(?, height),
+       meta_json = COALESCE(?, meta_json)
+     WHERE id = ?;`,
+    [next.size, next.contentKey, next.width, next.height, next.metaJson, videoId]
+  );
+}
+
 /** Videos imported before duration capture existed. Used to backfill. */
 export async function videosMissingDuration(): Promise<{ id: string; uri: string }[]> {
   const db = await getDb();
@@ -193,8 +230,8 @@ export async function videosMissingContentKey(): Promise<{ id: string; uri: stri
 export async function findByContentKey(key: string): Promise<Video | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<Row>(
-    `SELECT * FROM videos WHERE content_key = ? AND ${LIVE} LIMIT 1;`,
-    [key]
+    `SELECT * FROM videos WHERE (content_key = ? OR original_key = ?) AND ${LIVE} LIMIT 1;`,
+    [key, key]
   );
   return row ? toVideo(row) : null;
 }
