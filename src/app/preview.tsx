@@ -70,6 +70,10 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   calendar: { calendarOpen: true },
   timeline: { timelineOpen: true },
   overview: { overviewOpen: true },
+  map: { mapOpen: true },
+  importmenu: { importMenuOpen: true },
+  smaller: { smallerOpen: true, selectedIds: FIXTURE_ITEMS.slice(0, 3).map((v) => v.id) },
+  'smaller-one': { viewerId: first, smallerOpen: true },
   passcode: { passcodeOpen: true },
   slideshow: { slideshowOpen: true },
   compare: { compareOpen: true },
@@ -156,6 +160,24 @@ export default function PreviewRoute() {
       onShare: noop,
       onExtractFrame: noop,
       onDuplicate: noop,
+      onImportLink: () => {},
+      readClipboardLink: async () => 'https://example.com/clips/beach.mp4',
+      onSaveToPhotos: noop,
+      onSetCoverFrame: noop,
+      onPickCover: async () => false,
+      onResetCover: noop,
+      canMakeSmaller: () => true,
+      // Pretends to re-encode: a short progress run, then about 45% saved.
+      onMakeSmaller: async (item, _quality, onProgress) => {
+        for (let i = 1; i <= 10; i++) {
+          await new Promise((r) => setTimeout(r, 120));
+          onProgress(i / 10);
+        }
+        return { kind: 'done', before: item.sizeBytes, after: Math.round(item.sizeBytes * 0.55) };
+      },
+      onCancelMakeSmaller: () => {},
+      getImportQuality: async () => null,
+      setImportQuality: noop,
       onOpenMap: () => {},
       onExportBackup: noop,
       onImportBackup: noop,

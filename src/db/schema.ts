@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export type Migration = {
   version: number;
@@ -157,6 +157,20 @@ export const MIGRATIONS: Migration[] = [
 
       -- Smart filters can live in a folder ("smart folder") ----------------
       ALTER TABLE smart_filters ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;
+    `,
+  },
+  {
+    version: 4,
+    sql: `
+      -- Custom cover: when it was set (its file is thumbs/<id>-<cover_at>.jpg);
+      -- NULL = the frame made at import (thumbs/<id>.jpg).
+      ALTER TABLE videos ADD COLUMN cover_at INTEGER;
+
+      -- After "Make Smaller": the size and duplicate key of the file as it was
+      -- imported, so importing that original again is still caught as a duplicate.
+      ALTER TABLE videos ADD COLUMN original_size INTEGER;
+      ALTER TABLE videos ADD COLUMN original_key TEXT;
+      CREATE INDEX IF NOT EXISTS idx_videos_original_key ON videos(original_key);
     `,
   },
 ];

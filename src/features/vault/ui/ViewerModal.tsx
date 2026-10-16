@@ -29,6 +29,7 @@ import DateSheet from './DateSheet';
 import { fmtBitrate, fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './format';
 import { fmtLocation, RECENTLY_DELETED_DAYS } from './logic';
 import { PromptSheet } from './prompts';
+import { SmallerSheet } from './smaller';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
   STATUSES,
@@ -56,6 +57,7 @@ export default function ViewerModal({
   enableVideo,
   initialInfoOpen = false,
   initialMenuOpen = false,
+  initialSmallerOpen = false,
   onSlideshow,
   onNearby,
   onClose,
@@ -68,6 +70,7 @@ export default function ViewerModal({
   /** Preview-only: open a panel on first render so it can be screenshotted. */
   initialInfoOpen?: boolean;
   initialMenuOpen?: boolean;
+  initialSmallerOpen?: boolean;
   /** Play the current list as a slideshow, starting here. */
   onSlideshow: (item: VaultItem) => void;
   /** Show the videos filmed near this one. */
@@ -102,6 +105,7 @@ export default function ViewerModal({
   const [chrome, setChrome] = useState(true);
   const [dateOpen, setDateOpen] = useState(false);
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
+  const [smallerOpen, setSmallerOpen] = useState(initialSmallerOpen);
   const [note, setNote] = useState('');
 
   const framesRef = useRef<ThumbSource[]>([]);
@@ -443,6 +447,10 @@ export default function ViewerModal({
                 <Detail label="Codec" value={item.meta?.codec} />
                 <Detail label="Frame rate" value={item.meta?.fps ? `${item.meta.fps} fps` : undefined} />
                 <Detail label="Bitrate" value={bitrate ?? undefined} />
+                <Detail
+                  label="Made smaller"
+                  value={item.originalSizeBytes ? `from ${fmtSize(item.originalSizeBytes)}` : undefined}
+                />
                 <Detail label="Imported" value={`${imported.date} at ${imported.time}`} />
 
                 <Text style={styles.section}>Location</Text>
@@ -580,11 +588,57 @@ export default function ViewerModal({
                   }}
                 />
                 <MenuRow
+                  label="Save to Photos"
+                  hint="Copy"
+                  onPress={() => {
+                    setMenuOpen(false);
+                    run('Saved to Photos', actions.onSaveToPhotos([item]));
+                  }}
+                />
+                <MenuRow
                   label="Save This Frame as Image"
                   hint={fmtDuration(elapsed * 1000) ?? '0:00'}
                   onPress={() => {
                     setMenuOpen(false);
                     void actions.onExtractFrame(item, progress * totalSec * 1000);
+                  }}
+                />
+                <MenuRow
+                  label="Use This Frame as Cover"
+                  hint={fmtDuration(elapsed * 1000) ?? '0:00'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    run('Cover changed', actions.onSetCoverFrame(item, progress * totalSec * 1000));
+                  }}
+                />
+                <MenuRow
+                  label="Choose Cover Photo…"
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    actions
+                      .onPickCover(item)
+                      .then((picked) => picked && setNote('Cover changed'))
+                      .catch((e) => setNote(`That did not work: ${String(e)}`));
+                  }}
+                />
+                {item.customCover && (
+                  <MenuRow
+                    label="Reset Cover"
+                    hint="First frame"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      run('Cover reset', actions.onResetCover(item));
+                    }}
+                  />
+                )}
+                <MenuRow
+                  label="Make Smaller…"
+                  hint={fmtSize(item.sizeBytes)}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    if (player.playing) player.pause();
+                    setSmallerOpen(true);
                   }}
                 />
                 <MenuRow
@@ -631,6 +685,16 @@ export default function ViewerModal({
             initial={item.createdAt}
             onApply={(change) => actions.onAdjustDates([item.id], change)}
             onClose={() => setDateOpen(false)}
+          />
+        )}
+
+        {smallerOpen && (
+          <SmallerSheet
+            items={[item]}
+            available={actions.canMakeSmaller()}
+            onMakeSmaller={actions.onMakeSmaller}
+            onCancel={actions.onCancelMakeSmaller}
+            onClose={() => setSmallerOpen(false)}
           />
         )}
 

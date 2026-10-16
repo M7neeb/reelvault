@@ -10,6 +10,10 @@
  * here rather than imported from `repo.ts`/`tags.ts` - those pull in sqlite.
  */
 
+import type { CompressQuality } from '../smaller';
+
+export type { CompressQuality };
+
 export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
 
 export type UiTag = { id: number; name: string; pinned?: boolean };
@@ -228,7 +232,19 @@ export type VaultItem = {
   meta: UiMeta | null;
   /** Size + hash of both ends; equal keys = the same video. */
   contentKey: string | null;
+  /** A cover was picked by hand (frame or photo). */
+  customCover: boolean;
+  /** Size before Make Smaller; null if it never was. */
+  originalSizeBytes: number | null;
 };
+
+export type ImportSource = 'files' | 'photos' | 'camera';
+
+/** What Make Smaller did to one video. */
+export type UiSmallerResult =
+  | { kind: 'done'; before: number; after: number }
+  | { kind: 'skipped'; reason: string }
+  | { kind: 'failed'; reason: string };
 
 export const SORTS: { key: VaultSort; label: string }[] = [
   { key: 'recent', label: 'Recent' },
@@ -258,9 +274,16 @@ export type SecurityState = {
 /** Everything the UI can ask the native layer to do. */
 export type VaultActions = {
   /** Open the document picker and import. Container owns the busy/status text. */
-  onImport: () => void;
+  /** Files (HashPhotos exports), the Photos picker, or the camera. */
+  onImport: (source: ImportSource) => void;
   /** Import every video in a folder from Files (sub-folders included); originals stay. */
   onImportFolder: () => void;
+  /** A direct link to a video file (downloaded, then imported). */
+  onImportLink: (url: string) => void;
+  /** The link on the clipboard, if any - pre-fills "Paste Link". */
+  readClipboardLink: () => Promise<string | null>;
+  /** Copies into the Photos app (Save to Photos). */
+  onSaveToPhotos: (items: VaultItem[]) => Promise<void>;
   /** Full-text search. The native layer uses SQLite FTS5; the preview filters locally. */
   search: (query: string) => Promise<VaultItem[]>;
   /** Tags currently on one video. */
@@ -311,6 +334,17 @@ export type VaultActions = {
   onExtractFrame: (item: VaultItem, timeMs: number) => Promise<void>;
   /** A second copy of the video inside ReelVault. */
   onDuplicate: (item: VaultItem) => Promise<void>;
+  /** Covers: the frame at `timeMs`, a picked photo (false = cancelled), or back to the import frame. */
+  onSetCoverFrame: (item: VaultItem, timeMs: number) => Promise<void>;
+  onPickCover: (item: VaultItem) => Promise<boolean>;
+  onResetCover: (item: VaultItem) => Promise<void>;
+  /** Make Smaller is only there in app builds with the encoder (1.1+). */
+  canMakeSmaller: () => boolean;
+  onMakeSmaller: (item: VaultItem, quality: CompressQuality, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
+  onCancelMakeSmaller: () => void;
+  /** Make every imported video smaller right away (null = off). */
+  getImportQuality: () => Promise<CompressQuality | null>;
+  setImportQuality: (quality: CompressQuality | null) => Promise<void>;
   /** Open the place a video was filmed in Apple Maps. */
   onOpenMap: (lat: number, lon: number, label: string) => void;
   /** Library-info backup (ratings, keywords, albums...): export to Files / import back. */
@@ -381,9 +415,13 @@ export type VaultScreenProps = {
     bulkOpen?: boolean;
     smartEditorOpen?: boolean;
     settingsOpen?: boolean;
+    /** Opens Make Smaller for the selected ids. */
+    smallerOpen?: boolean;
     calendarOpen?: boolean;
     timelineOpen?: boolean;
     overviewOpen?: boolean;
+    mapOpen?: boolean;
+    importMenuOpen?: boolean;
     passcodeOpen?: boolean;
     slideshowOpen?: boolean;
     compareOpen?: boolean;

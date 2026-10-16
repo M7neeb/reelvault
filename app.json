@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -44,9 +44,25 @@
         {
           "faceIDPermission": "ReelVault uses Face ID to unlock your private videos."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ReelVault imports the videos you pick from Photos.",
+          "cameraPermission": "ReelVault films videos straight into your vault.",
+          "microphonePermission": "ReelVault records sound with the videos you film."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "ReelVault imports the videos you pick from Photos.",
+          "savePhotosPermission": "ReelVault saves the videos you choose to Photos.",
+          "isAccessMediaLocationEnabled": true
+        }
       ]
     ],
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.1.0",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {

@@ -8,6 +8,7 @@ import { readVideoMeta } from './metadata';
 import { findByContentKey, insertVideo } from './repo';
 import { probeDurationMs } from './duration';
 import { ensureDirs, thumbsDir, videosDir } from './storage';
+import type { Video } from './types';
 
 export type ImportSummary = {
   imported: number;
@@ -45,7 +46,14 @@ function removeQuietly(file: File): void {
 export async function importAssets(
   assets: Pick<DocumentPicker.DocumentPickerAsset, 'uri' | 'name' | 'size'>[],
   onProgress?: (done: number, total: number) => void,
-  { keepOriginals = false }: { keepOriginals?: boolean } = {}
+  {
+    keepOriginals = false,
+    afterEach,
+  }: {
+    keepOriginals?: boolean;
+    /** Runs on each video right after it is in (Make Smaller on import), before the next one. */
+    afterEach?: (video: Video, index: number, total: number) => Promise<void>;
+  } = {}
 ): Promise<ImportSummary> {
   ensureDirs();
   const summary: ImportSummary = { imported: 0, duplicates: [], unverified: [], failed: [] };
@@ -97,7 +105,7 @@ export async function importAssets(
 
       const now = Date.now();
       const size = destination.size ?? asset.size ?? 0;
-      await insertVideo({
+      const video: Video = {
         id,
         uri: destination.uri,
         filename: asset.name,
@@ -117,10 +125,21 @@ export async function importAssets(
         flag: 0,
         inTray: false,
         meta,
-      });
+        coverAt: null,
+        originalSize: null,
+        originalKey: null,
+      };
+      await insertVideo(video);
 
       summary.imported++;
       console.log(`[IMPORT] ok ${asset.name} -> ${id} (${size} bytes)`);
+      if (afterEach) {
+        try {
+          await afterEach(video, index, assets.length);
+        } catch (e) {
+          console.log(`[IMPORT] after-import step failed for ${asset.name}: ${String(e)}`);
+        }
+      }
     } catch (e) {
       summary.failed.push(asset.name);
       console.log(`[IMPORT] FAILED ${asset.name}: ${String(e)}`);

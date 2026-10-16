@@ -493,6 +493,7 @@ export const monthName = (month0: number): string => MONTHS[month0];
 
 type OverviewTarget = {
   sizeBytes: number;
+  originalSizeBytes?: number | null;
   durationMs: number | null;
   rating: number;
   tagNames: string[];
@@ -508,6 +509,9 @@ type OverviewTarget = {
 export type Overview = {
   count: number;
   totalBytes: number;
+  /** Space freed by Make Smaller, and how many videos it shrank. */
+  savedBytes: number;
+  madeSmaller: number;
   totalMs: number;
   rated: number;
   averageRating: number | null;
@@ -534,6 +538,8 @@ export function libraryOverview<T extends OverviewTarget>(items: T[]): Overview 
   return {
     count: items.length,
     totalBytes: items.reduce((s, v) => s + v.sizeBytes, 0),
+    savedBytes: items.reduce((s, v) => s + (v.originalSizeBytes ? Math.max(0, v.originalSizeBytes - v.sizeBytes) : 0), 0),
+    madeSmaller: items.filter((v) => v.originalSizeBytes).length,
     totalMs: items.reduce((s, v) => s + (v.durationMs ?? 0), 0),
     rated: rated.length,
     averageRating: rated.length ? Math.round((rated.reduce((s, v) => s + v.rating, 0) / rated.length) * 10) / 10 : null,
@@ -567,4 +573,25 @@ export const FREE_SPACE_RESERVE_GB = 0.5;
  */
 export function safeBatchGb(freeGb: number): number {
   return Math.max(0, Math.floor(((freeGb - FREE_SPACE_RESERVE_GB) / 2) * 10) / 10);
+}
+
+/* ---------------------------------------------------------------------- map */
+
+export type MapRegion = { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number };
+
+/** A map region that shows every point with a little margin (a city-sized view for one point). */
+export function regionFor(points: { lat: number; lon: number }[]): MapRegion | null {
+  if (!points.length) return null;
+  const lats = points.map((p) => p.lat);
+  const lons = points.map((p) => p.lon);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLon + maxLon) / 2,
+    latitudeDelta: Math.min(170, Math.max(0.05, (maxLat - minLat) * 1.4)),
+    longitudeDelta: Math.min(350, Math.max(0.05, (maxLon - minLon) * 1.4)),
+  };
 }

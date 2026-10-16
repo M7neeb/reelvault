@@ -30,9 +30,14 @@ export function ensureDirs(): void {
   if (!thumbsDir.exists) thumbsDir.create({ intermediates: true });
 }
 
-export function thumbnailUri(videoId: string): string {
+/** The cover file: the frame made at import, or a custom one (a new name each time, so no stale cache). */
+export function coverFileName(videoId: string, coverAt: number | null = null): string {
+  return coverAt ? `${videoId}-${coverAt}.jpg` : `${videoId}.jpg`;
+}
+
+export function thumbnailUri(videoId: string, coverAt: number | null = null): string {
   if (!canUseFs) return '';
-  return new File(thumbsDir, `${videoId}.jpg`).uri;
+  return new File(thumbsDir, coverFileName(videoId, coverAt)).uri;
 }
 
 export function bytesToGb(bytes: number): string {

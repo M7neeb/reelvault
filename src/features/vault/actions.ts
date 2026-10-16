@@ -2,7 +2,7 @@ import { Directory, File } from 'expo-file-system';
 
 import { purgeCutoff } from './ui/logic';
 import { deletedBefore, markDeleted, removeRow, restoreVideos } from './repo';
-import { thumbsDir } from './storage';
+import { coverFileName, thumbsDir } from './storage';
 import type { Video } from './types';
 
 /**
@@ -31,8 +31,10 @@ export async function purgeVideo(video: Video): Promise<void> {
     console.log(`[PURGE] video file failed: ${String(e)}`);
   }
   try {
-    const cover = new File(thumbsDir, `${video.id}.jpg`);
-    if (cover.exists) cover.delete();
+    for (const name of [coverFileName(video.id), ...(video.coverAt ? [coverFileName(video.id, video.coverAt)] : [])]) {
+      const cover = new File(thumbsDir, name);
+      if (cover.exists) cover.delete();
+    }
   } catch (e) {
     console.log(`[PURGE] cover failed: ${String(e)}`);
   }

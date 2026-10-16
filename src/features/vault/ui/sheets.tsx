@@ -257,6 +257,7 @@ export function BulkEditSheet({
   onText,
   onDate,
   onPrivate,
+  onMakeSmaller,
   onClose,
 }: {
   count: number;
@@ -275,6 +276,8 @@ export function BulkEditSheet({
   onText: (field: 'title' | 'notes', value: string) => Promise<void>;
   onDate: () => void;
   onPrivate: () => Promise<void>;
+  /** Opens the Make Smaller sheet for the selection. */
+  onMakeSmaller: () => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
@@ -429,6 +432,11 @@ export function BulkEditSheet({
           <Chip label="Add to Tray" onPress={() => void run('Added to the Tray', onTray(true))} />
           <Chip label="Remove from Tray" onPress={() => void run('Removed from the Tray', onTray(false))} />
         </Wrap>
+      </Section>
+
+      <Section label="Storage">
+        <Chip label="Make Smaller…" onPress={onMakeSmaller} />
+        <Text style={styles.hint}>Re-encode the videos so they take less space.</Text>
       </Section>
 
       <Section label="Private">

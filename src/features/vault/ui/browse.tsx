@@ -207,6 +207,8 @@ export function OverviewSheet({ items, onClose }: { items: VaultItem[]; onClose:
       <View style={styles.stats}>
         <Stat label="picks" value={String(o.picks)} />
         <Stat label="rejects" value={String(o.rejects)} />
+        <Stat label="made smaller" value={String(o.madeSmaller)} />
+        <Stat label="space saved" value={fmtSize(o.savedBytes)} />
       </View>
       <Section label="By year">
         <Bars rows={o.byYear} total={o.count} />
