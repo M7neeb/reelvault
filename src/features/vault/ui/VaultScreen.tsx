@@ -29,11 +29,30 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ViewerModal from './ViewerModal';
+import { BulkEditSheet, newSmartFilterDraft, SmartFilterSheet, ViewOptionsSheet } from './sheets';
 
-import { fmtDateTime, fmtDuration, fmtSize, gbFromBytes } from './format';
-import { SORTS, type ThumbSource, type UiTag, type VaultItem, type VaultScreenProps, type VaultSort } from './types';
+import { fmtDuration, gbFromBytes } from './format';
+import {
+  daysLeft,
+  describeRule,
+  extraCopies,
+  matchesRule,
+  RECENTLY_DELETED_DAYS,
+  safeBatchGb,
+} from './logic';
+import {
+  SORTS,
+  STATUSES,
+  type SmartFilter,
+  type SmartRule,
+  type UiStatus,
+  type UiTag,
+  type VaultItem,
+  type VaultScreenProps,
+  type ViewOptions,
+} from './types';
 
-const COLUMN_OPTIONS = [3, 4, 5];
+const COLUMN_OPTIONS: ViewOptions['columns'][] = [3, 4, 5];
 /** Gap between grid tiles, in px. Tiles are sized explicitly from this. */
 const GRID_GAP = 3;
 const FRAME_W = 52;
@@ -46,10 +65,18 @@ type Filter =
   | { kind: 'favorites' }
   | { kind: 'rated' }
   | { kind: 'untagged' }
-  | { kind: 'tag'; tag: string };
+  | { kind: 'tag'; tag: string }
+  | { kind: 'status'; status: UiStatus }
+  | { kind: 'smart'; id: number }
+  | { kind: 'duplicates' }
+  | { kind: 'deleted' };
 
-function filterLabel(f: Filter): string {
+function filterLabel(f: Filter, smartFilters: SmartFilter[]): string {
   switch (f.kind) {
+    case 'status':
+      return STATUSES.find((s) => s.key === f.status)?.label ?? 'Status';
+    case 'smart':
+      return smartFilters.find((s) => s.id === f.id)?.name ?? 'Smart Filter';
     case 'all':
       return 'All Videos';
     case 'favorites':
@@ -60,11 +87,20 @@ function filterLabel(f: Filter): string {
       return 'Untagged';
     case 'tag':
       return `# ${f.tag}`;
+    case 'duplicates':
+      return 'Duplicates';
+    case 'deleted':
+      return 'Recently Deleted';
   }
 }
 
 /** Alert.alert does not exist on web, so route the confirm through whatever fits. */
-function confirmDestructive(title: string, message: string | undefined, onConfirm: () => void) {
+function confirmAction(
+  title: string,
+  message: string | undefined,
+  onConfirm: () => void,
+  { label = 'Delete', destructive = true }: { label?: string; destructive?: boolean } = {}
+) {
   if (Platform.OS === 'web') {
     const text = message ? `${title}\n\n${message}` : title;
     // eslint-disable-next-line no-alert
@@ -73,19 +109,23 @@ function confirmDestructive(title: string, message: string | undefined, onConfir
   }
   Alert.alert(title, message, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    { text: label, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
   ]);
 }
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export default function VaultScreen({
   items,
   allTags,
   tagMap,
+  deletedItems,
+  duplicateGroups,
+  smartFilters,
+  viewOptions,
   freeGb,
   busy,
   status,
-  sort,
-  onSortChange,
   actions,
   enableVideo = true,
   devInitialState,
@@ -94,12 +134,20 @@ export default function VaultScreen({
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VaultItem[] | null>(null);
-  const [cols, setCols] = useState(3);
   const [selectMode, setSelectMode] = useState(devInitialState?.selectMode ?? false);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(devInitialState?.selectedIds ?? []);
   const [searchOpen, setSearchOpen] = useState(devInitialState?.searchOpen ?? false);
   const [sidebarOpen, setSidebarOpen] = useState(devInitialState?.sidebarOpen ?? false);
-  const [filter, setFilter] = useState<Filter>({ kind: 'all' });
+  const [viewOptionsOpen, setViewOptionsOpen] = useState(devInitialState?.viewOptionsOpen ?? false);
+  const [bulkOpen, setBulkOpen] = useState(devInitialState?.bulkOpen ?? false);
+  /** The smart filter being edited (`id` set) or created; null when the editor is closed. */
+  const [editingSmart, setEditingSmart] = useState<{ id?: number; name: string; rule: SmartRule } | null>(
+    devInitialState?.smartEditorOpen ? { name: 'Best travel clips', rule: { minRating: 8, tags: ['holiday'] } } : null
+  );
+  const cols = viewOptions.columns;
+  const [filter, setFilter] = useState<Filter>(
+    devInitialState?.filter ? { kind: devInitialState.filter } : { kind: 'all' }
+  );
   const [playing, setPlaying] = useState<VaultItem | null>(
     () => items.find((i) => i.id === devInitialState?.viewerId) ?? null
   );
@@ -126,9 +174,26 @@ export default function VaultScreen({
     };
   }, [query, actions]);
 
-  const base = results ?? items;
+  /** id -> position inside its duplicate group (0 = the original). */
+  const dupRank = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const group of duplicateGroups) group.forEach((id, i) => m.set(id, i));
+    return m;
+  }, [duplicateGroups]);
+
+  const special = filter.kind === 'deleted' || filter.kind === 'duplicates';
+  const base = results && !special ? results : items;
   const shown = useMemo(() => {
     switch (filter.kind) {
+      case 'deleted':
+        return deletedItems;
+      case 'duplicates': {
+        const byId = new Map(items.map((v) => [v.id, v]));
+        return duplicateGroups.flat().flatMap((id) => {
+          const v = byId.get(id);
+          return v ? [v] : [];
+        });
+      }
       case 'favorites':
         return base.filter((v) => v.rating >= 8);
       case 'rated':
@@ -139,10 +204,22 @@ export default function VaultScreen({
         const ids = new Set(tagMap[filter.tag] ?? []);
         return base.filter((v) => ids.has(v.id));
       }
+      case 'status':
+        return base.filter((v) => v.status === filter.status);
+      case 'smart': {
+        const rule = smartFilters.find((s) => s.id === filter.id)?.rule;
+        return rule ? base.filter((v) => matchesRule(v, rule)) : [];
+      }
       default:
         return base;
     }
-  }, [base, filter, tagMap]);
+  }, [base, filter, tagMap, items, deletedItems, duplicateGroups, smartFilters]);
+
+  const activeSmart = filter.kind === 'smart' ? smartFilters.find((s) => s.id === filter.id) : undefined;
+
+  function setViewOptions(next: ViewOptions) {
+    actions.onViewOptionsChange(next).catch((e) => console.log(`[VIEW] save failed: ${String(e)}`));
+  }
 
   function toggleSelect(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -153,22 +230,84 @@ export default function VaultScreen({
     setSelected([]);
   }
 
+  function pickFilter(f: Filter) {
+    setFilter(f);
+    exitSelect();
+    setSidebarOpen(false);
+  }
+
+  const selectedItems = shown.filter((v) => selected.includes(v.id));
+
   function confirmBatchDelete() {
-    const victims = items.filter((v) => selected.includes(v.id));
-    if (!victims.length) return;
-    confirmDestructive(
-      `Delete ${victims.length} video${victims.length === 1 ? '' : 's'}?`,
-      undefined,
+    if (!selectedItems.length) return;
+    confirmAction(
+      `Delete ${plural(selectedItems.length, 'video')}?`,
+      `They move to Recently Deleted and can be restored for ${RECENTLY_DELETED_DAYS} days.`,
       () => {
         actions
-          .onDeleteMany(victims)
+          .onDeleteMany(selectedItems)
           .then(exitSelect)
           .catch((e) => console.log(`[DELETE] batch failed: ${String(e)}`));
       }
     );
   }
 
-  const title = results ? 'Search' : filterLabel(filter);
+  function restoreSelected() {
+    if (!selectedItems.length) return;
+    actions
+      .onRestoreMany(selectedItems)
+      .then(exitSelect)
+      .catch((e) => console.log(`[RESTORE] failed: ${String(e)}`));
+  }
+
+  function confirmPurge(list: VaultItem[]) {
+    if (!list.length) return;
+    confirmAction(
+      `Delete ${plural(list.length, 'video')} for good?`,
+      'This removes the files from your iPhone. It cannot be undone.',
+      () => {
+        actions
+          .onPurgeMany(list)
+          .then(exitSelect)
+          .catch((e) => console.log(`[PURGE] failed: ${String(e)}`));
+      },
+      { label: 'Delete for good' }
+    );
+  }
+
+  /** Select every copy except the original in each duplicate group. */
+  function selectCopies() {
+    setSelectMode(true);
+    setSelected(extraCopies(duplicateGroups));
+  }
+
+  /** Space check before the picker opens: the picker itself needs room for a temp copy. */
+  function startImport() {
+    if (freeGb === null) {
+      actions.onImport();
+      return;
+    }
+    const batch = safeBatchGb(freeGb);
+    if (batch < 0.1) {
+      confirmAction(
+        'Not enough free space',
+        `Only ${freeGb} GB is free. Free up some space on your iPhone first, then import.`,
+        () => {},
+        { label: 'OK', destructive: false }
+      );
+      return;
+    }
+    confirmAction(
+      `Import up to ${batch} GB`,
+      `${freeGb} GB is free. Pick at most ${batch} GB of videos this time, so the phone ` +
+        "doesn't run full. Videos already in ReelVault are skipped.",
+      actions.onImport,
+      { label: 'Choose videos', destructive: false }
+    );
+  }
+
+  const title = results && !special ? 'Search' : filterLabel(filter, smartFilters);
+  const now = Date.now();
 
   // Explicit tile maths, instead of `flex: 1` + `aspectRatio: 1`.
   //
@@ -201,55 +340,120 @@ export default function VaultScreen({
           <View style={[styles.listHeader, { paddingTop: insets.top + 56 }]}>
             <View style={styles.subRow}>
               <Text style={styles.subText}>
-                {shown.length} video{shown.length === 1 ? '' : 's'}
+                {plural(shown.length, 'video')}
                 {freeGb !== null ? ` · ${freeGb} GB free` : ''}
               </Text>
-              <TouchableOpacity style={styles.importPill} onPress={actions.onImport} disabled={busy}>
-                <Text style={styles.importPillText}>{busy ? '…' : '+ Import'}</Text>
-              </TouchableOpacity>
+              {filter.kind === 'duplicates' && duplicateGroups.length > 0 ? (
+                <TouchableOpacity style={styles.importPill} onPress={selectCopies}>
+                  <Text style={styles.importPillText}>Select copies</Text>
+                </TouchableOpacity>
+              ) : filter.kind === 'deleted' ? (
+                deletedItems.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.dangerPill}
+                    onPress={() => confirmPurge(deletedItems)}>
+                    <Text style={styles.importPillText}>Delete all</Text>
+                  </TouchableOpacity>
+                )
+              ) : activeSmart ? (
+                <TouchableOpacity
+                  style={styles.importPill}
+                  onPress={() => setEditingSmart({ ...activeSmart })}>
+                  <Text style={styles.importPillText}>Edit filter</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.importPill} onPress={startImport} disabled={busy}>
+                  <Text style={styles.importPillText}>{busy ? '…' : '+ Import'}</Text>
+                </TouchableOpacity>
+              )}
             </View>
             {!!status && <Text style={styles.statusText}>{status}</Text>}
-            {!results && (
+            {activeSmart && <Text style={styles.statusText}>{describeRule(activeSmart.rule)}</Text>}
+            {filter.kind === 'deleted' && (
+              <Text style={styles.statusText}>
+                Videos stay here for {RECENTLY_DELETED_DAYS} days, then they are removed for good.
+                Tap videos to select them.
+              </Text>
+            )}
+            {filter.kind === 'duplicates' && (
+              <Text style={styles.statusText}>
+                {duplicateGroups.length
+                  ? `${plural(duplicateGroups.length, 'group')} of the same video. The first in each ` +
+                    'group is the original; the others are marked Copy.'
+                  : 'No duplicates found.'}
+              </Text>
+            )}
+            {!results && !special && (
               <View style={styles.sortRow}>
-                {SORTS.map((s) => (
-                  <TouchableOpacity
-                    key={s.key}
-                    style={[styles.chip, sort === s.key && styles.chipActive]}
-                    onPress={() => onSortChange(s.key)}>
-                    <Text style={[styles.chipText, sort === s.key && styles.chipTextActive]}>
-                      {s.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                <TouchableOpacity style={styles.chip} onPress={() => setViewOptionsOpen(true)}>
+                  <Text style={styles.chipText}>
+                    Sorted by {SORTS.find((s) => s.key === viewOptions.sort)?.label ?? 'Recent'} ›
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
           </View>
         }
         ListEmptyComponent={
-          <Text style={styles.empty}>{results ? 'No matches.' : 'Nothing here yet.'}</Text>
+          <Text style={styles.empty}>
+            {filter.kind === 'deleted'
+              ? 'Recently Deleted is empty.'
+              : filter.kind === 'duplicates'
+                ? ''
+                : results
+                  ? 'No matches.'
+                  : 'Nothing here yet.'}
+          </Text>
         }
         renderItem={({ item }) => {
           const dur = fmtDuration(item.durationMs);
           const isSel = selected.includes(item.id);
+          const inTrash = filter.kind === 'deleted';
+          const copyRank = filter.kind === 'duplicates' ? dupRank.get(item.id) : undefined;
           return (
             <TouchableOpacity
               style={[styles.cell, { width: tileSize, height: tileSize }]}
               activeOpacity={0.8}
               onPress={() => {
-                if (selectMode) toggleSelect(item.id);
+                if (inTrash) {
+                  // Deleted videos are not played - tapping selects them for restore.
+                  setSelectMode(true);
+                  toggleSelect(item.id);
+                } else if (selectMode) toggleSelect(item.id);
                 else {
                   console.log(`[VAULT] open ${item.filename}`);
                   setPlaying(item);
                 }
               }}>
-              <Image source={item.thumbSource} style={styles.thumb} contentFit="cover" />
-              {dur && <Text style={styles.durBadge}>{dur}</Text>}
-              {item.tagCount > 0 && (
+              <Image
+                source={item.thumbSource}
+                style={[styles.thumb, inTrash && styles.thumbDimmed]}
+                contentFit="cover"
+              />
+              {viewOptions.showDuration && dur && <Text style={styles.durBadge}>{dur}</Text>}
+              {viewOptions.showKeywords && item.tagCount > 0 && (
                 <View style={styles.tagBadge}>
                   <Text style={styles.tagBadgeText}>#</Text>
                 </View>
               )}
-              {item.rating > 0 && <Text style={styles.rateBadge}>{item.rating}/10</Text>}
+              {viewOptions.showRating && item.rating > 0 && (
+                <Text style={styles.rateBadge}>{item.rating}/10</Text>
+              )}
+              {inTrash && item.deletedAt !== null && (
+                <Text style={[styles.daysBadge, selectMode && styles.badgeBesideCheck]}>
+                  {plural(daysLeft(item.deletedAt, now), 'day')}
+                </Text>
+              )}
+              {copyRank !== undefined && (
+                <Text
+                  style={[
+                    styles.daysBadge,
+                    copyRank === 0 && styles.originalBadge,
+                    selectMode && styles.badgeBesideCheck,
+                  ]}>
+                  {copyRank === 0 ? 'Original' : 'Copy'}
+                </Text>
+              )}
               {selectMode && (
                 <View style={[styles.check, isSel && styles.checkOn]}>
                   {isSel && <Text style={styles.checkMark}>✓</Text>}
@@ -265,15 +469,21 @@ export default function VaultScreen({
         pointerEvents="box-none">
         <TouchableOpacity
           style={styles.circleBtn}
+          accessibilityLabel="Thumbnail size"
           onPress={() => {
             const i = COLUMN_OPTIONS.indexOf(cols);
-            setCols(COLUMN_OPTIONS[(i + 1) % COLUMN_OPTIONS.length]);
+            setViewOptions({ ...viewOptions, columns: COLUMN_OPTIONS[(i + 1) % COLUMN_OPTIONS.length] });
           }}>
           <Text style={styles.circleIcon}>{cols === 3 ? '▦' : cols === 4 ? '▩' : '▪'}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{title}</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {title}
+        </Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.circleBtn} onPress={() => setSidebarOpen(true)}>
+          <TouchableOpacity
+            style={styles.circleBtn}
+            accessibilityLabel="View options"
+            onPress={() => setViewOptionsOpen(true)}>
             <Text style={styles.circleIcon}>•••</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -287,12 +497,37 @@ export default function VaultScreen({
       {selectMode ? (
         <View style={styles.actionBar}>
           <Text style={styles.actionCount}>{selected.length} selected</Text>
-          <TouchableOpacity
-            style={[styles.actionBtn, !selected.length && styles.actionDisabled]}
-            disabled={!selected.length}
-            onPress={confirmBatchDelete}>
-            <Text style={styles.actionBtnText}>Delete</Text>
-          </TouchableOpacity>
+          {filter.kind === 'deleted' ? (
+            <View style={styles.actionGroup}>
+              <TouchableOpacity
+                style={[styles.actionBtnBlue, !selected.length && styles.actionDisabled]}
+                disabled={!selected.length}
+                onPress={restoreSelected}>
+                <Text style={styles.actionBtnText}>Restore</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, !selected.length && styles.actionDisabled]}
+                disabled={!selected.length}
+                onPress={() => confirmPurge(selectedItems)}>
+                <Text style={styles.actionBtnText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.actionGroup}>
+              <TouchableOpacity
+                style={[styles.actionBtnBlue, !selected.length && styles.actionDisabled]}
+                disabled={!selected.length}
+                onPress={() => setBulkOpen(true)}>
+                <Text style={styles.actionBtnText}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, !selected.length && styles.actionDisabled]}
+                disabled={!selected.length}
+                onPress={confirmBatchDelete}>
+                <Text style={styles.actionBtnText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       ) : (
         <>
@@ -314,6 +549,10 @@ export default function VaultScreen({
           tags={allTags}
           onChange={setQuery}
           onClose={() => setSearchOpen(false)}
+          onSaveSmart={() => {
+            setSearchOpen(false);
+            setEditingSmart(newSmartFilterDraft(query));
+          }}
         />
       )}
 
@@ -322,14 +561,54 @@ export default function VaultScreen({
           items={items}
           tags={allTags}
           tagMap={tagMap}
+          smartFilters={smartFilters}
+          deletedCount={deletedItems.length}
+          duplicateCount={duplicateGroups.flat().length}
           freeGb={freeGb}
           filter={filter}
-          onPick={(f) => {
-            setFilter(f);
-            setSidebarOpen(false);
-          }}
+          onPick={pickFilter}
           onClose={() => setSidebarOpen(false)}
-          onImport={actions.onImport}
+          onNewSmart={() => {
+            setSidebarOpen(false);
+            setEditingSmart(newSmartFilterDraft(''));
+          }}
+          onImport={() => {
+            setSidebarOpen(false);
+            startImport();
+          }}
+        />
+      )}
+
+      {viewOptionsOpen && (
+        <ViewOptionsSheet
+          options={viewOptions}
+          onChange={setViewOptions}
+          onClose={() => setViewOptionsOpen(false)}
+        />
+      )}
+
+      {bulkOpen && (
+        <BulkEditSheet
+          count={selected.length}
+          tags={allTags}
+          onRate={(n) => actions.onRateMany(selected, n)}
+          onAddTag={(name) => actions.onAddTagMany(selected, name)}
+          onStatus={(s) => actions.onSetStatus(selected, s)}
+          onClose={() => setBulkOpen(false)}
+        />
+      )}
+
+      {editingSmart && (
+        <SmartFilterSheet
+          initial={editingSmart}
+          tags={allTags}
+          items={items}
+          onSave={actions.onSaveSmartFilter}
+          onDelete={async (id) => {
+            await actions.onDeleteSmartFilter(id);
+            if (filter.kind === 'smart' && filter.id === id) setFilter({ kind: 'all' });
+          }}
+          onClose={() => setEditingSmart(null)}
         />
       )}
 
@@ -349,41 +628,72 @@ export default function VaultScreen({
 
 /* ------------------------------------------------------------------ sidebar */
 
+function DrawerRow({
+  label,
+  hint,
+  count,
+  f,
+  current,
+  onPick,
+}: {
+  label: string;
+  /** Optional second line, e.g. what a smart filter checks. */
+  hint?: string;
+  count: number;
+  f: Filter;
+  current: Filter;
+  onPick: (f: Filter) => void;
+}) {
+  const active = JSON.stringify(f) === JSON.stringify(current);
+  return (
+    <TouchableOpacity style={[styles.drawerRow, active && styles.drawerRowOn]} onPress={() => onPick(f)}>
+      <View style={styles.drawerRowText}>
+        <Text style={[styles.drawerLabel, active && styles.drawerLabelOn]} numberOfLines={1}>
+          {label}
+        </Text>
+        {!!hint && (
+          <Text style={styles.drawerHint} numberOfLines={1}>
+            {hint}
+          </Text>
+        )}
+      </View>
+      <Text style={styles.drawerCount}>{count}</Text>
+    </TouchableOpacity>
+  );
+}
+
 function Sidebar({
   items,
   tags,
   tagMap,
+  smartFilters,
+  deletedCount,
+  duplicateCount,
   freeGb,
   filter,
   onPick,
   onClose,
+  onNewSmart,
   onImport,
 }: {
   items: VaultItem[];
   tags: UiTag[];
   tagMap: Record<string, string[]>;
+  smartFilters: SmartFilter[];
+  deletedCount: number;
+  duplicateCount: number;
   freeGb: number | null;
   filter: Filter;
   onPick: (f: Filter) => void;
   onClose: () => void;
+  onNewSmart: () => void;
   onImport: () => void;
 }) {
   const favorites = items.filter((v) => v.rating >= 8).length;
   const rated = items.filter((v) => v.rating > 0).length;
   const untagged = items.filter((v) => v.tagCount === 0).length;
   const totalBytes = items.reduce((sum, v) => sum + v.sizeBytes, 0);
-
-  function Row({ label, count, f }: { label: string; count: number; f: Filter }) {
-    const active = JSON.stringify(f) === JSON.stringify(filter);
-    return (
-      <TouchableOpacity
-        style={[styles.drawerRow, active && styles.drawerRowOn]}
-        onPress={() => onPick(f)}>
-        <Text style={[styles.drawerLabel, active && styles.drawerLabelOn]}>{label}</Text>
-        <Text style={styles.drawerCount}>{count}</Text>
-      </TouchableOpacity>
-    );
-  }
+  const row = { current: filter, onPick };
 
   return (
     <View style={styles.drawerRoot}>
@@ -392,15 +702,44 @@ function Sidebar({
         <Text style={styles.drawerTitle}>ReelVault</Text>
         <ScrollView contentContainerStyle={styles.drawerScroll}>
           <Text style={styles.drawerSection}>Library</Text>
-          <Row label="All Videos" count={items.length} f={{ kind: 'all' }} />
-          <Row label="★ Favorites" count={favorites} f={{ kind: 'favorites' }} />
-          <Row label="Rated" count={rated} f={{ kind: 'rated' }} />
-          <Row label="Untagged" count={untagged} f={{ kind: 'untagged' }} />
+          <DrawerRow {...row} label="All Videos" count={items.length} f={{ kind: 'all' }} />
+          <DrawerRow {...row} label="★ Favorites" count={favorites} f={{ kind: 'favorites' }} />
+          <DrawerRow {...row} label="Rated" count={rated} f={{ kind: 'rated' }} />
+          <DrawerRow {...row} label="Untagged" count={untagged} f={{ kind: 'untagged' }} />
+          <DrawerRow {...row} label="Duplicates" count={duplicateCount} f={{ kind: 'duplicates' }} />
+          <DrawerRow {...row} label="Recently Deleted" count={deletedCount} f={{ kind: 'deleted' }} />
+
+          <Text style={styles.drawerSection}>Smart Filters</Text>
+          {smartFilters.map((s) => (
+            <DrawerRow
+              {...row}
+              key={s.id}
+              label={s.name}
+              hint={describeRule(s.rule)}
+              count={items.filter((v) => matchesRule(v, s.rule)).length}
+              f={{ kind: 'smart', id: s.id }}
+            />
+          ))}
+          <TouchableOpacity style={styles.drawerRow} onPress={onNewSmart}>
+            <Text style={styles.drawerAdd}>+ New Smart Filter</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.drawerSection}>Status</Text>
+          {STATUSES.map((s) => (
+            <DrawerRow
+              {...row}
+              key={s.key}
+              label={s.label}
+              count={items.filter((v) => v.status === s.key).length}
+              f={{ kind: 'status', status: s.key }}
+            />
+          ))}
 
           <Text style={styles.drawerSection}>Keywords</Text>
           {tags.length === 0 && <Text style={styles.muted}>No keywords yet.</Text>}
           {tags.map((t) => (
-            <Row
+            <DrawerRow
+              {...row}
               key={t.id}
               label={`# ${t.name}`}
               count={(tagMap[t.name] ?? []).length}
@@ -413,6 +752,9 @@ function Sidebar({
           <Text style={styles.drawerStat}>
             {freeGb !== null ? `${freeGb} GB free on device` : 'Device space unavailable'}
           </Text>
+          {freeGb !== null && (
+            <Text style={styles.drawerStat}>Safe import batch: up to {safeBatchGb(freeGb)} GB</Text>
+          )}
         </ScrollView>
 
         <View style={styles.drawerFooter}>
@@ -435,11 +777,14 @@ function SearchSheet({
   tags,
   onChange,
   onClose,
+  onSaveSmart,
 }: {
   value: string;
   tags: UiTag[];
   onChange: (v: string) => void;
   onClose: () => void;
+  /** Turn the current search into a Smart Filter. */
+  onSaveSmart: () => void;
 }) {
   const [draft, setDraft] = useState(value);
 
@@ -476,6 +821,12 @@ function SearchSheet({
               returnKeyType="search"
               onSubmitEditing={onClose}
             />
+
+            {!!draft.trim() && (
+              <TouchableOpacity style={styles.saveSmart} onPress={onSaveSmart}>
+                <Text style={styles.saveSmartText}>Save as Smart Filter</Text>
+              </TouchableOpacity>
+            )}
 
             <Text style={styles.section}>Keywords</Text>
             <ScrollView contentContainerStyle={styles.tagCloud} keyboardShouldPersistTaps="handled">
@@ -547,6 +898,7 @@ const styles = StyleSheet.create({
   subText: { color: '#8e939b', fontSize: 13 },
   importPill: { backgroundColor: '#0A84FF', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
   importPillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  dangerPill: { backgroundColor: '#c0392b', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
   statusText: { color: '#8e939b', fontSize: 12, paddingHorizontal: 4 },
   sortRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingHorizontal: 4, paddingTop: 2 },
   chip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, backgroundColor: '#1c1c1e' },
@@ -557,6 +909,23 @@ const styles = StyleSheet.create({
   grid: { paddingBottom: 110 },
   cell: { backgroundColor: '#141416' },
   thumb: { width: '100%', height: '100%' },
+  thumbDimmed: { opacity: 0.55 },
+  daysBadge: {
+    position: 'absolute',
+    bottom: 3,
+    left: 3,
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  originalBadge: { backgroundColor: '#0A84FF' },
+  /** Select mode puts its circle in the bottom-left corner; sit next to it. */
+  badgeBesideCheck: { left: 28, bottom: 5 },
   durBadge: {
     position: 'absolute',
     bottom: 3,
@@ -646,7 +1015,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(18,18,20,0.96)',
   },
   actionCount: { color: '#fff', fontWeight: '600' },
+  actionGroup: { flexDirection: 'row', gap: 8 },
   actionBtn: { backgroundColor: '#c0392b', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
+  actionBtnBlue: { backgroundColor: '#0A84FF', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 999 },
   actionDisabled: { opacity: 0.4 },
   actionBtnText: { color: '#fff', fontWeight: '700' },
 
@@ -688,6 +1059,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   drawerRowOn: { backgroundColor: 'rgba(10,132,255,0.22)' },
+  drawerRowText: { flex: 1, paddingRight: 8 },
+  drawerHint: { color: '#8e939b', fontSize: 12, marginTop: 2 },
+  drawerAdd: { color: '#4aa8ff', fontSize: 15, fontWeight: '600' },
   drawerLabel: { color: '#e7e9ec', fontSize: 15 },
   drawerLabelOn: { color: '#fff', fontWeight: '700' },
   drawerCount: { color: '#8e939b', fontSize: 14 },
@@ -734,6 +1108,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   cloudChipText: { color: '#4aa8ff', fontSize: 13, fontWeight: '600' },
+  saveSmart: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1f1f22',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  saveSmartText: { color: '#4aa8ff', fontWeight: '700', fontSize: 13 },
 
   muted: { color: '#5b6472', fontStyle: 'italic' },
 });

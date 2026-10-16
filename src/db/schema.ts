@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export type Migration = {
   version: number;
@@ -73,6 +73,41 @@ export const MIGRATIONS: Migration[] = [
         INSERT INTO videos_fts(video_id, title, notes, filename)
         VALUES (new.id, new.title, new.notes, new.filename);
       END;
+    `,
+  },
+  {
+    version: 2,
+    sql: `
+      -- Watch status, same values as Simkl ----------------------------------
+      -- 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped', or NULL
+      ALTER TABLE videos ADD COLUMN status TEXT;
+
+      -- Recently Deleted: set instead of deleting, purged after 30 days ----
+      ALTER TABLE videos ADD COLUMN deleted_at INTEGER;
+
+      -- Private album (Face ID) ---------------------------------------------
+      ALTER TABLE videos ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0;
+
+      -- Duplicate detection: size + hash of the first and last 1 MB -------
+      ALTER TABLE videos ADD COLUMN content_key TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_videos_deleted     ON videos(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_videos_content_key ON videos(content_key);
+
+      -- App settings (theme, view options, ...) -----------------------------
+      CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      -- Saved searches shown in the sidebar ----------------------------------
+      CREATE TABLE IF NOT EXISTS smart_filters (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        rule_json  TEXT NOT NULL,             -- see SmartRule in ui/types.ts
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
     `,
   },
 ];

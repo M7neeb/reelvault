@@ -9,28 +9,56 @@
  * Before this existed the UI could only be seen by loading it on a physical
  * iPhone, which meant it was written blind.
  *
- * Open `/preview?view=grid|sidebar|search|viewer` to capture each surface.
- * Fixtures are neutral placeholders, never real videos.
+ * Open `/preview?view=<name>` to capture one surface; the names are the keys of
+ * VIEWS below. Fixtures are neutral placeholders, never real videos.
  */
 
 import { useMemo, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 
 import {
+  FIXTURE_DELETED,
+  FIXTURE_DUPLICATE_GROUPS,
   FIXTURE_ITEMS,
+  FIXTURE_SMART_FILTERS,
   FIXTURE_TAGS,
   FIXTURE_TAG_MAP,
   fixtureFrames,
   fixtureSearch,
 } from '@/features/vault/ui/fixtures';
 import VaultScreen from '@/features/vault/ui/VaultScreen';
-import type { VaultActions, VaultSort } from '@/features/vault/ui/types';
+import {
+  DEFAULT_VIEW_OPTIONS,
+  type VaultActions,
+  type VaultScreenProps,
+  type ViewOptions,
+} from '@/features/vault/ui/types';
 
 const noop = async () => {};
 
+const first = FIXTURE_ITEMS[0].id;
+
+/** Every surface the preview can open on first render. */
+const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = {
+  grid: {},
+  sidebar: { sidebarOpen: true },
+  search: { searchOpen: true },
+  viewer: { viewerId: first },
+  info: { viewerId: first, infoOpen: true },
+  menu: { viewerId: first, menuOpen: true },
+  select: { selectMode: true },
+  deleted: { filter: 'deleted' },
+  'deleted-select': { filter: 'deleted', selectMode: true },
+  duplicates: { filter: 'duplicates' },
+  'view-options': { viewOptionsOpen: true },
+  bulk: { selectMode: true, selectedIds: [first, FIXTURE_ITEMS[1].id], bulkOpen: true },
+  'bulk-bar': { selectMode: true, selectedIds: [first, FIXTURE_ITEMS[1].id] },
+  'smart-editor': { smartEditorOpen: true },
+};
+
 export default function PreviewRoute() {
   const { view } = useLocalSearchParams<{ view?: string }>();
-  const [sort, setSort] = useState<VaultSort>('recent');
+  const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
 
   const actions = useMemo<VaultActions>(
     () => ({
@@ -46,13 +74,21 @@ export default function PreviewRoute() {
       onRemoveTag: noop,
       onDeleteOne: noop,
       onDeleteMany: noop,
+      onRestoreMany: noop,
+      onPurgeMany: noop,
+      onRateMany: noop,
+      onAddTagMany: noop,
+      onSetStatus: noop,
+      onViewOptionsChange: async (next) => setViewOptions(next),
+      onSaveSmartFilter: noop,
+      onDeleteSmartFilter: noop,
     }),
     []
   );
 
   const items = useMemo(() => {
     const list = [...FIXTURE_ITEMS];
-    switch (sort) {
+    switch (viewOptions.sort) {
       case 'oldest':
         return list.sort((a, b) => a.importedAt - b.importedAt);
       case 'rating':
@@ -64,37 +100,24 @@ export default function PreviewRoute() {
       default:
         return list.sort((a, b) => b.importedAt - a.importedAt);
     }
-  }, [sort]);
-
-  // Whatever surface the URL asked for, opened on first render.
-  const initial =
-    view === 'sidebar'
-      ? { sidebarOpen: true }
-      : view === 'search'
-        ? { searchOpen: true }
-        : view === 'viewer'
-          ? { viewerId: FIXTURE_ITEMS[0].id }
-          : view === 'info'
-            ? { viewerId: FIXTURE_ITEMS[0].id, infoOpen: true }
-            : view === 'menu'
-              ? { viewerId: FIXTURE_ITEMS[0].id, menuOpen: true }
-              : view === 'select'
-                ? { selectMode: true }
-                : {};
+  }, [viewOptions.sort]);
 
   return (
     <VaultScreen
       items={items}
       allTags={FIXTURE_TAGS}
       tagMap={FIXTURE_TAG_MAP}
-      freeGb={42.5}
+      deletedItems={FIXTURE_DELETED}
+      duplicateGroups={FIXTURE_DUPLICATE_GROUPS}
+      smartFilters={FIXTURE_SMART_FILTERS}
+      viewOptions={viewOptions}
+      // The owner's real situation: an almost full 128 GB iPhone.
+      freeGb={2.1}
       busy={false}
       status=""
-      sort={sort}
-      onSortChange={setSort}
       actions={actions}
       enableVideo={false}
-      devInitialState={initial}
+      devInitialState={VIEWS[view ?? 'grid'] ?? {}}
     />
   );
 }

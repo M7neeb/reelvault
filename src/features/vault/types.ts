@@ -1,3 +1,6 @@
+/** Watch status. The same values Simkl uses, so the whole app shares one vocabulary. */
+export type WatchStatus = 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped';
+
 /** A video in the vault. Mirrors the `videos` table. */
 export type Video = {
   id: string;
@@ -15,4 +18,10 @@ export type Video = {
   createdAt: number;
   /** when ReelVault imported it (ms since epoch) */
   importedAt: number;
+  status: WatchStatus | null;
+  /** set while the video sits in Recently Deleted (ms since epoch) */
+  deletedAt: number | null;
+  isPrivate: boolean;
+  /** size + hash of the first and last 1 MB; equal keys mean duplicates */
+  contentKey: string | null;
 };

@@ -18,11 +18,13 @@ export default function VaultRoute() {
       items={vault.items}
       allTags={vault.allTags}
       tagMap={vault.tagMap}
+      deletedItems={vault.deletedItems}
+      duplicateGroups={vault.duplicateGroups}
+      smartFilters={vault.smartFilters}
+      viewOptions={vault.viewOptions}
       freeGb={vault.freeGb}
       busy={vault.busy}
       status={vault.status}
-      sort={vault.sort}
-      onSortChange={vault.setSort}
       actions={vault.actions}
     />
   );
