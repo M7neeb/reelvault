@@ -51,19 +51,28 @@ type InfoSource = {
   durationMs: number | null;
   width: number | null;
   height: number | null;
-  importedAt: number;
+  /** Filming date. */
+  createdAt: number;
   tagNames: string[];
+  albumIds?: number[];
+  meta?: { model?: string; make?: string } | null;
 };
 
-/** The label a thumbnail shows for the chosen Thumbnail Info, or null for none. */
-export function fmtThumbInfo(item: InfoSource, info: ThumbInfo): string | null {
+/** One Thumbnail Info item, or null when the video has nothing to show for it. */
+export function fmtThumbInfo(
+  item: InfoSource,
+  info: ThumbInfo,
+  albumNames?: Map<number, string>
+): string | null {
   switch (info) {
     case 'duration':
       return fmtDuration(item.durationMs);
     case 'size':
       return fmtSize(item.sizeBytes);
     case 'date':
-      return fmtDateTime(item.importedAt).date;
+      return fmtDateTime(item.createdAt).date;
+    case 'time':
+      return fmtDateTime(item.createdAt).time;
     case 'dimensions':
       return item.width && item.height ? `${item.width}×${item.height}` : null;
     case 'format':
@@ -72,7 +81,38 @@ export function fmtThumbInfo(item: InfoSource, info: ThumbInfo): string | null {
       return item.filename;
     case 'keywords':
       return item.tagNames.length ? item.tagNames.map((t) => `#${t}`).join(' ') : null;
+    case 'albums': {
+      const names = (item.albumIds ?? []).map((id) => albumNames?.get(id)).filter(Boolean);
+      return names.length ? names.join(', ') : null;
+    }
+    case 'device':
+      return item.meta?.model ?? item.meta?.make ?? null;
     default:
       return null;
   }
+}
+
+/** The whole thumbnail label: every chosen item that has a value, joined. */
+export function fmtThumbInfos(
+  item: InfoSource,
+  infos: ThumbInfo[],
+  albumNames?: Map<number, string>
+): string | null {
+  const parts = infos.map((i) => fmtThumbInfo(item, i, albumNames)).filter((s): s is string => !!s);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+/** `1 h 12 min` / `14 min` / `45 s` - for totals. */
+export function fmtTotalDuration(ms: number): string {
+  const totalMin = Math.round(ms / 60000);
+  if (totalMin >= 60) return `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`;
+  if (totalMin >= 1) return `${totalMin} min`;
+  return `${Math.round(ms / 1000)} s`;
+}
+
+/** `8.4 Mbit/s` from size and duration. */
+export function fmtBitrate(bytes: number, durationMs: number | null): string | null {
+  if (!durationMs) return null;
+  const mbit = (bytes * 8) / (durationMs / 1000) / 1_000_000;
+  return `${mbit >= 10 ? Math.round(mbit) : Math.round(mbit * 10) / 10} Mbit/s`;
 }

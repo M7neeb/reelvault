@@ -7,30 +7,35 @@
  *   media, filling everything above the bottom stack
  *   scrubber bar   (play/pause · track · time · more)
  *   filmstrip      (tap a frame to seek)
- *   toolbar        (flag · flag-off · stars · more · delete)
+ *   album bar      (tap an album to put the video in it)
+ *   toolbar        (pick flag · reject flag · stars · more · delete)
  *
- * and the metadata lives in a SEPARATE panel opened by the info button. This
- * file follows that structure exactly.
+ * Tapping the video hides all of it (full screen) and brings it back. The
+ * metadata lives in a SEPARATE panel opened by the info button.
  *
  * Like the rest of `ui/`, this imports no native module except expo-video, which
  * has a real web implementation. `enableVideo=false` (the browser preview) skips
  * mounting the player and shows a placeholder stage instead.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction } from './confirm';
-import { fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './format';
-import { RECENTLY_DELETED_DAYS } from './logic';
+import DateSheet from './DateSheet';
+import { fmtBitrate, fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './format';
+import { fmtLocation, RECENTLY_DELETED_DAYS } from './logic';
+import { PromptSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
   STATUSES,
   statusLabel,
   type ThumbSource,
+  type UiAlbum,
+  type UiFlag,
   type UiStatus,
   type UiTag,
   type VaultItem,
@@ -47,17 +52,26 @@ const FAVOURITE_RATING = 8;
 export default function ViewerModal({
   item,
   actions,
+  albums,
   enableVideo,
   initialInfoOpen = false,
   initialMenuOpen = false,
+  onSlideshow,
+  onNearby,
   onClose,
 }: {
   item: VaultItem;
   actions: VaultScreenProps['actions'];
+  /** Albums this video can go into (private ones only for private videos). */
+  albums: UiAlbum[];
   enableVideo: boolean;
   /** Preview-only: open a panel on first render so it can be screenshotted. */
   initialInfoOpen?: boolean;
   initialMenuOpen?: boolean;
+  /** Play the current list as a slideshow, starting here. */
+  onSlideshow: (item: VaultItem) => void;
+  /** Show the videos filmed near this one. */
+  onNearby: (item: VaultItem) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -71,7 +85,12 @@ export default function ViewerModal({
   });
 
   const [rating, setRating] = useState(item.rating);
+  const [flag, setFlag] = useState<UiFlag>(item.flag);
   const [watch, setWatch] = useState<UiStatus | null>(item.status);
+  const [inTray, setInTray] = useState(item.inTray);
+  const [albumIds, setAlbumIds] = useState<number[]>(item.albumIds);
+  const [title, setTitle] = useState(item.title ?? '');
+  const [caption, setCaption] = useState(item.notes ?? '');
   const [videoTags, setVideoTags] = useState<UiTag[]>([]);
   const [draft, setDraft] = useState('');
   const [frames, setFrames] = useState<ThumbSource[]>([]);
@@ -80,6 +99,10 @@ export default function ViewerModal({
   const [trackW, setTrackW] = useState(0);
   const [infoOpen, setInfoOpen] = useState(initialInfoOpen);
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
+  const [chrome, setChrome] = useState(true);
+  const [dateOpen, setDateOpen] = useState(false);
+  const [newAlbumOpen, setNewAlbumOpen] = useState(false);
+  const [note, setNote] = useState('');
 
   const framesRef = useRef<ThumbSource[]>([]);
   framesRef.current = frames;
@@ -112,17 +135,24 @@ export default function ViewerModal({
         const idx = Math.min(count - 1, Math.floor(fraction * count));
         if (idx !== lastIdx.current) {
           lastIdx.current = idx;
-          stripRef.current?.scrollTo({
-            x: Math.max(0, idx * (FRAME_W + FRAME_GAP) - 60),
-            animated: true,
-          });
+          stripRef.current?.scrollTo({ x: Math.max(0, idx * (FRAME_W + FRAME_GAP) - 60), animated: true });
         }
       }
     });
     return () => sub.remove();
   }, [player, item.durationMs]);
 
-  const dt = fmtDateTime(item.importedAt);
+  /** Recently used albums first, then pinned, then the rest - HashPhotos' album bar. */
+  const barAlbums = useMemo(
+    () =>
+      [...albums].sort(
+        (a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name)
+      ),
+    [albums]
+  );
+
+  const dt = fmtDateTime(item.createdAt);
+  const imported = fmtDateTime(item.importedAt);
   const totalSec = player.duration || (item.durationMs ?? 0) / 1000;
   const elapsed = Math.round(progress * totalSec);
 
@@ -151,11 +181,27 @@ export default function ViewerModal({
     console.log(`[RATE] ${item.filename} → ${next}`);
   }
 
+  async function onFlag(next: UiFlag) {
+    const value = next === flag ? 0 : next;
+    setFlag(value);
+    await actions.onSetFlag([item.id], value);
+  }
+
   async function onStatus(next: UiStatus) {
     const value = next === watch ? null : next;
     setWatch(value);
     await actions.onSetStatus([item.id], value);
     console.log(`[STATUS] ${item.filename} → ${value ?? 'none'}`);
+  }
+
+  async function toggleAlbum(album: UiAlbum) {
+    if (albumIds.includes(album.id)) {
+      setAlbumIds((ids) => ids.filter((x) => x !== album.id));
+      await actions.onRemoveFromAlbum([item.id], album.id);
+    } else {
+      setAlbumIds((ids) => [...ids, album.id]);
+      await actions.onAddToAlbums([item.id], [album.id]);
+    }
   }
 
   async function onAddTag() {
@@ -173,16 +219,12 @@ export default function ViewerModal({
   }
 
   function confirmDelete() {
-    confirmAction(
-      'Delete video?',
-      `It moves to Recently Deleted for ${RECENTLY_DELETED_DAYS} days.`,
-      () => {
-        actions
-          .onDeleteOne(item)
-          .then(onClose)
-          .catch((e) => console.log(`[DELETE] failed: ${String(e)}`));
-      }
-    );
+    confirmAction('Delete video?', `It moves to Recently Deleted for ${RECENTLY_DELETED_DAYS} days.`, () => {
+      actions
+        .onDeleteOne(item)
+        .then(onClose)
+        .catch((e) => console.log(`[DELETE] failed: ${String(e)}`));
+    });
   }
 
   /** Moving a video in or out of Private takes it out of the current view, so close. */
@@ -193,15 +235,22 @@ export default function ViewerModal({
       .catch((e) => console.log(`[PRIVATE] failed: ${String(e)}`));
   }
 
+  function run(label: string, job: Promise<void>) {
+    job.then(() => setNote(label)).catch((e) => setNote(`That did not work: ${String(e)}`));
+  }
+
   const isFavourite = rating >= FAVOURITE_RATING;
   const format = fmtFormat(item.filename);
+  const bitrate = fmtBitrate(item.sizeBytes, item.durationMs);
+  const loc = item.meta?.location;
+  const camera = [item.meta?.make, item.meta?.model].filter(Boolean).join(' ');
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.viewer}>
-        {/* ── media ─────────────────────────────────────────────────────── */}
+      <View style={[styles.viewer, !chrome && styles.viewerBare]}>
+        {/* ── media: tap to hide or show everything else ───────────────── */}
         <View style={styles.stage}>
-          <TouchableOpacity activeOpacity={1} onPress={togglePlay} style={styles.stageTouch}>
+          <TouchableOpacity activeOpacity={1} onPress={() => setChrome((c) => !c)} style={styles.stageTouch}>
             {enableVideo ? (
               <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} />
             ) : (
@@ -212,98 +261,108 @@ export default function ViewerModal({
           </TouchableOpacity>
         </View>
 
-        {/* ── header ────────────────────────────────────────────────────── */}
-        <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
-          <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Back">
-            <Text style={styles.circleIcon}>‹</Text>
-          </TouchableOpacity>
-
-          <View style={styles.titleWrap}>
-            <Text style={styles.titleDate}>{dt.date}</Text>
-            <Text style={styles.titleTime}>{dt.time}</Text>
-          </View>
-
-          <View style={styles.headerRight}>
-            <TouchableOpacity
-              style={[styles.circle, infoOpen && styles.circleOn]}
-              onPress={() => setInfoOpen((v) => !v)}
-              accessibilityLabel="Info">
-              <Text style={[styles.circleIcon, infoOpen && styles.circleIconOn]}>ⓘ</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.circle, menuOpen && styles.circleOn]}
-              onPress={() => setMenuOpen(true)}
-              accessibilityLabel="More">
-              <Text style={[styles.circleIcon, menuOpen && styles.circleIconOn]}>≡</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* ── bottom stack ──────────────────────────────────────────────── */}
-        <View style={styles.bottom}>
-          {/* scrubber */}
-          <View style={styles.scrub}>
-            <TouchableOpacity onPress={togglePlay} hitSlop={10} accessibilityLabel="Play or pause">
-              <Text style={styles.scrubIcon}>{playing ? '❚❚' : '▶'}</Text>
-            </TouchableOpacity>
-
-            <View style={styles.scrubTrack} onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
-              <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
-              <View style={[styles.scrubThumb, { left: progress * Math.max(0, trackW - 3) }]} />
-            </View>
-
-            <Text style={styles.scrubTime}>
-              {fmtDuration(elapsed * 1000) ?? '0:00'} / {fmtDuration(totalSec * 1000) ?? '--:--'}
-            </Text>
-
-            <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={10}>
-              <Text style={styles.scrubIcon}>•••</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* filmstrip */}
-          <ScrollView
-            ref={stripRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.strip}>
-            {frames.map((src, i) => (
-              <TouchableOpacity key={i} onPress={() => seek((i + 0.5) / frames.length)}>
-                <Image source={src} style={styles.stripFrame} contentFit="cover" />
+        {chrome && (
+          <>
+            {/* ── header ──────────────────────────────────────────────── */}
+            <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+              <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Back">
+                <Text style={styles.circleIcon}>‹</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
 
-          {/* toolbar */}
-          <View style={[styles.toolbar, { paddingBottom: insets.bottom + 10 }]}>
-            <TouchableOpacity
-              style={styles.tool}
-              onPress={() => onRate(FAVOURITE_RATING)}
-              accessibilityLabel="Favourite">
-              <Text style={[styles.toolIcon, isFavourite && styles.toolIconOn]}>★</Text>
-            </TouchableOpacity>
+              <View style={styles.titleWrap}>
+                <Text style={styles.titleDate}>{item.title || dt.date}</Text>
+                <Text style={styles.titleTime}>{item.title ? `${dt.date} ${dt.time}` : dt.time}</Text>
+              </View>
 
-            <TouchableOpacity style={styles.tool} onPress={() => onRate(0)} accessibilityLabel="Clear rating">
-              <Text style={[styles.toolIcon, !rating && styles.toolIconDim]}>☆</Text>
-            </TouchableOpacity>
-
-            <View style={styles.stars}>
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                <TouchableOpacity key={n} onPress={() => onRate(n)} hitSlop={4}>
-                  <Text style={[styles.star, n <= rating && styles.starOn]}>{n <= rating ? '★' : '☆'}</Text>
+              <View style={styles.headerRight}>
+                <TouchableOpacity
+                  style={[styles.circle, infoOpen && styles.circleOn]}
+                  onPress={() => setInfoOpen((v) => !v)}
+                  accessibilityLabel="Info">
+                  <Text style={[styles.circleIcon, infoOpen && styles.circleIconOn]}>ⓘ</Text>
                 </TouchableOpacity>
-              ))}
+                <TouchableOpacity
+                  style={[styles.circle, menuOpen && styles.circleOn]}
+                  onPress={() => setMenuOpen(true)}
+                  accessibilityLabel="More">
+                  <Text style={[styles.circleIcon, menuOpen && styles.circleIconOn]}>≡</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <TouchableOpacity style={styles.tool} onPress={() => setMenuOpen(true)}>
-              <Text style={styles.toolIcon}>•••</Text>
-            </TouchableOpacity>
+            {/* ── bottom stack ────────────────────────────────────────── */}
+            <View style={styles.bottom}>
+              {!!note && (
+                <TouchableOpacity onPress={() => setNote('')}>
+                  <Text style={styles.note}>{note}</Text>
+                </TouchableOpacity>
+              )}
+              <View style={styles.scrub}>
+                <TouchableOpacity onPress={togglePlay} hitSlop={10} accessibilityLabel="Play or pause">
+                  <Text style={styles.scrubIcon}>{playing ? '❚❚' : '▶'}</Text>
+                </TouchableOpacity>
+                <View style={styles.scrubTrack} onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
+                  <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                  <View style={[styles.scrubThumb, { left: progress * Math.max(0, trackW - 3) }]} />
+                </View>
+                <Text style={styles.scrubTime}>
+                  {fmtDuration(elapsed * 1000) ?? '0:00'} / {fmtDuration(totalSec * 1000) ?? '--:--'}
+                </Text>
+                <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={10}>
+                  <Text style={styles.scrubIcon}>•••</Text>
+                </TouchableOpacity>
+              </View>
 
-            <TouchableOpacity style={styles.tool} onPress={confirmDelete} accessibilityLabel="Delete">
-              <Text style={styles.toolDanger}>⌫</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+              <ScrollView ref={stripRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
+                {frames.map((src, i) => (
+                  <TouchableOpacity key={i} onPress={() => seek((i + 0.5) / frames.length)}>
+                    <Image source={src} style={styles.stripFrame} contentFit="cover" />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* album bar */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.albumBar}>
+                {barAlbums.map((a) => (
+                  <TouchableOpacity
+                    key={a.id}
+                    style={[styles.albumChip, albumIds.includes(a.id) && styles.albumChipOn]}
+                    onPress={() => void toggleAlbum(a)}>
+                    <Text style={[styles.albumChipText, albumIds.includes(a.id) && styles.albumChipTextOn]} numberOfLines={1}>
+                      {albumIds.includes(a.id) ? '✓ ' : ''}
+                      {a.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity style={styles.albumChip} onPress={() => setNewAlbumOpen(true)}>
+                  <Text style={styles.albumChipText}>+ Album</Text>
+                </TouchableOpacity>
+              </ScrollView>
+
+              <View style={[styles.toolbar, { paddingBottom: insets.bottom + 10 }]}>
+                <TouchableOpacity style={styles.tool} onPress={() => void onFlag(1)} accessibilityLabel="Pick">
+                  <Text style={[styles.toolIcon, flag === 1 && styles.toolPick]}>⚑</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.tool} onPress={() => void onFlag(-1)} accessibilityLabel="Reject">
+                  <Text style={[styles.toolIcon, flag === -1 && styles.toolReject]}>✕</Text>
+                </TouchableOpacity>
+                <View style={styles.stars}>
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                    <TouchableOpacity key={n} onPress={() => onRate(n)} hitSlop={4}>
+                      <Text style={[styles.star, n <= rating && styles.starOn]}>{n <= rating ? '★' : '☆'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.tool} onPress={() => setMenuOpen(true)}>
+                  <Text style={styles.toolIcon}>•••</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.tool} onPress={confirmDelete} accessibilityLabel="Delete">
+                  <Text style={styles.toolDanger}>⌫</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
 
         {/* ── info panel ────────────────────────────────────────────────── */}
         {infoOpen && (
@@ -331,17 +390,33 @@ export default function ViewerModal({
                   </Text>
                 </View>
 
-                <Text style={styles.infoPlaceholder}>Tap here to add title</Text>
-                <Text style={styles.infoMuted}>No Caption</Text>
+                <TextInput
+                  style={styles.titleInput}
+                  value={title}
+                  onChangeText={setTitle}
+                  onEndEditing={() => void actions.onSetText([item.id], 'title', title)}
+                  placeholder="Tap here to add title"
+                  placeholderTextColor={p.link}
+                  keyboardAppearance={p.scheme}
+                  returnKeyType="done"
+                />
+                <TextInput
+                  style={styles.captionInput}
+                  value={caption}
+                  onChangeText={setCaption}
+                  onEndEditing={() => void actions.onSetText([item.id], 'notes', caption)}
+                  placeholder="No Caption"
+                  placeholderTextColor={p.textSecondary}
+                  keyboardAppearance={p.scheme}
+                  multiline
+                />
 
-                <View style={styles.infoRow}>
+                <TouchableOpacity style={styles.infoRow} onPress={() => setDateOpen(true)}>
                   <Text style={styles.infoValue}>
                     {dt.date} at {dt.time}
                   </Text>
-                </View>
-
-                <Text style={styles.infoMuted}>No camera information</Text>
-                <Text style={styles.infoMuted}>No lens information</Text>
+                  <Text style={styles.linkSmall}>Adjust</Text>
+                </TouchableOpacity>
 
                 <View style={styles.chipRow}>
                   <View style={styles.chip}>
@@ -362,7 +437,34 @@ export default function ViewerModal({
                   )}
                 </View>
 
-                <Text style={styles.infoMuted}>No Location Data</Text>
+                <Text style={styles.section}>Details</Text>
+                <Detail label="Camera" value={camera || 'No camera information'} />
+                <Detail label="Software" value={item.meta?.software} />
+                <Detail label="Codec" value={item.meta?.codec} />
+                <Detail label="Frame rate" value={item.meta?.fps ? `${item.meta.fps} fps` : undefined} />
+                <Detail label="Bitrate" value={bitrate ?? undefined} />
+                <Detail label="Imported" value={`${imported.date} at ${imported.time}`} />
+
+                <Text style={styles.section}>Location</Text>
+                {loc ? (
+                  <>
+                    <Text style={styles.infoValue}>{fmtLocation(loc)}</Text>
+                    <View style={styles.linkRow}>
+                      <TouchableOpacity onPress={() => actions.onOpenMap(loc.lat, loc.lon, item.title || item.filename)}>
+                        <Text style={styles.linkSmall}>Open in Maps</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          onNearby(item);
+                          onClose();
+                        }}>
+                        <Text style={styles.linkSmall}>Videos nearby</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={styles.infoMuted}>No Location Data</Text>
+                )}
 
                 <Text style={styles.section}>Status</Text>
                 <View style={styles.pills}>
@@ -371,12 +473,22 @@ export default function ViewerModal({
                       key={s.key}
                       style={[styles.statusChip, watch === s.key && styles.statusChipOn]}
                       onPress={() => void onStatus(s.key)}>
-                      <Text style={[styles.statusChipText, watch === s.key && styles.statusChipTextOn]}>
-                        {s.label}
-                      </Text>
+                      <Text style={[styles.statusChipText, watch === s.key && styles.statusChipTextOn]}>{s.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
+
+                {albumIds.length > 0 && (
+                  <>
+                    <Text style={styles.section}>Albums</Text>
+                    <Text style={styles.infoValue}>
+                      {albums
+                        .filter((a) => albumIds.includes(a.id))
+                        .map((a) => a.name)
+                        .join(', ')}
+                    </Text>
+                  </>
+                )}
 
                 <Text style={styles.section}>Keywords</Text>
                 <View style={styles.pills}>
@@ -417,61 +529,141 @@ export default function ViewerModal({
               <Text style={styles.menuTitle} numberOfLines={1}>
                 {item.filename}
               </Text>
-
-              <MenuRow
-                label="Favourite"
-                hint={isFavourite ? 'On' : 'Off'}
-                onPress={() => {
-                  setMenuOpen(false);
-                  void onRate(isFavourite ? 0 : FAVOURITE_RATING);
-                }}
-              />
-              <MenuRow
-                label="Status"
-                hint={statusLabel(watch)}
-                onPress={() => {
-                  setMenuOpen(false);
-                  setInfoOpen(true);
-                }}
-              />
-              <MenuRow
-                label="Keyword"
-                hint={`${videoTags.length}`}
-                onPress={() => {
-                  setMenuOpen(false);
-                  setInfoOpen(true);
-                }}
-              />
-              <MenuRow
-                label="Info"
-                hint=""
-                onPress={() => {
-                  setMenuOpen(false);
-                  setInfoOpen(true);
-                }}
-              />
-              <MenuRow
-                label={item.isPrivate ? 'Remove from Private' : 'Move to Private'}
-                hint={item.isPrivate ? '' : 'Face ID'}
-                onPress={() => {
-                  setMenuOpen(false);
-                  togglePrivate();
-                }}
-              />
-              <MenuRow
-                label="Delete"
-                danger
-                hint=""
-                onPress={() => {
-                  setMenuOpen(false);
-                  confirmDelete();
-                }}
-              />
+              <ScrollView style={styles.menuScroll}>
+                <MenuRow
+                  label="Favourite"
+                  hint={isFavourite ? 'On' : 'Off'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    void onRate(isFavourite ? 0 : FAVOURITE_RATING);
+                  }}
+                />
+                <MenuRow
+                  label="Status"
+                  hint={statusLabel(watch)}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setInfoOpen(true);
+                  }}
+                />
+                <MenuRow
+                  label="Keyword, title, caption"
+                  hint={`${videoTags.length}`}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setInfoOpen(true);
+                  }}
+                />
+                <MenuRow
+                  label={inTray ? 'Remove from Tray' : 'Add to Tray'}
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setInTray(!inTray);
+                    run(inTray ? 'Removed from the Tray' : 'Added to the Tray', actions.onSetTray([item.id], !inTray));
+                  }}
+                />
+                <MenuRow
+                  label="Adjust Date & Time"
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setDateOpen(true);
+                  }}
+                />
+                <MenuRow
+                  label="Share / Save to Files"
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    void actions.onShare(item);
+                  }}
+                />
+                <MenuRow
+                  label="Save This Frame as Image"
+                  hint={fmtDuration(elapsed * 1000) ?? '0:00'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    void actions.onExtractFrame(item, progress * totalSec * 1000);
+                  }}
+                />
+                <MenuRow
+                  label="Slideshow from Here"
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onSlideshow(item);
+                  }}
+                />
+                <MenuRow
+                  label="Duplicate"
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    run('Duplicated - the copy is in the library', actions.onDuplicate(item));
+                  }}
+                />
+                <MenuRow
+                  label={item.isPrivate ? 'Remove from Private' : 'Move to Private'}
+                  hint={item.isPrivate ? '' : 'Locked'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    togglePrivate();
+                  }}
+                />
+                <MenuRow
+                  label="Delete"
+                  danger
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    confirmDelete();
+                  }}
+                />
+              </ScrollView>
             </View>
           </View>
         )}
+
+        {dateOpen && (
+          <DateSheet
+            count={1}
+            initial={item.createdAt}
+            onApply={(change) => actions.onAdjustDates([item.id], change)}
+            onClose={() => setDateOpen(false)}
+          />
+        )}
+
+        {newAlbumOpen && (
+          <PromptSheet
+            title="New Album"
+            message={item.isPrivate ? 'A private album, only shown when Private is unlocked.' : undefined}
+            placeholder="Album name"
+            confirmLabel="Create"
+            onSubmit={(name) => {
+              actions
+                .onCreateAlbum(name, { isPrivate: item.isPrivate })
+                .then((id) => actions.onAddToAlbums([item.id], [id]).then(() => setAlbumIds((ids) => [...ids, id])))
+                .catch((e) => console.log(`[ALBUM] create failed: ${String(e)}`));
+            }}
+            onClose={() => setNewAlbumOpen(false)}
+          />
+        )}
       </View>
     </Modal>
+  );
+}
+
+function Detail({ label, value }: { label: string; value?: string | null }) {
+  const styles = useStyles(makeStyles);
+  if (!value) return null;
+  return (
+    <View style={styles.detail}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -498,6 +690,7 @@ function MenuRow({
 const makeStyles = (p: Palette) =>
   sheet({
     viewer: { flex: 1, backgroundColor: p.bg },
+    viewerBare: { backgroundColor: '#000' },
     stage: { flex: 1 },
     stageTouch: { flex: 1, justifyContent: 'center' },
     video: { width: '100%', height: '100%' },
@@ -515,7 +708,7 @@ const makeStyles = (p: Palette) =>
       alignItems: 'center',
       justifyContent: 'space-between',
     },
-    titleWrap: { alignItems: 'center' },
+    titleWrap: { alignItems: 'center', flex: 1, paddingHorizontal: 8 },
     titleDate: { color: p.text, fontSize: 17, fontWeight: '700' },
     titleTime: { color: p.textSecondary, fontSize: 13 },
     headerRight: { flexDirection: 'row', gap: 8 },
@@ -533,6 +726,7 @@ const makeStyles = (p: Palette) =>
     circleIconOn: { color: '#fff' },
 
     bottom: { backgroundColor: p.viewerBar },
+    note: { color: p.link, fontSize: 12, textAlign: 'center', paddingTop: 8 },
     scrub: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -549,17 +743,25 @@ const makeStyles = (p: Palette) =>
       justifyContent: 'center',
     },
     scrubFill: { height: 3, borderRadius: 2, backgroundColor: p.text },
-    scrubThumb: {
-      position: 'absolute',
-      width: 9,
-      height: 9,
-      borderRadius: 5,
-      backgroundColor: p.text,
-    },
+    scrubThumb: { position: 'absolute', width: 9, height: 9, borderRadius: 5, backgroundColor: p.text },
     scrubTime: { color: p.textSecondary, fontSize: 11, fontVariant: ['tabular-nums'] },
 
     strip: { gap: FRAME_GAP, paddingHorizontal: 14, paddingBottom: 8, alignItems: 'center' },
     stripFrame: { width: FRAME_W, height: FRAME_H, backgroundColor: p.tile },
+
+    albumBar: { gap: 6, paddingHorizontal: 14, paddingBottom: 8 },
+    albumChip: {
+      borderWidth: 1,
+      borderColor: p.border,
+      backgroundColor: p.card,
+      borderRadius: 999,
+      paddingHorizontal: 11,
+      paddingVertical: 5,
+      maxWidth: 160,
+    },
+    albumChipOn: { backgroundColor: p.accent, borderColor: p.accent },
+    albumChipText: { color: p.textSoft, fontSize: 12, fontWeight: '600' },
+    albumChipTextOn: { color: '#fff' },
 
     toolbar: {
       flexDirection: 'row',
@@ -572,8 +774,8 @@ const makeStyles = (p: Palette) =>
     },
     tool: { paddingVertical: 4, paddingHorizontal: 2 },
     toolIcon: { color: p.textSoft, fontSize: 17, fontWeight: '600' },
-    toolIconOn: { color: p.rating },
-    toolIconDim: { color: p.textMuted },
+    toolPick: { color: '#34c759' },
+    toolReject: { color: '#ff453a' },
     toolDanger: { color: p.dangerText, fontSize: 17, fontWeight: '700' },
     stars: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 },
     star: { color: p.starOff, fontSize: 14 },
@@ -614,14 +816,20 @@ const makeStyles = (p: Palette) =>
     },
     fileBarIcon: { color: '#fff', fontSize: 11 },
     fileBarText: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
-    infoPlaceholder: { color: p.link, fontSize: 14 },
+    titleInput: { color: p.text, fontSize: 15, fontWeight: '600', paddingVertical: 4 },
+    captionInput: { color: p.textSoft, fontSize: 13, paddingVertical: 4, minHeight: 22 },
     infoMuted: { color: p.textSecondary, fontSize: 13 },
-    infoValue: { color: p.textSoft, fontSize: 13 },
-    infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    infoValue: { color: p.textSoft, fontSize: 13, flexShrink: 1 },
+    infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    linkSmall: { color: p.link, fontSize: 13, fontWeight: '600' },
+    linkRow: { flexDirection: 'row', gap: 18 },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     chip: { backgroundColor: p.card, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
     chipText: { color: p.textSoft, fontSize: 12 },
     section: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, paddingTop: 4 },
+    detail: { flexDirection: 'row', gap: 10 },
+    detailLabel: { width: 82, color: p.textSecondary, fontSize: 13 },
+    detailValue: { flex: 1, color: p.textSoft, fontSize: 13 },
     pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     pill: { backgroundColor: p.keyword, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
     pillText: { color: '#fff', fontSize: 14, fontWeight: '600' },
@@ -653,12 +861,14 @@ const makeStyles = (p: Palette) =>
       left: 0,
       right: 0,
       bottom: 0,
+      maxHeight: '80%',
       backgroundColor: p.panel,
       borderTopLeftRadius: 18,
       borderTopRightRadius: 18,
       paddingTop: 10,
       paddingHorizontal: 8,
     },
+    menuScroll: { flexGrow: 0 },
     grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: p.grabber },
     menuTitle: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 },
     menuRow: {

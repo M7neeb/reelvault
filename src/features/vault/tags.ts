@@ -1,11 +1,12 @@
 import { getDb } from '@/db';
 
-export type Tag = { id: number; name: string; color: string | null };
+export type Tag = { id: number; name: string; color: string | null; pinned?: number };
 
+/** Pinned keywords first, then A-Z. */
 export async function listTags(): Promise<Tag[]> {
   const db = await getDb();
   return db.getAllAsync<Tag>(
-    'SELECT id, name, color FROM tags ORDER BY name COLLATE NOCASE;'
+    'SELECT id, name, color, pinned FROM tags ORDER BY pinned DESC, name COLLATE NOCASE;'
   );
 }
 

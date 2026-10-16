@@ -2,8 +2,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { aspectRatio, COLUMNS, computeLayout, nextSize, visibleTiles } from '../src/features/vault/ui/layout.ts';
-import { fmtThumbInfo } from '../src/features/vault/ui/format.ts';
+import {
+  aspectRatio,
+  COLUMNS,
+  computeLayout,
+  computeSectionedLayout,
+  nextSize,
+  visibleTiles,
+} from '../src/features/vault/ui/layout.ts';
+import { fmtThumbInfo, fmtThumbInfos } from '../src/features/vault/ui/format.ts';
 
 const W = 393;
 const GAP = 3;
@@ -134,8 +141,10 @@ test('thumbnail info labels', () => {
     durationMs: 192000,
     width: 1920,
     height: 1080,
-    importedAt: Date.UTC(2026, 9, 13, 12, 0),
+    createdAt: Date.UTC(2026, 9, 13, 12, 0),
     tagNames: ['holiday', 'nature'],
+    albumIds: [1, 2],
+    meta: { model: 'iPhone 15' },
   };
   assert.equal(fmtThumbInfo(item, 'duration'), '3:12');
   assert.equal(fmtThumbInfo(item, 'size'), '45 MB');
@@ -143,6 +152,37 @@ test('thumbnail info labels', () => {
   assert.equal(fmtThumbInfo(item, 'format'), 'MOV');
   assert.equal(fmtThumbInfo(item, 'filename'), 'clip.mov');
   assert.equal(fmtThumbInfo(item, 'keywords'), '#holiday #nature');
-  assert.equal(fmtThumbInfo(item, 'none'), null);
+  assert.equal(fmtThumbInfo(item, 'device'), 'iPhone 15');
+  assert.equal(fmtThumbInfo(item, 'albums', new Map([[1, 'Holiday'], [2, 'Family']])), 'Holiday, Family');
   assert.equal(fmtThumbInfo({ ...item, tagNames: [] }, 'keywords'), null);
+  // Several at once, joined; empty ones are skipped.
+  assert.equal(fmtThumbInfos({ ...item, tagNames: [] }, ['duration', 'keywords', 'size']), '3:12 · 45 MB');
+  assert.equal(fmtThumbInfos(item, []), null);
+});
+
+test('grouping adds a title row per period and keeps tiles below it', () => {
+  const sections = [
+    { key: '2026-10', title: 'October 2026', items: many(4) },
+    { key: '2026-09', title: 'September 2026', items: many(2).map((v, i) => ({ ...v, id: `s${i}` })) },
+  ];
+  const layout = computeSectionedLayout(sections, { style: 'grid', size: 'large', width: W, gap: GAP, headerHeight: 38 });
+  assert.equal(layout.headers.length, 2);
+  assert.equal(layout.headers[0].y, 0);
+  assert.equal(layout.tiles[0].y, 38, 'first row sits under its title');
+  const secondHeader = layout.headers[1].y;
+  assert.ok(layout.tiles.filter((t) => t.id.startsWith('s')).every((t) => t.y >= secondHeader + 38));
+  assert.ok(nonDecreasingY(layout.tiles));
+});
+
+test('no grouping means no title rows and the same tiles as a plain layout', () => {
+  const plain = computeLayout(many(7), { style: 'grid', size: 'medium', width: W, gap: GAP });
+  const one = computeSectionedLayout([{ key: 'all', title: '', items: many(7) }], {
+    style: 'grid',
+    size: 'medium',
+    width: W,
+    gap: GAP,
+    headerHeight: 38,
+  });
+  assert.equal(one.headers.length, 0);
+  assert.deepEqual(one.tiles, plain.tiles);
 });

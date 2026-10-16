@@ -12,7 +12,7 @@
 
 export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
 
-export type UiTag = { id: number; name: string };
+export type UiTag = { id: number; name: string; pinned?: boolean };
 
 /** Watch status. The same values Simkl uses (redeclared from `../types`, see above). */
 export type UiStatus = 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped';
@@ -27,6 +27,9 @@ export const STATUSES: { key: UiStatus; label: string }[] = [
 
 export const statusLabel = (s: UiStatus | null): string =>
   STATUSES.find((x) => x.key === s)?.label ?? 'No status';
+
+/** 1 = pick, -1 = reject, 0 = none (HashPhotos' Flag). */
+export type UiFlag = -1 | 0 | 1;
 
 /** HashPhotos' four layout styles. */
 export type LayoutStyle = 'grid' | 'natural' | 'waterfall' | 'mosaic';
@@ -49,26 +52,40 @@ export const THUMB_SIZES: { key: ThumbSize; label: string }[] = [
   { key: 'fit', label: 'Fit to screen' },
 ];
 
-/** What the bottom-right label of every thumbnail shows. */
+/** Things a thumbnail can show in its bottom-right label (several at once). */
 export type ThumbInfo =
   | 'duration'
   | 'size'
   | 'date'
+  | 'time'
   | 'dimensions'
   | 'format'
   | 'filename'
   | 'keywords'
-  | 'none';
+  | 'albums'
+  | 'device';
 
 export const THUMB_INFOS: { key: ThumbInfo; label: string }[] = [
   { key: 'duration', label: 'Duration' },
   { key: 'size', label: 'File size' },
   { key: 'date', label: 'Date' },
+  { key: 'time', label: 'Time' },
   { key: 'dimensions', label: 'Dimensions' },
   { key: 'format', label: 'Format' },
   { key: 'filename', label: 'File name' },
   { key: 'keywords', label: 'Keywords' },
-  { key: 'none', label: 'Nothing' },
+  { key: 'albums', label: 'Album names' },
+  { key: 'device', label: 'Camera model' },
+];
+
+/** HashPhotos' Grouping: section headers above the rows (never tiles inside the grid). */
+export type GroupBy = 'none' | 'day' | 'month' | 'year';
+
+export const GROUPINGS: { key: GroupBy; label: string }[] = [
+  { key: 'none', label: 'None' },
+  { key: 'day', label: 'Day' },
+  { key: 'month', label: 'Month' },
+  { key: 'year', label: 'Year' },
 ];
 
 export type ThemeMode = 'system' | 'light' | 'dark';
@@ -84,7 +101,10 @@ export type ViewOptions = {
   layout: LayoutStyle;
   size: ThumbSize;
   sort: VaultSort;
-  info: ThumbInfo;
+  groupBy: GroupBy;
+  /** In this order on the label; empty = no label. */
+  infos: ThumbInfo[];
+  /** Rating and flag marks. */
   showRating: boolean;
   showKeywords: boolean;
   theme: ThemeMode;
@@ -94,29 +114,78 @@ export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   layout: 'grid',
   size: 'large',
   sort: 'recent',
-  info: 'duration',
+  groupBy: 'none',
+  infos: ['duration'],
   showRating: true,
   showKeywords: true,
   theme: 'system',
 };
 
+export type Orientation = 'landscape' | 'portrait' | 'square';
+
 /**
- * A saved search. Every condition that is set must match; an empty rule
- * matches everything. Evaluated in the UI (`logic.ts`) over the loaded items.
+ * A saved search (Smart Filter / Smart Album) or a one-off search with filters.
+ * Every condition that is set must match; an empty rule matches everything.
+ * Evaluated in the UI (`logic.ts`) over the loaded items.
  */
 export type SmartRule = {
-  /** Part of the filename, any case. */
+  /** Part of the filename, title or caption, any case. */
   text?: string;
-  /** Rating at least this (1..10). */
+  /** Treat `text` as a regular expression. */
+  regex?: boolean;
   minRating?: number;
+  maxRating?: number;
   /** The video carries ALL of these keywords. */
   tags?: string[];
   status?: UiStatus;
   /** Only videos without any keyword. */
   untagged?: boolean;
+  flag?: 'pick' | 'reject' | 'none';
+  /** Filming date range (ms since epoch, inclusive). */
+  dateFrom?: number;
+  dateTo?: number;
+  minDurationSec?: number;
+  maxDurationSec?: number;
+  minSizeMb?: number;
+  maxSizeMb?: number;
+  orientation?: Orientation;
+  /** File extension, e.g. 'MOV'. */
+  format?: string;
+  minKeywords?: number;
+  maxKeywords?: number;
+  minAlbums?: number;
+  maxAlbums?: number;
+  /** Only videos that have / don't have GPS in their file. */
+  hasLocation?: boolean;
+  inTray?: boolean;
 };
 
-export type SmartFilter = { id: number; name: string; rule: SmartRule };
+export type SmartFilter = { id: number; name: string; rule: SmartRule; folderId: number | null };
+
+export type UiAlbum = {
+  id: number;
+  name: string;
+  folderId: number | null;
+  isPrivate: boolean;
+  pinned: boolean;
+  /** Its videos still show in Uncategorized. */
+  excludeUncategorized: boolean;
+  lastUsedAt: number | null;
+};
+
+export type UiFolder = { id: number; name: string };
+
+/** What the video file says about itself (redeclared from `../mp4`). */
+export type UiMeta = {
+  createdAt?: number;
+  codec?: string;
+  fps?: number;
+  rotation?: number;
+  make?: string;
+  model?: string;
+  software?: string;
+  location?: { lat: number; lon: number; alt?: number };
+};
 
 /**
  * An image the UI can display. The device passes a `file://` uri string; the
@@ -138,16 +207,27 @@ export type VaultItem = {
   rating: number;
   width: number | null;
   height: number | null;
+  /** When it was filmed (from the file) or, failing that, imported. */
+  createdAt: number;
   importedAt: number;
-  /** Number of tags on this video (drives the 🏷 badge). */
+  /** Number of tags on this video (drives the # badge). */
   tagCount: number;
   /** Tag names on this video, used for client-side filtering in the UI. */
   tagNames: string[];
   /** Set while the video is in Recently Deleted (ms since epoch). */
   deletedAt: number | null;
   status: UiStatus | null;
-  /** In the Private album: hidden everywhere else, shown only after Face ID. */
+  /** In the Private album: hidden everywhere else, shown only after unlocking. */
   isPrivate: boolean;
+  flag: UiFlag;
+  inTray: boolean;
+  albumIds: number[];
+  title: string | null;
+  /** HashPhotos' "caption". */
+  notes: string | null;
+  meta: UiMeta | null;
+  /** Size + hash of both ends; equal keys = the same video. */
+  contentKey: string | null;
 };
 
 export const SORTS: { key: VaultSort; label: string }[] = [
@@ -159,10 +239,28 @@ export const SORTS: { key: VaultSort; label: string }[] = [
   { key: 'duration', label: 'Duration' },
 ];
 
+export type PasscodeKind = '4' | '6' | 'numeric' | 'alphanumeric';
+
+export const PASSCODE_KINDS: { key: PasscodeKind; label: string }[] = [
+  { key: '4', label: '4 digits' },
+  { key: '6', label: '6 digits' },
+  { key: 'numeric', label: 'Custom number' },
+  { key: 'alphanumeric', label: 'Letters and numbers' },
+];
+
+export type SecurityState = {
+  /** null = no app passcode: Private opens with Face ID / the phone's passcode. */
+  passcodeKind: PasscodeKind | null;
+  faceId: boolean;
+  hasFakePasscode: boolean;
+};
+
 /** Everything the UI can ask the native layer to do. */
 export type VaultActions = {
   /** Open the document picker and import. Container owns the busy/status text. */
   onImport: () => void;
+  /** Import every video in a folder from Files (sub-folders included); originals stay. */
+  onImportFolder: () => void;
   /** Full-text search. The native layer uses SQLite FTS5; the preview filters locally. */
   search: (query: string) => Promise<VaultItem[]>;
   /** Tags currently on one video. */
@@ -172,10 +270,18 @@ export type VaultActions = {
   onRate: (videoId: string, rating: number) => Promise<void>;
   onAddTag: (videoId: string, name: string) => Promise<void>;
   onRemoveTag: (videoId: string, tagId: number) => Promise<void>;
+  onPinTag: (tagId: number, pinned: boolean) => Promise<void>;
   /** Bulk edits for the selected videos. `null` status / rating 0 clears it. */
   onRateMany: (videoIds: string[], rating: number) => Promise<void>;
   onAddTagMany: (videoIds: string[], name: string) => Promise<void>;
   onSetStatus: (videoIds: string[], status: UiStatus | null) => Promise<void>;
+  onSetFlag: (videoIds: string[], flag: UiFlag) => Promise<void>;
+  onSetTray: (videoIds: string[], inTray: boolean) => Promise<void>;
+  onClearTray: () => Promise<void>;
+  /** Title or caption; empty text clears it. */
+  onSetText: (videoIds: string[], field: 'title' | 'notes', value: string) => Promise<void>;
+  /** Set one filming date for all, or shift each by the same amount (ms). */
+  onAdjustDates: (videoIds: string[], change: { setTo?: number; shiftBy?: number }) => Promise<void>;
   /** Move videos into (true) or out of (false) the Private album. */
   onSetPrivate: (videoIds: string[], isPrivate: boolean) => Promise<void>;
   /** Ask for Face ID (or the phone's passcode). `message` explains a refusal. */
@@ -184,6 +290,39 @@ export type VaultActions = {
   /** Saves a new smart filter, or replaces the one with `id`. */
   onSaveSmartFilter: (filter: { id?: number; name: string; rule: SmartRule }) => Promise<void>;
   onDeleteSmartFilter: (id: number) => Promise<void>;
+  onMoveSmartFilter: (id: number, folderId: number | null) => Promise<void>;
+  /** Albums and folders. */
+  onCreateAlbum: (name: string, opts?: { folderId?: number | null; isPrivate?: boolean }) => Promise<number>;
+  onUpdateAlbum: (
+    id: number,
+    patch: Partial<{ name: string; folderId: number | null; pinned: boolean; excludeUncategorized: boolean }>
+  ) => Promise<void>;
+  onDeleteAlbum: (id: number) => Promise<void>;
+  onAddToAlbums: (videoIds: string[], albumIds: number[]) => Promise<void>;
+  onRemoveFromAlbum: (videoIds: string[], albumId: number) => Promise<void>;
+  /** Every video in the album gets the album's name as a keyword. */
+  onAlbumNameToKeyword: (albumId: number) => Promise<void>;
+  onCreateFolder: (name: string) => Promise<number>;
+  onRenameFolder: (id: number, name: string) => Promise<void>;
+  onDeleteFolder: (id: number) => Promise<void>;
+  /** Share sheet: Save Video, Save to Files, AirDrop, other apps. */
+  onShare: (item: VaultItem) => Promise<void>;
+  /** Save the frame at `timeMs` as an image (share sheet). */
+  onExtractFrame: (item: VaultItem, timeMs: number) => Promise<void>;
+  /** A second copy of the video inside ReelVault. */
+  onDuplicate: (item: VaultItem) => Promise<void>;
+  /** Open the place a video was filmed in Apple Maps. */
+  onOpenMap: (lat: number, lon: number, label: string) => void;
+  /** Library-info backup (ratings, keywords, albums...): export to Files / import back. */
+  onExportBackup: () => Promise<void>;
+  onImportBackup: () => Promise<void>;
+  /** App passcode, Face ID and fake passcode for the Private album. */
+  getSecurity: () => Promise<SecurityState>;
+  setPasscode: (kind: PasscodeKind, code: string) => Promise<void>;
+  clearPasscode: () => Promise<void>;
+  setFakePasscode: (code: string | null) => Promise<void>;
+  setFaceId: (enabled: boolean) => Promise<void>;
+  checkPasscode: (code: string) => Promise<'real' | 'fake' | 'wrong'>;
   /** Move to Recently Deleted. Nothing is removed from disk yet. */
   onDeleteOne: (item: VaultItem) => Promise<void>;
   onDeleteMany: (items: VaultItem[]) => Promise<void>;
@@ -196,7 +335,7 @@ export type VaultActions = {
 export type VaultScreenProps = {
   /** All videos, already sorted by `viewOptions.sort`. Filtering happens inside the UI. */
   items: VaultItem[];
-  /** Every tag in the library - powers the sidebar and the search cloud. */
+  /** Every tag in the library, pinned first - powers the sidebar and the search cloud. */
   allTags: UiTag[];
   /** tag name -> video ids. Powers sidebar counts and tag filtering. */
   tagMap: Record<string, string[]>;
@@ -205,6 +344,8 @@ export type VaultScreenProps = {
   /** Ids of videos with the same content, oldest import first in each group. */
   duplicateGroups: string[][];
   smartFilters: SmartFilter[];
+  albums: UiAlbum[];
+  folders: UiFolder[];
   viewOptions: ViewOptions;
   /** Free space on the device, or null when unknown (web/preview). */
   freeGb: number | null;
@@ -228,8 +369,10 @@ export type VaultScreenProps = {
     selectMode?: boolean;
     infoOpen?: boolean;
     menuOpen?: boolean;
-    /** Start on one of the special library views. */
-    filter?: 'deleted' | 'duplicates' | 'private';
+    /** Start on one of the library views. */
+    filter?: 'deleted' | 'duplicates' | 'private' | 'tray' | 'similar' | 'uncategorized' | 'picks';
+    /** Start inside an album. */
+    albumId?: number;
     /** Start with the Private album unlocked. */
     privateUnlocked?: boolean;
     /** Pre-selected ids (select mode). */
@@ -237,5 +380,12 @@ export type VaultScreenProps = {
     viewOptionsOpen?: boolean;
     bulkOpen?: boolean;
     smartEditorOpen?: boolean;
+    settingsOpen?: boolean;
+    calendarOpen?: boolean;
+    timelineOpen?: boolean;
+    overviewOpen?: boolean;
+    passcodeOpen?: boolean;
+    slideshowOpen?: boolean;
+    compareOpen?: boolean;
   };
 };

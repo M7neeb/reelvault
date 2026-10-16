@@ -1,4 +1,5 @@
 import { getDb } from '@/db';
+import type { Mp4Meta } from './mp4';
 import type { Video, WatchStatus } from './types';
 
 type Row = {
@@ -18,7 +19,20 @@ type Row = {
   deleted_at: number | null;
   is_private: number;
   content_key: string | null;
+  flag: number;
+  in_tray: number;
+  meta_json: string | null;
 };
+
+function parseMeta(json: string | null): Mp4Meta | null {
+  if (!json) return null;
+  try {
+    const value = JSON.parse(json);
+    return value && typeof value === 'object' ? (value as Mp4Meta) : null;
+  } catch {
+    return null;
+  }
+}
 
 function toVideo(r: Row): Video {
   return {
@@ -38,6 +52,9 @@ function toVideo(r: Row): Video {
     deletedAt: r.deleted_at,
     isPrivate: r.is_private === 1,
     contentKey: r.content_key,
+    flag: r.flag === 1 ? 1 : r.flag === -1 ? -1 : 0,
+    inTray: r.in_tray === 1,
+    meta: parseMeta(r.meta_json),
   };
 }
 
@@ -52,8 +69,8 @@ export async function insertVideo(v: Video): Promise<void> {
   await db.runAsync(
     `INSERT INTO videos
        (id, uri, filename, size, duration_ms, width, height, rating, title, notes,
-        created_at, imported_at, status, deleted_at, is_private, content_key)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+        created_at, imported_at, status, deleted_at, is_private, content_key, flag, in_tray, meta_json)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
     [
       v.id,
       v.uri,
@@ -71,6 +88,9 @@ export async function insertVideo(v: Video): Promise<void> {
       v.deletedAt,
       v.isPrivate ? 1 : 0,
       v.contentKey,
+      v.flag,
+      v.inTray ? 1 : 0,
+      v.meta ? JSON.stringify(v.meta) : null,
     ]
   );
 }
@@ -78,8 +98,9 @@ export async function insertVideo(v: Video): Promise<void> {
 export type SortKey = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
 
 const ORDER_BY: Record<SortKey, string> = {
-  recent: 'imported_at DESC',
-  oldest: 'imported_at ASC',
+  // By filming date (the import time until the file's own date is known).
+  recent: 'created_at DESC, imported_at DESC',
+  oldest: 'created_at ASC, imported_at ASC',
   rating: 'rating DESC, imported_at DESC',
   name: 'filename COLLATE NOCASE ASC',
   size: 'size DESC',

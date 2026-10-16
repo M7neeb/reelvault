@@ -222,6 +222,36 @@ export function computeLayout(
   }
 }
 
+export type SectionHeader = { key: string; title: string; y: number };
+
+export type SectionedLayout = Layout & { headers: SectionHeader[] };
+
+/**
+ * HashPhotos' Grouping: each section gets a title row, then its own tiles laid
+ * out with the chosen style. Sections without a title (grouping off) add no row.
+ */
+export function computeSectionedLayout(
+  sections: { key: string; title: string; items: Sized[] }[],
+  options: { style: LayoutStyle; size: ThumbSize; width: number; gap: number; headerHeight: number }
+): SectionedLayout {
+  const tiles: Tile[] = [];
+  const headers: SectionHeader[] = [];
+  let y = 0;
+  let maxTileHeight = 0;
+  for (const section of sections) {
+    if (section.title) {
+      headers.push({ key: section.key, title: section.title, y });
+      y += options.headerHeight;
+    }
+    const sub = computeLayout(section.items, options);
+    for (const t of sub.tiles) tiles.push({ ...t, y: t.y + y });
+    if (sub.maxTileHeight > maxTileHeight) maxTileHeight = sub.maxTileHeight;
+    y += sub.height + (section.title ? options.gap * 3 : options.gap);
+  }
+  if (tiles.length || headers.length) y -= sections[sections.length - 1]?.title ? options.gap * 3 : options.gap;
+  return { tiles, headers, height: Math.max(0, y), maxTileHeight };
+}
+
 /** First index whose tile top is >= `y` (tiles are sorted by top edge). */
 function firstAtOrBelow(tiles: Tile[], y: number): number {
   let lo = 0;

@@ -1,3 +1,5 @@
+import type { Mp4Meta } from './mp4';
+
 /** Watch status. The same values Simkl uses, so the whole app shares one vocabulary. */
 export type WatchStatus = 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped';
 
@@ -24,4 +26,9 @@ export type Video = {
   isPrivate: boolean;
   /** size + hash of the first and last 1 MB; equal keys mean duplicates */
   contentKey: string | null;
+  /** 1 = pick, -1 = reject, 0 = no flag */
+  flag: -1 | 0 | 1;
+  inTray: boolean;
+  /** What the file says about itself; null until read. */
+  meta: Mp4Meta | null;
 };

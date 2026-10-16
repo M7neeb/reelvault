@@ -120,7 +120,8 @@ const DEFAULTS = {
   layout: 'grid',
   size: 'large',
   sort: 'recent',
-  info: 'duration',
+  groupBy: 'none',
+  infos: ['duration'],
   showRating: true,
   showKeywords: true,
   theme: 'system',
@@ -134,10 +135,10 @@ test('missing view options fall back to the defaults', () => {
 test('saved view options are kept, invalid values replaced', () => {
   assert.deepEqual(
     parseViewOptions(
-      '{"layout": "waterfall", "size": "fit", "sort": "duration", "info": "size", "showRating": false, "theme": "light"}',
+      '{"layout": "waterfall", "size": "fit", "sort": "duration", "infos": ["size", "bogus", "date"], "groupBy": "month", "showRating": false, "theme": "light"}',
       DEFAULTS
     ),
-    { ...DEFAULTS, layout: 'waterfall', size: 'fit', sort: 'duration', info: 'size', showRating: false, theme: 'light' }
+    { ...DEFAULTS, layout: 'waterfall', size: 'fit', sort: 'duration', infos: ['size', 'date'], groupBy: 'month', showRating: false, theme: 'light' }
   );
   const junk = parseViewOptions('{"layout": "spiral", "size": 9, "sort": "random", "theme": "blue"}', DEFAULTS);
   assert.deepEqual(junk, DEFAULTS);
@@ -149,10 +150,13 @@ test('options saved by the first version are carried over', () => {
     DEFAULTS
   );
   assert.equal(old.size, 'small');
-  assert.equal(old.info, 'none');
+  assert.deepEqual(old.infos, []);
   assert.equal(old.sort, 'size');
   assert.equal(old.showKeywords, false);
   assert.equal(parseViewOptions('{"columns": 4}', DEFAULTS).size, 'medium');
+  // The version with one `info` value.
+  assert.deepEqual(parseViewOptions('{"info": "size"}', DEFAULTS).infos, ['size']);
+  assert.deepEqual(parseViewOptions('{"info": "none"}', DEFAULTS).infos, []);
 });
 
 /* -------------------------------------------------------------------- theme */
