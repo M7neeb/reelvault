@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export type Migration = {
   version: number;
@@ -108,6 +108,55 @@ export const MIGRATIONS: Migration[] = [
         sort_order INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       );
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      -- Pick / reject flag: 1 = pick, -1 = reject, 0 = none -----------------
+      ALTER TABLE videos ADD COLUMN flag INTEGER NOT NULL DEFAULT 0;
+
+      -- The Tray: a working set that stays across views ---------------------
+      ALTER TABLE videos ADD COLUMN in_tray INTEGER NOT NULL DEFAULT 0;
+
+      -- What the file itself says (codec, fps, device, location...) as JSON;
+      -- NULL = not read yet. created_at is set from it when the file knows
+      -- when it was filmed.
+      ALTER TABLE videos ADD COLUMN meta_json TEXT;
+
+      -- Folders group albums and smart filters -------------------------------
+      CREATE TABLE IF NOT EXISTS folders (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS albums (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        name                  TEXT NOT NULL,
+        folder_id             INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+        is_private            INTEGER NOT NULL DEFAULT 0,  -- only shown inside unlocked Private
+        pinned                INTEGER NOT NULL DEFAULT 0,
+        exclude_uncategorized INTEGER NOT NULL DEFAULT 0,  -- its videos still count as uncategorized
+        last_used_at          INTEGER,                     -- for "recent destinations"
+        sort_order            INTEGER NOT NULL DEFAULT 0,
+        created_at            INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS album_videos (
+        album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+        video_id TEXT    NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+        added_at INTEGER NOT NULL,
+        PRIMARY KEY (album_id, video_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_album_videos_video ON album_videos(video_id);
+
+      -- Pinned keywords sit at the top of the sidebar and search cloud ------
+      ALTER TABLE tags ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+
+      -- Smart filters can live in a folder ("smart folder") ----------------
+      ALTER TABLE smart_filters ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;
     `,
   },
 ];

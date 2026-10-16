@@ -4,6 +4,7 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import { File } from 'expo-file-system';
 
 import { contentKeyOf } from './contentKey';
+import { readVideoMeta } from './metadata';
 import { findByContentKey, insertVideo } from './repo';
 import { probeDurationMs } from './duration';
 import { ensureDirs, thumbsDir, videosDir } from './storage';
@@ -37,10 +38,14 @@ function removeQuietly(file: File): void {
  * ReelVault's folder, not copied: copying would hold a third copy of every
  * video on a phone with little free space. Videos already in the vault are
  * skipped. One bad file never aborts the batch.
+ *
+ * `keepOriginals` is for files that belong to the user (Import Folder): they
+ * are copied and never touched.
  */
 export async function importAssets(
-  assets: DocumentPicker.DocumentPickerAsset[],
-  onProgress?: (done: number, total: number) => void
+  assets: Pick<DocumentPicker.DocumentPickerAsset, 'uri' | 'name' | 'size'>[],
+  onProgress?: (done: number, total: number) => void,
+  { keepOriginals = false }: { keepOriginals?: boolean } = {}
 ): Promise<ImportSummary> {
   ensureDirs();
   const summary: ImportSummary = { imported: 0, duplicates: [], unverified: [], failed: [] };
@@ -52,20 +57,24 @@ export async function importAssets(
       const contentKey = await contentKeyOf(picked.uri);
       if (contentKey && (await findByContentKey(contentKey))) {
         summary.duplicates.push(asset.name);
-        removeQuietly(picked);
+        if (!keepOriginals) removeQuietly(picked);
         console.log(`[IMPORT] duplicate skipped ${asset.name}`);
         continue;
       }
 
       const id = Crypto.randomUUID();
       const destination = new File(videosDir, `${id}.${extOf(asset.name)}`);
-      try {
-        await picked.move(destination);
-      } catch (e) {
-        // A move can fail across volumes; fall back to copy + remove the temp file.
-        console.log(`[IMPORT] move failed (${String(e)}), copying ${asset.name}`);
-        await new File(asset.uri).copy(destination);
-        removeQuietly(new File(asset.uri));
+      if (keepOriginals) {
+        await picked.copy(destination);
+      } else {
+        try {
+          await picked.move(destination);
+        } catch (e) {
+          // A move can fail across volumes; fall back to copy + remove the temp file.
+          console.log(`[IMPORT] move failed (${String(e)}), copying ${asset.name}`);
+          await new File(asset.uri).copy(destination);
+          removeQuietly(new File(asset.uri));
+        }
       }
 
       let width: number | null = null;
@@ -83,6 +92,9 @@ export async function importAssets(
       const durationMs = await probeDurationMs(destination.uri);
       if (!durationMs) summary.unverified.push(asset.name);
 
+      // The file's own record of when it was filmed, its real size, device...
+      const meta = (await readVideoMeta(destination.uri)) ?? {};
+
       const now = Date.now();
       const size = destination.size ?? asset.size ?? 0;
       await insertVideo({
@@ -90,18 +102,21 @@ export async function importAssets(
         uri: destination.uri,
         filename: asset.name,
         size,
-        durationMs,
-        width,
-        height,
+        durationMs: durationMs ?? meta.durationMs ?? null,
+        width: meta.width ?? width,
+        height: meta.height ?? height,
         rating: 0,
         title: null,
         notes: null,
-        createdAt: now,
+        createdAt: meta.createdAt ?? now,
         importedAt: now,
         status: null,
         deletedAt: null,
         isPrivate: false,
         contentKey,
+        flag: 0,
+        inTray: false,
+        meta,
       });
 
       summary.imported++;

@@ -1,9 +1,9 @@
 /**
- * The thumbnail grid for all four layout styles.
+ * The thumbnail grid for all four layout styles, with optional date groups.
  *
- * `layout.ts` decides where every tile goes; this file draws only the tiles
- * near the visible part of the scroll view (one screen above, two below), so
- * thousands of videos cost no more than a few dozen mounted images.
+ * `layout.ts` decides where every tile and group title goes; this file draws
+ * only what is near the visible part of the scroll view (one screen above, two
+ * below), so thousands of videos cost no more than a few dozen mounted images.
  *
  * Presentational only - no native modules (see the rule in types.ts).
  */
@@ -20,14 +20,16 @@ import {
 import { Image } from 'expo-image';
 
 import { plural } from './confirm';
-import { fmtThumbInfo } from './format';
-import { computeLayout, visibleTiles, type Tile } from './layout';
-import { daysLeft } from './logic';
+import { fmtThumbInfos } from './format';
+import { computeSectionedLayout, visibleTiles, type Tile } from './layout';
+import { daysLeft, groupItems } from './logic';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem, ViewOptions } from './types';
 
 /** Gap between tiles, in px. */
 export const GRID_GAP = 3;
+/** Height of a group title row ("October 2026"). */
+const GROUP_HEADER = 38;
 
 export type GridMode = 'normal' | 'trash' | 'duplicates';
 
@@ -44,9 +46,14 @@ type Props = {
   selected: string[];
   /** 'trash': dimmed tiles + days left. 'duplicates': Original / Copy badges. */
   mode: GridMode;
-  /** id -> position inside its duplicate group (0 = the original). */
+  /** id -> position inside its duplicate / similar group (0 = the original). */
   dupRank: Map<string, number>;
+  /** For the "Album names" thumbnail info. */
+  albumNames: Map<number, string>;
+  /** Scroll to the group with this key (Timeline). A new `nonce` repeats the jump. */
+  jumpTo?: { key: string; nonce: number } | null;
   onPressTile: (item: VaultItem) => void;
+  onLongPressTile?: (item: VaultItem) => void;
 };
 
 export default function Grid({
@@ -59,7 +66,10 @@ export default function Grid({
   selected,
   mode,
   dupRank,
+  albumNames,
+  jumpTo,
   onPressTile,
+  onLongPressTile,
 }: Props) {
   const styles = useStyles(makeStyles);
   const scrollRef = useRef<ScrollView>(null);
@@ -71,15 +81,20 @@ export default function Grid({
 
   const step = Math.max(200, Math.round(viewport.h / 2));
 
+  // Group titles only make sense for the normal library views.
+  const groupBy = mode === 'normal' ? viewOptions.groupBy : 'none';
+  const sections = useMemo(() => groupItems(items, groupBy), [items, groupBy]);
+
   const layout = useMemo(
     () =>
-      computeLayout(items, {
+      computeSectionedLayout(sections, {
         style: viewOptions.layout,
         size: viewOptions.size,
         width: viewport.w,
         gap: GRID_GAP,
+        headerHeight: GROUP_HEADER,
       }),
-    [items, viewOptions.layout, viewOptions.size, viewport.w]
+    [sections, viewOptions.layout, viewOptions.size, viewport.w]
   );
 
   useEffect(() => {
@@ -87,6 +102,14 @@ export default function Grid({
     stepRef.current = 0;
     setScrollStep(0);
   }, [resetKey]);
+
+  useEffect(() => {
+    if (!jumpTo) return;
+    const target = layout.headers.find((h) => h.key === jumpTo.key);
+    if (target) scrollRef.current?.scrollTo({ y: Math.max(0, headerH + target.y - 60), animated: true });
+    // Only a new jump request should scroll, not every layout change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTo?.nonce]);
 
   const byId = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
 
@@ -96,6 +119,7 @@ export default function Grid({
     () => visibleTiles(layout, windowTop, windowBottom),
     [layout, windowTop, windowBottom]
   );
+  const visibleHeaders = layout.headers.filter((h) => h.y < windowBottom && h.y + GROUP_HEADER > windowTop);
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     const next = Math.floor(e.nativeEvent.contentOffset.y / step);
@@ -124,6 +148,11 @@ export default function Grid({
         empty
       ) : (
         <View style={{ height: layout.height }}>
+          {visibleHeaders.map((h) => (
+            <View key={`h-${h.key}`} style={[styles.groupHeader, { top: h.y, height: GROUP_HEADER }]}>
+              <Text style={styles.groupTitle}>{h.title}</Text>
+            </View>
+          ))}
           {visible.map((tile) => {
             const item = byId.get(tile.id);
             return item ? (
@@ -135,10 +164,12 @@ export default function Grid({
                 selectMode={selectMode}
                 isSelected={selected.includes(item.id)}
                 mode={mode}
-                copyRank={mode === 'duplicates' ? dupRank.get(item.id) : undefined}
+                copyRank={dupRank.get(item.id)}
+                albumNames={albumNames}
                 now={now}
                 styles={styles}
                 onPress={onPressTile}
+                onLongPress={onLongPressTile}
               />
             ) : null;
           })}
@@ -156,9 +187,11 @@ function TileView({
   isSelected,
   mode,
   copyRank,
+  albumNames,
   now,
   styles,
   onPress,
+  onLongPress,
 }: {
   tile: Tile;
   item: VaultItem;
@@ -167,54 +200,58 @@ function TileView({
   isSelected: boolean;
   mode: GridMode;
   copyRank: number | undefined;
+  albumNames: Map<number, string>;
   now: number;
   styles: ReturnType<typeof makeStyles>;
   onPress: (item: VaultItem) => void;
+  onLongPress?: (item: VaultItem) => void;
 }) {
-  const info = fmtThumbInfo(item, viewOptions.info);
+  const info = fmtThumbInfos(item, viewOptions.infos, albumNames);
   const inTrash = mode === 'trash';
   const bottomLeft =
     inTrash && item.deletedAt !== null
       ? { label: plural(daysLeft(item.deletedAt, now), 'day'), original: false }
-      : copyRank !== undefined
+      : mode === 'duplicates' && copyRank !== undefined
         ? { label: copyRank === 0 ? 'Original' : 'Copy', original: copyRank === 0 }
         : null;
   /** Small tiles have no room for long labels next to other badges. */
   const crowded = bottomLeft !== null || selectMode;
+  const hasTagMark = viewOptions.showKeywords && item.tagCount > 0;
 
   return (
     <TouchableOpacity
       style={[styles.cell, { left: tile.x, top: tile.y, width: tile.w, height: tile.h }]}
       activeOpacity={0.8}
-      onPress={() => onPress(item)}>
+      onPress={() => onPress(item)}
+      onLongPress={onLongPress ? () => onLongPress(item) : undefined}
+      delayLongPress={350}>
       <Image
         source={item.thumbSource}
         style={[styles.thumb, inTrash && styles.thumbDimmed]}
         contentFit="cover"
         recyclingKey={item.id}
       />
+      {item.inTray && <View style={styles.trayOutline} pointerEvents="none" />}
       {info && (
-        <Text
-          style={[styles.infoBadge, { maxWidth: tile.w * (crowded ? 0.5 : 0.9) }]}
-          numberOfLines={1}>
+        <Text style={[styles.infoBadge, { maxWidth: tile.w * (crowded ? 0.5 : 0.9) }]} numberOfLines={1}>
           {info}
         </Text>
       )}
-      {viewOptions.showKeywords && item.tagCount > 0 && (
+      {hasTagMark && (
         <View style={styles.tagBadge}>
           <Text style={styles.tagBadgeText}>#</Text>
         </View>
       )}
-      {viewOptions.showRating && item.rating > 0 && (
-        <Text style={styles.rateBadge}>{item.rating}/10</Text>
+      {viewOptions.showRating && item.flag !== 0 && (
+        <View
+          style={[styles.flagBadge, item.flag === 1 ? styles.flagPick : styles.flagReject, { right: hasTagMark ? 22 : 3 }]}>
+          <Text style={styles.flagText}>{item.flag === 1 ? '⚑' : '✕'}</Text>
+        </View>
       )}
+      {viewOptions.showRating && item.rating > 0 && <Text style={styles.rateBadge}>{item.rating}/10</Text>}
       {bottomLeft && (
         <Text
-          style={[
-            styles.leftBadge,
-            bottomLeft.original && styles.originalBadge,
-            selectMode && styles.badgeBesideCheck,
-          ]}>
+          style={[styles.leftBadge, bottomLeft.original && styles.originalBadge, selectMode && styles.badgeBesideCheck]}>
           {bottomLeft.label}
         </Text>
       )}
@@ -229,78 +266,93 @@ function TileView({
 
 const makeStyles = (p: Palette) =>
   sheet({
-  scroll: { flex: 1 },
-  content: { paddingBottom: 110 },
-  cell: { position: 'absolute', backgroundColor: p.tile, overflow: 'hidden' },
-  thumb: { width: '100%', height: '100%' },
-  thumbDimmed: { opacity: 0.55 },
+    scroll: { flex: 1 },
+    content: { paddingBottom: 110 },
+    groupHeader: { position: 'absolute', left: 0, right: 0, justifyContent: 'flex-end', paddingHorizontal: 8, paddingBottom: 6 },
+    groupTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
+    cell: { position: 'absolute', backgroundColor: p.tile, overflow: 'hidden' },
+    thumb: { width: '100%', height: '100%' },
+    thumbDimmed: { opacity: 0.55 },
+    trayOutline: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      borderWidth: 3,
+      borderColor: p.accent,
+    },
 
-  // Badges sit on top of pictures, so they stay dark in both themes.
-  infoBadge: {
-    position: 'absolute',
-    bottom: 3,
-    right: 3,
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  tagBadge: {
-    position: 'absolute',
-    top: 3,
-    right: 3,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  tagBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-  rateBadge: {
-    position: 'absolute',
-    top: 3,
-    left: 3,
-    color: '#000',
-    fontSize: 10,
-    fontWeight: '800',
-    backgroundColor: p.rating,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  leftBadge: {
-    position: 'absolute',
-    bottom: 3,
-    left: 3,
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  originalBadge: { backgroundColor: p.accent },
-  /** Select mode puts its circle in the bottom-left corner; sit next to it. */
-  badgeBesideCheck: { left: 28, bottom: 5 },
-  check: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#fff',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkOn: { backgroundColor: p.accent, borderColor: p.accent },
-  checkMark: { color: '#fff', fontSize: 12, fontWeight: '800' },
-});
+    // Badges sit on top of pictures, so they stay dark in both themes.
+    infoBadge: {
+      position: 'absolute',
+      bottom: 3,
+      right: 3,
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '700',
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    tagBadge: {
+      position: 'absolute',
+      top: 3,
+      right: 3,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      borderRadius: 4,
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+    },
+    tagBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+    flagBadge: { position: 'absolute', top: 3, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
+    flagPick: { backgroundColor: '#34c759' },
+    flagReject: { backgroundColor: '#ff453a' },
+    flagText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+    rateBadge: {
+      position: 'absolute',
+      top: 3,
+      left: 3,
+      color: '#000',
+      fontSize: 10,
+      fontWeight: '800',
+      backgroundColor: p.rating,
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    leftBadge: {
+      position: 'absolute',
+      bottom: 3,
+      left: 3,
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '700',
+      backgroundColor: 'rgba(0,0,0,0.65)',
+      paddingHorizontal: 4,
+      paddingVertical: 1,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    originalBadge: { backgroundColor: p.accent },
+    /** Select mode puts its circle in the bottom-left corner; sit next to it. */
+    badgeBesideCheck: { left: 28, bottom: 5 },
+    check: {
+      position: 'absolute',
+      bottom: 4,
+      left: 4,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: '#fff',
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkOn: { backgroundColor: p.accent, borderColor: p.accent },
+    checkMark: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  });

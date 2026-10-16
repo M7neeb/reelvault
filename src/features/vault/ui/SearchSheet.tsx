@@ -24,6 +24,7 @@ export default function SearchSheet({
   onChange,
   onClose,
   onSaveSmart,
+  onFilters,
 }: {
   value: string;
   tags: UiTag[];
@@ -31,6 +32,8 @@ export default function SearchSheet({
   onClose: () => void;
   /** Turn the current search into a Smart Filter. */
   onSaveSmart: () => void;
+  /** Open the built-in search filters (rating, date, length, size, shape...). */
+  onFilters: () => void;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -69,11 +72,16 @@ export default function SearchSheet({
               keyboardAppearance={p.scheme}
             />
 
-            {!!draft.trim() && (
-              <TouchableOpacity style={styles.saveSmart} onPress={onSaveSmart}>
-                <Text style={styles.saveSmartText}>Save as Smart Filter</Text>
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.saveSmart} onPress={onFilters}>
+                <Text style={styles.saveSmartText}>Filters…</Text>
               </TouchableOpacity>
-            )}
+              {!!draft.trim() && (
+                <TouchableOpacity style={styles.saveSmart} onPress={onSaveSmart}>
+                  <Text style={styles.saveSmartText}>Save as Smart Filter</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
             <Text style={styles.section}>Keywords</Text>
             <ScrollView contentContainerStyle={styles.cloud} keyboardShouldPersistTaps="handled">
@@ -126,6 +134,7 @@ const makeStyles = (p: Palette) =>
       paddingVertical: 11,
       color: p.text,
     },
+    actions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
     saveSmart: {
       alignSelf: 'flex-start',
       backgroundColor: p.card,

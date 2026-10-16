@@ -1,0 +1,162 @@
+/**
+ * Two small sheets used everywhere: a list of options (long-press menus) and
+ * a one-line text prompt (new album, rename...). Alert.prompt is iOS-only and
+ * absent in the browser preview, so these are drawn by hand.
+ */
+
+import { useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+import { sheet, usePalette, useStyles, type Palette } from './theme';
+
+export type OptionItem = { label: string; hint?: string; danger?: boolean; onPress: () => void };
+
+export function OptionsSheet({
+  title,
+  options,
+  onClose,
+}: {
+  title: string;
+  options: OptionItem[];
+  onClose: () => void;
+}) {
+  const styles = useStyles(makeStyles);
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.backdrop}>
+        <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={onClose} />
+        <View style={styles.card}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          {options.map((o) => (
+            <TouchableOpacity
+              key={o.label}
+              style={styles.row}
+              onPress={() => {
+                onClose();
+                o.onPress();
+              }}>
+              <Text style={[styles.rowLabel, o.danger && styles.danger]}>{o.label}</Text>
+              {!!o.hint && <Text style={styles.rowHint}>{o.hint}</Text>}
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={[styles.row, styles.cancel]} onPress={onClose}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+export function PromptSheet({
+  title,
+  message,
+  initial = '',
+  placeholder,
+  confirmLabel = 'Save',
+  onSubmit,
+  onClose,
+}: {
+  title: string;
+  message?: string;
+  initial?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  onSubmit: (value: string) => void;
+  onClose: () => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const [value, setValue] = useState(initial);
+  const ok = value.trim().length > 0;
+
+  function submit() {
+    if (!ok) return;
+    onClose();
+    onSubmit(value.trim());
+  }
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={styles.kav} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.backdropCenter}>
+          <View style={styles.dialog}>
+            <Text style={styles.dialogTitle}>{title}</Text>
+            {!!message && <Text style={styles.dialogMessage}>{message}</Text>}
+            <TextInput
+              style={styles.input}
+              value={value}
+              onChangeText={setValue}
+              placeholder={placeholder}
+              placeholderTextColor={p.textMuted}
+              autoFocus
+              onSubmitEditing={submit}
+              returnKeyType="done"
+              keyboardAppearance={p.scheme}
+            />
+            <View style={styles.buttons}>
+              <TouchableOpacity style={styles.button} onPress={onClose}>
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.button, !ok && styles.disabled]} disabled={!ok} onPress={submit}>
+                <Text style={[styles.buttonText, styles.buttonPrimary]}>{confirmLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const makeStyles = (p: Palette) =>
+  sheet({
+    kav: { flex: 1 },
+    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop, padding: 10 },
+    backdropTap: { flex: 1 },
+    card: { backgroundColor: p.panel, borderRadius: 16, paddingVertical: 6, marginBottom: 20 },
+    title: { color: p.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, paddingHorizontal: 16 },
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 18,
+      paddingVertical: 14,
+      borderTopWidth: 1,
+      borderTopColor: p.separator,
+    },
+    rowLabel: { color: p.link, fontSize: 17 },
+    rowHint: { color: p.textSecondary, fontSize: 14 },
+    danger: { color: p.dangerText },
+    cancel: { justifyContent: 'center' },
+    cancelText: { color: p.text, fontSize: 17, fontWeight: '700' },
+
+    backdropCenter: { flex: 1, justifyContent: 'center', backgroundColor: p.backdrop, padding: 32 },
+    dialog: { backgroundColor: p.panel, borderRadius: 16, padding: 18, gap: 12 },
+    dialogTitle: { color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+    dialogMessage: { color: p.textSecondary, fontSize: 13, textAlign: 'center' },
+    input: {
+      backgroundColor: p.card,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      color: p.text,
+      borderWidth: 1,
+      borderColor: p.border,
+    },
+    buttons: { flexDirection: 'row', gap: 10 },
+    button: { flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 10, backgroundColor: p.card },
+    buttonText: { color: p.link, fontSize: 16, fontWeight: '600' },
+    buttonPrimary: { fontWeight: '800' },
+    disabled: { opacity: 0.4 },
+  });

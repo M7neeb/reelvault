@@ -11,7 +11,17 @@
  */
 
 import { groupDuplicates } from './logic';
-import type { SmartFilter, ThumbSource, UiStatus, UiTag, VaultItem } from './types';
+import type {
+  SmartFilter,
+  ThumbSource,
+  UiAlbum,
+  UiFlag,
+  UiFolder,
+  UiMeta,
+  UiStatus,
+  UiTag,
+  VaultItem,
+} from './types';
 
 // Reuse the template's bundled images as stand-in thumbnails. Real pixels, so
 // the grid can be judged honestly - tile size, gaps, badge legibility.
@@ -26,22 +36,27 @@ const PLACEHOLDERS = [
 
 const SAMPLE_NAMES = [
   'clip_2026-10-12_downtown.mp4',
-  'IMG_4471_market.mp4',
+  'IMG_4471_market.MOV',
   'snaptik_7609629117616590111_v3 (1).mp4',
   'family_evening_oct.mp4',
   'Terra Formars (2016) S01E04.mp4',
   'screenrec_2026-10-11_notes.mp4',
-  'IMG_4462_lake.mp4',
+  'IMG_4462_lake.MOV',
   'birthday_cut_v2.mp4',
   'Snaptik.app_7358080437329153323.mp4',
   'clip_2026-10-08_walk.mp4',
-  'IMG_4448_sunset.mp4',
+  'IMG_4448_sunset.MOV',
   'lecture_part3.mp4',
 ];
 
 const SIZES = [45.2, 12.8, 8.5, 120.4, 7.6, 33.1, 19.7, 64.9, 1.2, 22.5, 14.3, 9.8];
-const DURATIONS = [192, 41, 15, 615, 44, 128, 76, 271, 12, 98, 63, 205];
+// screenrec (128 s) and lecture_part3 (129 s) are both 1920x1080: a "similar" pair.
+const DURATIONS = [192, 41, 15, 615, 44, 128, 76, 271, 12, 98, 63, 129];
 const RATINGS = [9, 0, 7, 10, 5, 0, 8, 6, 0, 4, 9, 0];
+const FLAGS: UiFlag[] = [1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 1, 0];
+const IN_TRAY = [false, true, false, false, false, false, true, false, false, false, false, false];
+/** Filming dates: a few days apart, several per day, across two months. */
+const FILMED_DAYS_AGO = [3, 3, 4, 6, 6, 6, 10, 14, 21, 25, 33, 40];
 
 const TAG_SETS: string[][] = [
   ['holiday'],
@@ -73,12 +88,6 @@ const STATUS_SET: (UiStatus | null)[] = [
   'plantowatch',
 ];
 
-const NAMES = Array.from(
-  new Set(TAG_SETS.flat())
-).sort((a, b) => a.localeCompare(b));
-
-export const FIXTURE_TAGS: UiTag[] = NAMES.map((name, i) => ({ id: i + 1, name }));
-
 /** A mix of landscape, portrait (phone) and square videos, so every layout style can be judged. */
 const DIMENSIONS: [number, number][] = [
   [1920, 1080],
@@ -95,6 +104,37 @@ const DIMENSIONS: [number, number][] = [
   [1920, 1080],
 ];
 
+/** Albums: Holiday 2026 (pinned) and Family in the folder "Personal", plus one private album. */
+export const FIXTURE_FOLDERS: UiFolder[] = [{ id: 1, name: 'Personal' }];
+
+export const FIXTURE_ALBUMS: UiAlbum[] = [
+  { id: 1, name: 'Holiday 2026', folderId: null, isPrivate: false, pinned: true, excludeUncategorized: false, lastUsedAt: 5 },
+  { id: 2, name: 'Family', folderId: 1, isPrivate: false, pinned: false, excludeUncategorized: false, lastUsedAt: 9 },
+  { id: 3, name: 'Clips to send', folderId: null, isPrivate: false, pinned: false, excludeUncategorized: false, lastUsedAt: 2 },
+  { id: 4, name: 'Diary', folderId: null, isPrivate: true, pinned: false, excludeUncategorized: false, lastUsedAt: 1 },
+];
+
+const ALBUM_SETS: number[][] = [[1], [], [3], [2], [], [], [1], [2], [3], [], [1], []];
+
+/** A phone-style file record for some videos: device, codec, GPS. */
+const META: (UiMeta | null)[] = [
+  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 15', location: { lat: 51.6611, lon: 7.3489 } },
+  { codec: 'HEVC', fps: 60, make: 'Apple', model: 'iPhone 15', location: { lat: 51.6618, lon: 7.3502 } },
+  { codec: 'H.264', fps: 30 },
+  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 12' },
+  { codec: 'H.264', fps: 23.98 },
+  { codec: 'H.264', fps: 60 },
+  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 15', location: { lat: 51.66, lon: 7.35 } },
+  null,
+  { codec: 'H.264', fps: 30 },
+  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 12', location: { lat: 52.52, lon: 13.405 } },
+  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 15' },
+  null,
+];
+
+const DAY = 24 * 60 * 60 * 1000;
+const BASE = Date.UTC(2026, 9, 16, 17, 30);
+
 const PUBLIC_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   id: `fixture-${i + 1}`,
   filename,
@@ -105,13 +145,21 @@ const PUBLIC_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   rating: RATINGS[i],
   width: DIMENSIONS[i][0],
   height: DIMENSIONS[i][1],
-  // A few days apart, newest first, so date ordering is visible.
+  createdAt: BASE - FILMED_DAYS_AGO[i] * DAY - i * 37 * 60 * 1000,
+  // Imported a few days apart, newest first, so date ordering is visible.
   importedAt: Date.UTC(2026, 9, 13, 18, 30) - i * 26 * 60 * 60 * 1000,
   tagCount: TAG_SETS[i].length,
   tagNames: TAG_SETS[i],
   deletedAt: null,
   status: STATUS_SET[i],
   isPrivate: false,
+  flag: FLAGS[i],
+  inTray: IN_TRAY[i],
+  albumIds: ALBUM_SETS[i],
+  title: i === 0 ? 'Downtown at dusk' : null,
+  notes: i === 0 ? 'First warm evening of October.' : null,
+  meta: META[i],
+  contentKey: null,
 }));
 
 const PRIVATE_NAMES = ['private_note_01.mp4', 'private_note_02.mp4', 'private_note_03.mp4'];
@@ -127,20 +175,29 @@ const PRIVATE_ITEMS: VaultItem[] = PRIVATE_NAMES.map((filename, i) => ({
   rating: [7, 0, 9][i],
   width: 1080,
   height: 1920,
+  createdAt: Date.UTC(2026, 9, 2, 10, 0) - i * DAY,
   importedAt: Date.UTC(2026, 9, 2, 10, 0) - i * 26 * 60 * 60 * 1000,
   tagCount: 0,
   tagNames: [],
   deletedAt: null,
   status: null,
   isPrivate: true,
+  flag: 0,
+  inTray: false,
+  albumIds: i === 0 ? [4] : [],
+  title: null,
+  notes: null,
+  meta: null,
+  contentKey: null,
 }));
 
 export const FIXTURE_ITEMS: VaultItem[] = [...PUBLIC_ITEMS, ...PRIVATE_ITEMS];
 
-/** A couple of saved searches for the sidebar. */
+/** A couple of saved searches for the sidebar (one inside the "Personal" folder). */
 export const FIXTURE_SMART_FILTERS: SmartFilter[] = [
-  { id: 1, name: 'Best of holiday', rule: { minRating: 8, tags: ['holiday'] } },
-  { id: 2, name: 'Still to watch', rule: { status: 'plantowatch' } },
+  { id: 1, name: 'Best of holiday', rule: { minRating: 8, tags: ['holiday'] }, folderId: null },
+  { id: 2, name: 'Still to watch', rule: { status: 'plantowatch' }, folderId: null },
+  { id: 3, name: 'Long portrait clips', rule: { orientation: 'portrait', minDurationSec: 30 }, folderId: 1 },
 ];
 
 /**
@@ -171,20 +228,33 @@ export const FIXTURE_DELETED: VaultItem[] = DELETED_NAMES.map((filename, i) => (
   rating: 0,
   width: 1920,
   height: 1080,
+  createdAt: Date.UTC(2026, 8, 1, 12, 0),
   importedAt: Date.UTC(2026, 8, 1, 12, 0),
   tagCount: 0,
   tagNames: [],
-  deletedAt: Date.now() - DELETED_DAYS_AGO[i] * 24 * 60 * 60 * 1000 - 60 * 60 * 1000,
+  deletedAt: Date.now() - DELETED_DAYS_AGO[i] * DAY - 60 * 60 * 1000,
   status: null,
   isPrivate: false,
+  flag: 0,
+  inTray: false,
+  albumIds: [],
+  title: null,
+  notes: null,
+  meta: null,
+  contentKey: null,
 }));
+
+const NAMES = Array.from(new Set(TAG_SETS.flat())).sort((a, b) => a.localeCompare(b));
+
+/** "holiday" is pinned, so it is listed first. */
+export const FIXTURE_TAGS: UiTag[] = [
+  ...NAMES.filter((n) => n === 'holiday'),
+  ...NAMES.filter((n) => n !== 'holiday'),
+].map((name, i) => ({ id: i + 1, name, pinned: name === 'holiday' }));
 
 /** name -> ids, the same shape the native layer hands over. */
 export const FIXTURE_TAG_MAP: Record<string, string[]> = Object.fromEntries(
-  FIXTURE_TAGS.map((t) => [
-    t.name,
-    FIXTURE_ITEMS.filter((v) => v.tagNames.includes(t.name)).map((v) => v.id),
-  ]),
+  FIXTURE_TAGS.map((t) => [t.name, FIXTURE_ITEMS.filter((v) => v.tagNames.includes(t.name)).map((v) => v.id)])
 );
 
 /** Mirrors the native FTS search closely enough to judge the search UI. */

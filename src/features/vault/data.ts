@@ -7,26 +7,51 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Appearance } from 'react-native';
+import { Alert, Appearance, Linking } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Paths } from 'expo-file-system';
 
 import { purgeExpired, purgeVideos, restore, trashVideos } from '@/features/vault/actions';
+import {
+  addToAlbums,
+  albumMembership,
+  albumNameToKeyword,
+  createAlbum,
+  createFolder,
+  deleteAlbum,
+  deleteFolder,
+  listAlbums,
+  listFolders,
+  moveSmartFilterToFolder,
+  removeFromAlbum,
+  removeFromPrivateAlbums,
+  renameFolder,
+  updateAlbum,
+} from '@/features/vault/albums';
+import { exportLibraryInfo, importLibraryInfo } from '@/features/vault/backup';
 import { contentKeyOf } from '@/features/vault/contentKey';
 import { probeDurationMs } from '@/features/vault/duration';
 import { ensureFilmstrip } from '@/features/vault/filmstrip';
+import { pickVideoFolder } from '@/features/vault/folderImport';
 import { importAssets, type ImportSummary } from '@/features/vault/import';
 import {
   addTagMany,
+  adjustDates,
+  clearTray,
   deleteSmartFilter,
   getSetting,
   listSmartFilters,
   saveSmartFilter,
+  setFlagMany,
   setPrivateMany,
   setRatingMany,
   setSetting,
   setStatusMany,
+  setTagPinned,
+  setTextMany,
+  setTrayMany,
 } from '@/features/vault/library';
+import { readVideoMeta, saveVideoMeta, videosMissingMeta } from '@/features/vault/metadata';
 import { unlockWithFaceId } from '@/features/vault/privateLock';
 import {
   listDeleted,
@@ -41,21 +66,26 @@ import {
   videosMissingDuration,
   type SortKey,
 } from '@/features/vault/repo';
-import { thumbnailUri } from '@/features/vault/storage';
 import {
-  addTagToVideo,
-  listTags,
-  removeTagFromVideo,
-  tagsForVideo,
-  type Tag,
-} from '@/features/vault/tags';
+  checkPasscode,
+  clearPasscode,
+  getSecurityState,
+  setFaceIdEnabled,
+  setFakePasscode,
+  setPasscode,
+} from '@/features/vault/security';
+import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share';
+import { thumbnailUri } from '@/features/vault/storage';
+import { addTagToVideo, listTags, removeTagFromVideo, tagsForVideo, type Tag } from '@/features/vault/tags';
 import type { Video } from '@/features/vault/types';
 
 import { gbFromBytes } from './ui/format';
-import { groupDuplicates, parseRule, parseViewOptions } from './ui/logic';
+import { FREE_SPACE_RESERVE_GB, groupDuplicates, parseRule, parseViewOptions } from './ui/logic';
 import {
   DEFAULT_VIEW_OPTIONS,
   type SmartFilter,
+  type UiAlbum,
+  type UiFolder,
   type UiTag,
   type VaultActions,
   type VaultItem,
@@ -64,13 +94,14 @@ import {
 
 const VIEW_OPTIONS_KEY = 'viewOptions';
 
-const asUiTag = (t: Tag): UiTag => ({ id: t.id, name: t.name });
+const asUiTag = (t: Tag): UiTag => ({ id: t.id, name: t.name, pinned: t.pinned === 1 });
 
 /** A DB row plus the display-only bits the UI needs. */
 function toVaultItem(
   v: Video,
   counts: Record<string, number>,
-  tagNamesById: Record<string, string[]>
+  tagNamesById: Record<string, string[]>,
+  membership: Record<string, number[]>
 ): VaultItem {
   return {
     id: v.id,
@@ -82,12 +113,20 @@ function toVaultItem(
     rating: v.rating,
     width: v.width ?? null,
     height: v.height ?? null,
+    createdAt: v.createdAt,
     importedAt: v.importedAt,
     tagCount: counts[v.id] ?? 0,
     tagNames: tagNamesById[v.id] ?? [],
     deletedAt: v.deletedAt,
     status: v.status,
     isPrivate: v.isPrivate,
+    flag: v.flag,
+    inTray: v.inTray,
+    albumIds: membership[v.id] ?? [],
+    title: v.title,
+    notes: v.notes,
+    meta: v.meta,
+    contentKey: v.contentKey,
   };
 }
 
@@ -127,6 +166,8 @@ export type VaultData = {
   deletedItems: VaultItem[];
   duplicateGroups: string[][];
   smartFilters: SmartFilter[];
+  albums: UiAlbum[];
+  folders: UiFolder[];
   viewOptions: ViewOptions;
   allTags: UiTag[];
   tagMap: Record<string, string[]>;
@@ -141,8 +182,11 @@ export function useVaultData(): VaultData {
   const [deleted, setDeleted] = useState<Video[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [tagMap, setTagMap] = useState<Record<string, string[]>>({});
+  const [membership, setMembership] = useState<Record<string, number[]>>({});
   const [tags, setTags] = useState<Tag[]>([]);
   const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
+  const [albums, setAlbums] = useState<UiAlbum[]>([]);
+  const [folders, setFolders] = useState<UiFolder[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
@@ -152,20 +196,38 @@ export function useVaultData(): VaultData {
   sortRef.current = viewOptions.sort;
 
   const refresh = useCallback(async () => {
-    const [list, trash, map, index, tagList, filters] = await Promise.all([
+    const [list, trash, map, index, tagList, filters, albumRows, folderRows, members] = await Promise.all([
       listVideos(sortRef.current),
       listDeleted(),
       tagCounts(),
       tagIndex(),
       listTags(),
       listSmartFilters(),
+      listAlbums(),
+      listFolders(),
+      albumMembership(),
     ]);
     setVideos(list);
     setDeleted(trash);
     setCounts(map);
     setTagMap(index);
     setTags(tagList);
-    setSmartFilters(filters.map((f) => ({ id: f.id, name: f.name, rule: parseRule(f.rule_json) })));
+    setSmartFilters(
+      filters.map((f) => ({ id: f.id, name: f.name, rule: parseRule(f.rule_json), folderId: f.folder_id }))
+    );
+    setAlbums(
+      albumRows.map((a) => ({
+        id: a.id,
+        name: a.name,
+        folderId: a.folder_id,
+        isPrivate: a.is_private === 1,
+        pinned: a.pinned === 1,
+        excludeUncategorized: a.exclude_uncategorized === 1,
+        lastUsedAt: a.last_used_at,
+      }))
+    );
+    setFolders(folderRows.map((f) => ({ id: f.id, name: f.name })));
+    setMembership(members);
     setFreeGb(readFreeGb());
   }, []);
 
@@ -185,7 +247,7 @@ export function useVaultData(): VaultData {
   }, [viewOptions.sort, refresh]);
 
   // On start: empty what has been in Recently Deleted for 30 days, then backfill
-  // durations and duplicate fingerprints for rows imported before those existed.
+  // durations, duplicate fingerprints and file metadata for older rows.
   useEffect(() => {
     (async () => {
       const purged = await purgeExpired();
@@ -205,7 +267,11 @@ export function useVaultData(): VaultData {
         if (key) await setContentKey(v.id, key);
       }
 
-      if (purged || missing.length || unkeyed.length) await refresh();
+      const unread = await videosMissingMeta();
+      if (unread.length) console.log(`[META] reading ${unread.length} files`);
+      for (const v of unread) await saveVideoMeta(v.id, (await readVideoMeta(v.uri)) ?? {});
+
+      if (purged || missing.length || unkeyed.length || unread.length) await refresh();
     })().catch((e) => console.log(`[VAULT] start-up tasks failed: ${String(e)}`));
   }, [refresh]);
 
@@ -219,12 +285,12 @@ export function useVaultData(): VaultData {
   }, [tagMap]);
 
   const items = useMemo(
-    () => videos.map((v) => toVaultItem(v, counts, tagNamesById)),
-    [videos, counts, tagNamesById]
+    () => videos.map((v) => toVaultItem(v, counts, tagNamesById, membership)),
+    [videos, counts, tagNamesById, membership]
   );
   const deletedItems = useMemo(
-    () => deleted.map((v) => toVaultItem(v, counts, tagNamesById)),
-    [deleted, counts, tagNamesById]
+    () => deleted.map((v) => toVaultItem(v, counts, tagNamesById, membership)),
+    [deleted, counts, tagNamesById, membership]
   );
   const duplicateGroups = useMemo(() => groupDuplicates(videos), [videos]);
 
@@ -237,6 +303,19 @@ export function useVaultData(): VaultData {
     [byId]
   );
 
+  const runImport = useCallback(
+    async (assets: { uri: string; name: string; size?: number }[], keepOriginals: boolean) => {
+      const summary = await importAssets(
+        assets.map((a) => ({ uri: a.uri, name: a.name, size: a.size })),
+        (done, total) => setStatus(`Importing ${Math.min(done + 1, total)} of ${total}…`),
+        { keepOriginals }
+      );
+      await refresh();
+      setStatus(describeImport(summary, readFreeGb()));
+    },
+    [refresh]
+  );
+
   const onImport = useCallback(async () => {
     setBusy(true);
     try {
@@ -246,42 +325,73 @@ export function useVaultData(): VaultData {
         copyToCacheDirectory: true,
       });
       if (picked.canceled || !picked.assets?.length) return;
-      const summary = await importAssets(picked.assets, (done, total) =>
-        setStatus(`Importing ${Math.min(done + 1, total)} of ${total}…`)
-      );
-      await refresh();
-      setStatus(describeImport(summary, readFreeGb()));
+      await runImport(picked.assets, false);
     } catch (e) {
       console.log(`[VAULT] import error: ${String(e)}`);
       setStatus('Import failed - check the dev log');
     } finally {
       setBusy(false);
     }
-  }, [refresh]);
+  }, [runImport]);
+
+  /** Import Folder copies, so the whole folder has to fit next to the originals. */
+  const onImportFolder = useCallback(async () => {
+    setBusy(true);
+    try {
+      const folder = await pickVideoFolder();
+      if (!folder) return;
+      if (!folder.videos.length) {
+        Alert.alert('No videos found', `"${folder.name}" has no video files.`);
+        return;
+      }
+      const totalGb = folder.videos.reduce((s, v) => s + v.size, 0) / 1024 ** 3;
+      const free = readFreeGb();
+      if (free !== null && totalGb > free - FREE_SPACE_RESERVE_GB) {
+        Alert.alert(
+          'Not enough free space',
+          `"${folder.name}" holds ${totalGb.toFixed(1)} GB of video, but only ${free} GB is free. ` +
+            'Import a smaller folder, or pick the videos with Import instead (that moves them).'
+        );
+        return;
+      }
+      await runImport(folder.videos, true);
+    } catch (e) {
+      console.log(`[VAULT] folder import error: ${String(e)}`);
+      setStatus('Folder import failed - check the dev log');
+    } finally {
+      setBusy(false);
+    }
+  }, [runImport]);
+
+  /** Run a write, then reload everything. */
+  const andRefresh = useCallback(
+    <A extends unknown[]>(job: (...args: A) => Promise<unknown>) =>
+      async (...args: A) => {
+        await job(...args);
+        await refresh();
+      },
+    [refresh]
+  );
 
   const actions = useMemo<VaultActions>(
     () => ({
       onImport: () => {
         void onImport();
       },
-      search: async (q) => (await searchVideos(q)).map((v) => toVaultItem(v, counts, tagNamesById)),
+      onImportFolder: () => {
+        void onImportFolder();
+      },
+      search: async (q) =>
+        (await searchVideos(q)).map((v) => toVaultItem(v, counts, tagNamesById, membership)),
       loadTags: async (id) => (await tagsForVideo(id)).map(asUiTag),
       loadFrames: async (item) => {
         const v = byId(item.id);
         return v ? ensureFilmstrip(v) : [];
       },
-      onRate: async (id, rating) => {
-        await saveRating(id, rating);
-        await refresh();
-      },
-      onAddTag: async (id, name) => {
-        await addTagToVideo(id, name);
-        await refresh();
-      },
-      onRemoveTag: async (id, tagId) => {
-        await removeTagFromVideo(id, tagId);
-        await refresh();
-      },
+      onRate: andRefresh((id: string, rating: number) => saveRating(id, rating)),
+      onAddTag: andRefresh((id: string, name: string) => addTagToVideo(id, name)),
+      onRemoveTag: andRefresh((id: string, tagId: number) => removeTagFromVideo(id, tagId)),
+      onPinTag: andRefresh(setTagPinned),
       onDeleteOne: async (item) => {
         await trashVideos(resolve([item]));
         await refresh();
@@ -298,38 +408,87 @@ export function useVaultData(): VaultData {
         await purgeVideos(resolve(list));
         await refresh();
       },
-      onRateMany: async (ids, rating) => {
-        await setRatingMany(ids, rating);
-        await refresh();
-      },
-      onAddTagMany: async (ids, name) => {
-        await addTagMany(ids, name);
-        await refresh();
-      },
-      onSetStatus: async (ids, next) => {
-        await setStatusMany(ids, next);
-        await refresh();
-      },
+      onRateMany: andRefresh(setRatingMany),
+      onAddTagMany: andRefresh(addTagMany),
+      onSetStatus: andRefresh(setStatusMany),
+      onSetFlag: andRefresh(setFlagMany),
+      onSetTray: andRefresh(setTrayMany),
+      onClearTray: andRefresh(clearTray),
+      onSetText: andRefresh(setTextMany),
+      onAdjustDates: andRefresh(adjustDates),
       onViewOptionsChange: async (next) => {
         setViewOptions(next);
         applyTheme(next.theme);
         await setSetting(VIEW_OPTIONS_KEY, JSON.stringify(next));
       },
-      onSetPrivate: async (ids, isPrivate) => {
+      onSetPrivate: andRefresh(async (ids: string[], isPrivate: boolean) => {
         await setPrivateMany(ids, isPrivate);
-        await refresh();
-      },
+        if (!isPrivate) await removeFromPrivateAlbums(ids);
+      }),
       unlockPrivate: unlockWithFaceId,
-      onSaveSmartFilter: async (f) => {
-        await saveSmartFilter({ id: f.id, name: f.name, ruleJson: JSON.stringify(f.rule) });
+      onSaveSmartFilter: andRefresh((f: { id?: number; name: string; rule: unknown }) =>
+        saveSmartFilter({ id: f.id, name: f.name, ruleJson: JSON.stringify(f.rule) })
+      ),
+      onDeleteSmartFilter: andRefresh(deleteSmartFilter),
+      onMoveSmartFilter: andRefresh(moveSmartFilterToFolder),
+      onCreateAlbum: async (name, opts) => {
+        const id = await createAlbum(name, opts);
+        await refresh();
+        return id;
+      },
+      onUpdateAlbum: andRefresh(updateAlbum),
+      onDeleteAlbum: andRefresh(deleteAlbum),
+      onAddToAlbums: andRefresh(addToAlbums),
+      onRemoveFromAlbum: andRefresh(removeFromAlbum),
+      onAlbumNameToKeyword: andRefresh(albumNameToKeyword),
+      onCreateFolder: async (name) => {
+        const id = await createFolder(name);
+        await refresh();
+        return id;
+      },
+      onRenameFolder: andRefresh(renameFolder),
+      onDeleteFolder: andRefresh(deleteFolder),
+      onShare: async (item) => {
+        const v = byId(item.id);
+        if (v) await shareFile(v.uri);
+      },
+      onExtractFrame: async (item, timeMs) => {
+        const v = byId(item.id);
+        if (v) await extractFrame(v, timeMs);
+      },
+      onDuplicate: async (item) => {
+        const v = byId(item.id);
+        if (v) await duplicateVideo(v);
         await refresh();
       },
-      onDeleteSmartFilter: async (id) => {
-        await deleteSmartFilter(id);
-        await refresh();
+      onOpenMap: (lat, lon, label) => {
+        const q = encodeURIComponent(label);
+        Linking.openURL(`https://maps.apple.com/?ll=${lat},${lon}&q=${q}`).catch((e) =>
+          console.log(`[MAP] could not open: ${String(e)}`)
+        );
       },
+      onExportBackup: async () => {
+        const n = await exportLibraryInfo();
+        setStatus(`Library info for ${n} videos exported`);
+      },
+      onImportBackup: async () => {
+        try {
+          const res = await importLibraryInfo();
+          if (!res) return;
+          await refresh();
+          setStatus(`Library info restored for ${res.matched} of ${res.total} videos`);
+        } catch (e) {
+          Alert.alert('Could not import', e instanceof Error ? e.message : String(e));
+        }
+      },
+      getSecurity: getSecurityState,
+      setPasscode,
+      clearPasscode,
+      setFakePasscode,
+      setFaceId: setFaceIdEnabled,
+      checkPasscode,
     }),
-    [onImport, refresh, counts, tagNamesById, byId, resolve]
+    [onImport, onImportFolder, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );
 
   return {
@@ -337,6 +496,8 @@ export function useVaultData(): VaultData {
     deletedItems,
     duplicateGroups,
     smartFilters,
+    albums,
+    folders,
     viewOptions,
     allTags: useMemo(() => tags.map(asUiTag), [tags]),
     tagMap,

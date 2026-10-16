@@ -21,6 +21,8 @@ export default function VaultRoute() {
       deletedItems={vault.deletedItems}
       duplicateGroups={vault.duplicateGroups}
       smartFilters={vault.smartFilters}
+      albums={vault.albums}
+      folders={vault.folders}
       viewOptions={vault.viewOptions}
       freeGb={vault.freeGb}
       busy={vault.busy}
