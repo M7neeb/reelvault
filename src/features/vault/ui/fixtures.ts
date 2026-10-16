@@ -79,7 +79,23 @@ const NAMES = Array.from(
 
 export const FIXTURE_TAGS: UiTag[] = NAMES.map((name, i) => ({ id: i + 1, name }));
 
-export const FIXTURE_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
+/** A mix of landscape, portrait (phone) and square videos, so every layout style can be judged. */
+const DIMENSIONS: [number, number][] = [
+  [1920, 1080],
+  [1080, 1920],
+  [1080, 1920],
+  [1920, 1080],
+  [1080, 1080],
+  [1920, 1080],
+  [1080, 1920],
+  [1920, 1080],
+  [720, 1280],
+  [1920, 1080],
+  [1080, 1350],
+  [1920, 1080],
+];
+
+const PUBLIC_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   id: `fixture-${i + 1}`,
   filename,
   uri: '',
@@ -87,15 +103,39 @@ export const FIXTURE_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   sizeBytes: Math.round(SIZES[i] * 1024 * 1024),
   durationMs: DURATIONS[i] * 1000,
   rating: RATINGS[i],
-  width: 1920,
-  height: 1080,
+  width: DIMENSIONS[i][0],
+  height: DIMENSIONS[i][1],
   // A few days apart, newest first, so date ordering is visible.
   importedAt: Date.UTC(2026, 9, 13, 18, 30) - i * 26 * 60 * 60 * 1000,
   tagCount: TAG_SETS[i].length,
   tagNames: TAG_SETS[i],
   deletedAt: null,
   status: STATUS_SET[i],
+  isPrivate: false,
 }));
+
+const PRIVATE_NAMES = ['private_note_01.mp4', 'private_note_02.mp4', 'private_note_03.mp4'];
+
+/** Three videos in the Private album: invisible everywhere until it is unlocked. */
+const PRIVATE_ITEMS: VaultItem[] = PRIVATE_NAMES.map((filename, i) => ({
+  id: `fixture-private-${i + 1}`,
+  filename,
+  uri: '',
+  thumbSource: PLACEHOLDERS[(i + 4) % PLACEHOLDERS.length],
+  sizeBytes: Math.round([28.1, 4.4, 61.9][i] * 1024 * 1024),
+  durationMs: [88, 21, 302][i] * 1000,
+  rating: [7, 0, 9][i],
+  width: 1080,
+  height: 1920,
+  importedAt: Date.UTC(2026, 9, 2, 10, 0) - i * 26 * 60 * 60 * 1000,
+  tagCount: 0,
+  tagNames: [],
+  deletedAt: null,
+  status: null,
+  isPrivate: true,
+}));
+
+export const FIXTURE_ITEMS: VaultItem[] = [...PUBLIC_ITEMS, ...PRIVATE_ITEMS];
 
 /** A couple of saved searches for the sidebar. */
 export const FIXTURE_SMART_FILTERS: SmartFilter[] = [
@@ -136,6 +176,7 @@ export const FIXTURE_DELETED: VaultItem[] = DELETED_NAMES.map((filename, i) => (
   tagNames: [],
   deletedAt: Date.now() - DELETED_DAYS_AGO[i] * 24 * 60 * 60 * 1000 - 60 * 60 * 1000,
   status: null,
+  isPrivate: false,
 }));
 
 /** name -> ids, the same shape the native layer hands over. */

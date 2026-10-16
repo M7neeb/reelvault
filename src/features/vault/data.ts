@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Appearance } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Paths } from 'expo-file-system';
 
@@ -21,10 +22,12 @@ import {
   getSetting,
   listSmartFilters,
   saveSmartFilter,
+  setPrivateMany,
   setRatingMany,
   setSetting,
   setStatusMany,
 } from '@/features/vault/library';
+import { unlockWithFaceId } from '@/features/vault/privateLock';
 import {
   listDeleted,
   listVideos,
@@ -84,7 +87,20 @@ function toVaultItem(
     tagNames: tagNamesById[v.id] ?? [],
     deletedAt: v.deletedAt,
     status: v.status,
+    isPrivate: v.isPrivate,
   };
+}
+
+/**
+ * The phone's own controls (alerts, keyboards, switches) follow the chosen
+ * theme too. 'system' hands the decision back to iOS.
+ */
+function applyTheme(theme: ViewOptions['theme']): void {
+  try {
+    Appearance.setColorScheme(theme === 'system' ? 'unspecified' : theme);
+  } catch (e) {
+    console.log(`[VIEW] theme not applied: ${String(e)}`);
+  }
 }
 
 /** One readable line for the header after an import. */
@@ -156,7 +172,11 @@ export function useVaultData(): VaultData {
   // Saved view options first, so the first list already uses the saved sort.
   useEffect(() => {
     getSetting(VIEW_OPTIONS_KEY)
-      .then((json) => setViewOptions(parseViewOptions(json, DEFAULT_VIEW_OPTIONS)))
+      .then((json) => {
+        const saved = parseViewOptions(json, DEFAULT_VIEW_OPTIONS);
+        applyTheme(saved.theme);
+        setViewOptions(saved);
+      })
       .catch((e) => console.log(`[VAULT] view options failed: ${String(e)}`));
   }, []);
 
@@ -292,8 +312,14 @@ export function useVaultData(): VaultData {
       },
       onViewOptionsChange: async (next) => {
         setViewOptions(next);
+        applyTheme(next.theme);
         await setSetting(VIEW_OPTIONS_KEY, JSON.stringify(next));
       },
+      onSetPrivate: async (ids, isPrivate) => {
+        await setPrivateMany(ids, isPrivate);
+        await refresh();
+      },
+      unlockPrivate: unlockWithFaceId,
       onSaveSmartFilter: async (f) => {
         await saveSmartFilter({ id: f.id, name: f.name, ruleJson: JSON.stringify(f.rule) });
         await refresh();

@@ -3,7 +3,16 @@
  * the native layer and the tests can all use the same code.
  */
 
-import type { SmartRule, UiStatus, VaultSort, ViewOptions } from './types';
+import type {
+  LayoutStyle,
+  SmartRule,
+  ThemeMode,
+  ThumbInfo,
+  ThumbSize,
+  UiStatus,
+  VaultSort,
+  ViewOptions,
+} from './types';
 
 /* ------------------------------------------------------------ smart filters */
 
@@ -65,9 +74,33 @@ export function parseRule(json: string): SmartRule {
 
 /* ------------------------------------------------------------- view options */
 
-const SORT_KEYS: VaultSort[] = ['recent', 'oldest', 'rating', 'name', 'size'];
+const SORT_KEYS: VaultSort[] = ['recent', 'oldest', 'rating', 'name', 'size', 'duration'];
+const LAYOUT_KEYS: LayoutStyle[] = ['grid', 'natural', 'waterfall', 'mosaic'];
+const SIZE_KEYS: ThumbSize[] = ['small', 'medium', 'large', 'xlarge', 'fit'];
+const INFO_KEYS: ThumbInfo[] = [
+  'duration',
+  'size',
+  'date',
+  'dimensions',
+  'format',
+  'filename',
+  'keywords',
+  'none',
+];
+const THEME_KEYS: ThemeMode[] = ['system', 'light', 'dark'];
 
-/** Saved view options, with anything missing or invalid replaced by the default. */
+/** The thumbnail sizes the first version saved as a column count. */
+const LEGACY_COLUMNS: Record<number, ThumbSize> = { 3: 'large', 4: 'medium', 5: 'small' };
+
+function oneOf<T extends string>(value: unknown, allowed: T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+/**
+ * Saved view options, with anything missing or invalid replaced by the default.
+ * Also reads the older format (`columns`, `showDuration`), so nobody loses
+ * their settings after an update.
+ */
 export function parseViewOptions(json: string | null, defaults: ViewOptions): ViewOptions {
   if (!json) return defaults;
   let raw: unknown;
@@ -79,13 +112,28 @@ export function parseViewOptions(json: string | null, defaults: ViewOptions): Vi
   if (!raw || typeof raw !== 'object') return defaults;
   const r = raw as Record<string, unknown>;
   const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
+
+  const legacySize = typeof r.columns === 'number' ? LEGACY_COLUMNS[r.columns] : undefined;
+  const legacyInfo = r.showDuration === false ? 'none' : undefined;
+
   return {
-    columns: r.columns === 3 || r.columns === 4 || r.columns === 5 ? r.columns : defaults.columns,
-    sort: SORT_KEYS.includes(r.sort as VaultSort) ? (r.sort as VaultSort) : defaults.sort,
+    layout: oneOf(r.layout, LAYOUT_KEYS, defaults.layout),
+    size: oneOf(r.size, SIZE_KEYS, legacySize ?? defaults.size),
+    sort: oneOf(r.sort, SORT_KEYS, defaults.sort),
+    info: oneOf(r.info, INFO_KEYS, legacyInfo ?? defaults.info),
     showRating: bool(r.showRating, defaults.showRating),
     showKeywords: bool(r.showKeywords, defaults.showKeywords),
-    showDuration: bool(r.showDuration, defaults.showDuration),
+    theme: oneOf(r.theme, THEME_KEYS, defaults.theme),
   };
+}
+
+/**
+ * Which colour set to use. "System" follows the phone; when the phone does not
+ * say (web, older devices) the app keeps its original dark look.
+ */
+export function resolveScheme(mode: ThemeMode, system: string | null | undefined): 'light' | 'dark' {
+  if (mode === 'light' || mode === 'dark') return mode;
+  return system === 'light' ? 'light' : 'dark';
 }
 
 /* ---------------------------------------------------------- recently deleted */

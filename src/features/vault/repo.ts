@@ -75,7 +75,7 @@ export async function insertVideo(v: Video): Promise<void> {
   );
 }
 
-export type SortKey = 'recent' | 'oldest' | 'rating' | 'name' | 'size';
+export type SortKey = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
 
 const ORDER_BY: Record<SortKey, string> = {
   recent: 'imported_at DESC',
@@ -83,6 +83,8 @@ const ORDER_BY: Record<SortKey, string> = {
   rating: 'rating DESC, imported_at DESC',
   name: 'filename COLLATE NOCASE ASC',
   size: 'size DESC',
+  // Longest first; videos whose length is still unknown go last.
+  duration: 'duration_ms IS NULL, duration_ms DESC',
 };
 
 export async function listVideos(sort: SortKey = 'recent'): Promise<Video[]> {

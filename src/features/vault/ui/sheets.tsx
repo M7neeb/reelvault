@@ -9,7 +9,6 @@ import {
   Modal,
   Platform,
   ScrollView,
-  StyleSheet,
   Switch,
   Text,
   TextInput,
@@ -18,9 +17,14 @@ import {
 } from 'react-native';
 
 import { matchesRule } from './logic';
+import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
+  LAYOUTS,
   SORTS,
   STATUSES,
+  THEMES,
+  THUMB_INFOS,
+  THUMB_SIZES,
   type SmartRule,
   type UiStatus,
   type UiTag,
@@ -42,11 +46,10 @@ function SheetFrame({
   action?: { label: string; onPress: () => void; disabled?: boolean };
   children: ReactNode;
 }) {
+  const styles = useStyles(makeStyles);
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.kav}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={styles.kav} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.backdrop}>
           <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={onClose} />
           <View style={styles.sheet}>
@@ -79,6 +82,7 @@ function SheetFrame({
 }
 
 function Section({ label, children }: { label: string; children: ReactNode }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>{label}</Text>
@@ -87,11 +91,51 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Chip({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) {
+function Chip({
+  label,
+  on,
+  danger,
+  onPress,
+}: {
+  label: string;
+  on?: boolean;
+  danger?: boolean;
+  onPress: () => void;
+}) {
+  const styles = useStyles(makeStyles);
   return (
     <TouchableOpacity style={[styles.chip, on && styles.chipOn]} onPress={onPress}>
-      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+      <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>
+        {label}
+      </Text>
     </TouchableOpacity>
+  );
+}
+
+/** A row of options where exactly one is chosen. */
+function Segment<K extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { key: K; label: string }[];
+  value: K;
+  onChange: (key: K) => void;
+}) {
+  const styles = useStyles(makeStyles);
+  return (
+    <View style={styles.segment}>
+      {options.map((o) => (
+        <TouchableOpacity
+          key={o.key}
+          style={[styles.segmentItem, value === o.key && styles.segmentOn]}
+          onPress={() => onChange(o.key)}>
+          <Text style={[styles.segmentText, value === o.key && styles.chipTextOn]} numberOfLines={1}>
+            {o.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
   );
 }
 
@@ -104,13 +148,15 @@ function ToggleRow({
   value: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: '#3a3a3e', true: '#0A84FF' }}
+        trackColor={{ false: p.switchOff, true: p.accent }}
         thumbColor="#fff"
       />
     </View>
@@ -122,18 +168,25 @@ function ToggleRow({
 export function BulkEditSheet({
   count,
   tags,
+  privateAction,
   onRate,
   onAddTag,
   onStatus,
+  onPrivate,
   onClose,
 }: {
   count: number;
   tags: UiTag[];
+  /** 'add' outside the Private album, 'remove' inside it. */
+  privateAction: 'add' | 'remove';
   onRate: (rating: number) => Promise<void>;
   onAddTag: (name: string) => Promise<void>;
   onStatus: (status: UiStatus | null) => Promise<void>;
+  onPrivate: () => Promise<void>;
   onClose: () => void;
 }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
   const [draft, setDraft] = useState('');
   const [done, setDone] = useState('');
 
@@ -188,12 +241,13 @@ export function BulkEditSheet({
           <TextInput
             style={styles.input}
             placeholder="new keyword…"
-            placeholderTextColor="#5b6472"
+            placeholderTextColor={p.textMuted}
             value={draft}
             onChangeText={setDraft}
             onSubmitEditing={() => addTag(draft)}
             autoCapitalize="none"
             returnKeyType="done"
+            keyboardAppearance={p.scheme}
           />
           <TouchableOpacity style={styles.primary} onPress={() => addTag(draft)}>
             <Text style={styles.primaryText}>Add</Text>
@@ -205,17 +259,23 @@ export function BulkEditSheet({
           ))}
         </View>
       </Section>
+
+      <Section label="Private">
+        <Chip
+          label={privateAction === 'add' ? 'Move to Private' : 'Remove from Private'}
+          onPress={() => void run(privateAction === 'add' ? 'Moved to Private' : 'Removed from Private', onPrivate())}
+        />
+        <Text style={styles.hint}>
+          {privateAction === 'add'
+            ? 'Private videos disappear from every other view and only show after Face ID.'
+            : 'They go back to the normal library.'}
+        </Text>
+      </Section>
     </SheetFrame>
   );
 }
 
 /* ------------------------------------------------------------- view options */
-
-const SIZES: { columns: ViewOptions['columns']; label: string }[] = [
-  { columns: 3, label: 'Large' },
-  { columns: 4, label: 'Medium' },
-  { columns: 5, label: 'Small' },
-];
 
 export function ViewOptionsSheet({
   options,
@@ -227,20 +287,18 @@ export function ViewOptionsSheet({
   onClose: () => void;
 }) {
   const set = (patch: Partial<ViewOptions>) => onChange({ ...options, ...patch });
+  const styles = useStyles(makeStyles);
 
   return (
     <SheetFrame title="View Options" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
+      <Section label="Layout style">
+        <Segment options={LAYOUTS} value={options.layout} onChange={(layout) => set({ layout })} />
+      </Section>
+
       <Section label="Thumbnail size">
-        <View style={styles.segment}>
-          {SIZES.map((s) => (
-            <TouchableOpacity
-              key={s.columns}
-              style={[styles.segmentItem, options.columns === s.columns && styles.segmentOn]}
-              onPress={() => set({ columns: s.columns })}>
-              <Text style={[styles.segmentText, options.columns === s.columns && styles.chipTextOn]}>
-                {s.label}
-              </Text>
-            </TouchableOpacity>
+        <View style={styles.wrap}>
+          {THUMB_SIZES.map((s) => (
+            <Chip key={s.key} label={s.label} on={options.size === s.key} onPress={() => set({ size: s.key })} />
           ))}
         </View>
       </Section>
@@ -253,6 +311,14 @@ export function ViewOptionsSheet({
         </View>
       </Section>
 
+      <Section label="Thumbnail info">
+        <View style={styles.wrap}>
+          {THUMB_INFOS.map((s) => (
+            <Chip key={s.key} label={s.label} on={options.info === s.key} onPress={() => set({ info: s.key })} />
+          ))}
+        </View>
+      </Section>
+
       <Section label="Show on thumbnails">
         <ToggleRow label="Rating" value={options.showRating} onChange={(v) => set({ showRating: v })} />
         <ToggleRow
@@ -260,11 +326,10 @@ export function ViewOptionsSheet({
           value={options.showKeywords}
           onChange={(v) => set({ showKeywords: v })}
         />
-        <ToggleRow
-          label="Duration"
-          value={options.showDuration}
-          onChange={(v) => set({ showDuration: v })}
-        />
+      </Section>
+
+      <Section label="Appearance">
+        <Segment options={THEMES} value={options.theme} onChange={(theme) => set({ theme })} />
       </Section>
     </SheetFrame>
   );
@@ -291,6 +356,8 @@ export function SmartFilterSheet({
   onDelete?: (id: number) => Promise<void>;
   onClose: () => void;
 }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
   const [name, setName] = useState(initial.name);
   const [rule, setRule] = useState<SmartRule>(initial.rule);
 
@@ -322,9 +389,10 @@ export function SmartFilterSheet({
         <TextInput
           style={styles.input}
           placeholder="e.g. Best travel clips"
-          placeholderTextColor="#5b6472"
+          placeholderTextColor={p.textMuted}
           value={name}
           onChangeText={setName}
+          keyboardAppearance={p.scheme}
         />
       </Section>
 
@@ -374,10 +442,11 @@ export function SmartFilterSheet({
         <TextInput
           style={styles.input}
           placeholder="part of the filename (optional)"
-          placeholderTextColor="#5b6472"
+          placeholderTextColor={p.textMuted}
           value={rule.text ?? ''}
           onChangeText={(t) => set({ text: t || undefined })}
           autoCapitalize="none"
+          keyboardAppearance={p.scheme}
         />
       </Section>
 
@@ -404,94 +473,97 @@ export function newSmartFilterDraft(query: string): { name: string; rule: SmartR
 
 /* -------------------------------------------------------------------- styles */
 
-const styles = StyleSheet.create({
-  kav: { flex: 1 },
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  backdropTap: { flex: 1 },
-  sheet: {
-    backgroundColor: '#151517',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 16,
-    maxHeight: '85%',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    gap: 10,
-  },
-  title: { flex: 1, color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center' },
-  circle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(120,120,128,0.28)',
-  },
-  circleGhost: { width: 34, height: 34 },
-  circleIcon: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  primary: { backgroundColor: '#0A84FF', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999 },
-  primaryText: { color: '#fff', fontWeight: '700' },
-  disabled: { opacity: 0.4 },
-  body: { paddingHorizontal: 16, paddingBottom: 36, gap: 18 },
-  done: { color: '#4aa8ff', fontSize: 13, fontWeight: '600' },
+const makeStyles = (p: Palette) =>
+  sheet({
+    kav: { flex: 1 },
+    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop },
+    backdropTap: { flex: 1 },
+    sheet: {
+      backgroundColor: p.panel,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingTop: 16,
+      maxHeight: '85%',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+      gap: 10,
+    },
+    title: { flex: 1, color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+    circle: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: p.circle,
+    },
+    circleGhost: { width: 34, height: 34 },
+    circleIcon: { color: p.icon, fontSize: 15, fontWeight: '700' },
+    primary: { backgroundColor: p.accent, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999 },
+    primaryText: { color: '#fff', fontWeight: '700' },
+    disabled: { opacity: 0.4 },
+    body: { paddingHorizontal: 16, paddingBottom: 36, gap: 18 },
+    done: { color: p.link, fontSize: 13, fontWeight: '600' },
+    hint: { color: p.textSecondary, fontSize: 12 },
 
-  section: { gap: 10 },
-  sectionLabel: { color: '#8e939b', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    section: { gap: 10 },
+    sectionLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+    wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
-  chip: {
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: '#2c2c30',
-    backgroundColor: '#1f1f22',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  chipOn: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
-  chipText: { color: '#e7e9ec', fontSize: 13, fontWeight: '600' },
-  chipTextOn: { color: '#fff' },
+    chip: {
+      alignSelf: 'flex-start',
+      borderWidth: 1,
+      borderColor: p.border,
+      backgroundColor: p.card,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
+    chipOn: { backgroundColor: p.accent, borderColor: p.accent },
+    chipText: { color: p.textSoft, fontSize: 13, fontWeight: '600' },
+    chipTextOn: { color: '#fff' },
+    chipTextDanger: { color: p.dangerText },
 
-  ratingRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  ratingBtn: {
-    width: 30,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: '#1f1f22',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ratingText: { color: '#F5A623', fontWeight: '800', fontSize: 14 },
+    ratingRow: { flexDirection: 'row', justifyContent: 'space-between' },
+    ratingBtn: {
+      width: 30,
+      height: 34,
+      borderRadius: 8,
+      backgroundColor: p.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ratingText: { color: p.rating, fontWeight: '800', fontSize: 14 },
 
-  inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  input: {
-    flex: 1,
-    backgroundColor: '#1f1f22',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    color: '#fff',
-  },
+    inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+    input: {
+      flex: 1,
+      backgroundColor: p.card,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      color: p.text,
+    },
 
-  segment: { flexDirection: 'row', backgroundColor: '#1f1f22', borderRadius: 10, padding: 3 },
-  segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  segmentOn: { backgroundColor: '#0A84FF' },
-  segmentText: { color: '#e7e9ec', fontWeight: '600', fontSize: 13 },
+    segment: { flexDirection: 'row', backgroundColor: p.card, borderRadius: 10, padding: 3 },
+    segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+    segmentOn: { backgroundColor: p.accent },
+    segmentText: { color: p.textSoft, fontWeight: '600', fontSize: 13 },
 
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  toggleLabel: { color: '#e7e9ec', fontSize: 15 },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 4,
+    },
+    toggleLabel: { color: p.textSoft, fontSize: 15 },
 
-  muted: { color: '#5b6472', fontStyle: 'italic' },
-  deleteRow: { paddingVertical: 12, alignItems: 'center' },
-  deleteText: { color: '#ff6b5e', fontWeight: '700' },
-});
+    muted: { color: p.textMuted, fontStyle: 'italic' },
+    deleteRow: { paddingVertical: 12, alignItems: 'center' },
+    deleteText: { color: p.dangerText, fontWeight: '700' },
+  });

@@ -12,6 +12,7 @@ import {
   parseViewOptions,
   purgeCutoff,
   RECENTLY_DELETED_DAYS,
+  resolveScheme,
   safeBatchGb,
 } from '../src/features/vault/ui/logic.ts';
 
@@ -115,7 +116,15 @@ test('a saved rule with junk in it is cleaned, never fatal', () => {
 
 /* ------------------------------------------------------------- view options */
 
-const DEFAULTS = { columns: 3, sort: 'recent', showRating: true, showKeywords: true, showDuration: true };
+const DEFAULTS = {
+  layout: 'grid',
+  size: 'large',
+  sort: 'recent',
+  info: 'duration',
+  showRating: true,
+  showKeywords: true,
+  theme: 'system',
+};
 
 test('missing view options fall back to the defaults', () => {
   assert.deepEqual(parseViewOptions(null, DEFAULTS), DEFAULTS);
@@ -124,8 +133,38 @@ test('missing view options fall back to the defaults', () => {
 
 test('saved view options are kept, invalid values replaced', () => {
   assert.deepEqual(
-    parseViewOptions('{"columns": 5, "sort": "size", "showRating": false, "showDuration": "no"}', DEFAULTS),
-    { columns: 5, sort: 'size', showRating: false, showKeywords: true, showDuration: true }
+    parseViewOptions(
+      '{"layout": "waterfall", "size": "fit", "sort": "duration", "info": "size", "showRating": false, "theme": "light"}',
+      DEFAULTS
+    ),
+    { ...DEFAULTS, layout: 'waterfall', size: 'fit', sort: 'duration', info: 'size', showRating: false, theme: 'light' }
   );
-  assert.equal(parseViewOptions('{"columns": 7, "sort": "random"}', DEFAULTS).columns, 3);
+  const junk = parseViewOptions('{"layout": "spiral", "size": 9, "sort": "random", "theme": "blue"}', DEFAULTS);
+  assert.deepEqual(junk, DEFAULTS);
+});
+
+test('options saved by the first version are carried over', () => {
+  const old = parseViewOptions(
+    '{"columns": 5, "sort": "size", "showRating": true, "showKeywords": false, "showDuration": false}',
+    DEFAULTS
+  );
+  assert.equal(old.size, 'small');
+  assert.equal(old.info, 'none');
+  assert.equal(old.sort, 'size');
+  assert.equal(old.showKeywords, false);
+  assert.equal(parseViewOptions('{"columns": 4}', DEFAULTS).size, 'medium');
+});
+
+/* -------------------------------------------------------------------- theme */
+
+test('System follows the phone, and falls back to dark when the phone does not say', () => {
+  assert.equal(resolveScheme('system', 'light'), 'light');
+  assert.equal(resolveScheme('system', 'dark'), 'dark');
+  assert.equal(resolveScheme('system', 'unspecified'), 'dark');
+  assert.equal(resolveScheme('system', null), 'dark');
+});
+
+test('a chosen theme wins over the phone', () => {
+  assert.equal(resolveScheme('light', 'dark'), 'light');
+  assert.equal(resolveScheme('dark', 'light'), 'dark');
 });
