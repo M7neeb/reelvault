@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 
+import { tick } from './haptics';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 
 export type OptionItem = { label: string; hint?: string; danger?: boolean; onPress: () => void };
@@ -42,17 +43,18 @@ export function OptionsSheet({
               key={o.label}
               style={styles.row}
               onPress={() => {
+                tick();
                 onClose();
                 o.onPress();
               }}>
               <Text style={[styles.rowLabel, o.danger && styles.danger]}>{o.label}</Text>
-              {!!o.hint && <Text style={styles.rowHint}>{o.hint}</Text>}
+              {!!o.hint && <Text style={[styles.rowHint, o.hint === '✓' && styles.rowCheck]}>{o.hint}</Text>}
             </TouchableOpacity>
           ))}
-          <TouchableOpacity style={[styles.row, styles.cancel]} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
         </View>
+        <TouchableOpacity style={styles.cancelCard} onPress={onClose}>
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
       </View>
     </Modal>
   );
@@ -122,9 +124,11 @@ export function PromptSheet({
 const makeStyles = (p: Palette) =>
   sheet({
     kav: { flex: 1 },
-    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop, padding: 10 },
+    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop, padding: 10, paddingBottom: 34 },
     backdropTap: { flex: 1 },
-    card: { backgroundColor: p.panel, borderRadius: 16, paddingVertical: 6, marginBottom: 20 },
+    card: { backgroundColor: p.panel, borderRadius: 26, paddingVertical: 4, overflow: 'hidden' },
+    cancelCard: { backgroundColor: p.panel, borderRadius: 26, alignItems: 'center', paddingVertical: 17, marginTop: 8 },
+    rowCheck: { color: p.accent, fontSize: 17, fontWeight: '700' },
     title: { color: p.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, paddingHorizontal: 16 },
     row: {
       flexDirection: 'row',
@@ -135,14 +139,13 @@ const makeStyles = (p: Palette) =>
       borderTopWidth: 1,
       borderTopColor: p.separator,
     },
-    rowLabel: { color: p.link, fontSize: 17 },
+    rowLabel: { color: p.text, fontSize: 17 },
     rowHint: { color: p.textSecondary, fontSize: 14 },
     danger: { color: p.dangerText },
-    cancel: { justifyContent: 'center' },
     cancelText: { color: p.text, fontSize: 17, fontWeight: '700' },
 
     backdropCenter: { flex: 1, justifyContent: 'center', backgroundColor: p.backdrop, padding: 32 },
-    dialog: { backgroundColor: p.panel, borderRadius: 16, padding: 18, gap: 12 },
+    dialog: { backgroundColor: p.panel, borderRadius: 26, padding: 20, gap: 12 },
     dialogTitle: { color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
     dialogMessage: { color: p.textSecondary, fontSize: 13, textAlign: 'center' },
     input: {

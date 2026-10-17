@@ -4,7 +4,9 @@
  * browser preview (`/preview?cat=shows`) and on the phone.
  */
 
-import type { SimklPlan, Timeframe } from '../actions';
+import type { ScrobbleTarget, SimklPlan, Timeframe } from '../actions';
+import type { ListEntry, SimklList, VideoLink } from '../collections';
+import type { ImportResult } from '../imports';
 import type { Meta, Play, Session, WatchEvent } from '../insights';
 import type { ReminderSettings } from '../reminders';
 import type {
@@ -17,6 +19,10 @@ import type {
 } from '../logic';
 
 export type {
+  ImportResult,
+  ListEntry,
+  SimklList,
+  VideoLink,
   CatalogEpisode,
   CatalogTitle,
   Meta,
@@ -33,6 +39,29 @@ export type {
 };
 
 export type Category = 'videos' | 'movie' | 'show' | 'anime';
+
+export type SimklPrefs = {
+  /** Blur titles, pictures and summaries of episodes you have not watched yet. */
+  hideSpoilers: boolean;
+};
+
+/**
+ * What the Videos tab gets from Simkl: link one of your videos to a movie or an
+ * episode, then scrobble while it plays (finishing it marks it watched).
+ */
+export type SimklBridge = {
+  connected: boolean;
+  search: (type: SimklType, q: string) => Promise<CatalogTitle[]>;
+  loadEpisodes: (type: SimklType, id: number) => Promise<CatalogEpisode[]>;
+  links: () => Promise<Map<string, VideoLink>>;
+  setLink: (videoId: string, link: Omit<VideoLink, 'videoId' | 'linkedAt' | 'loggedAt'> | null) => Promise<void>;
+  scrobble: (
+    videoId: string,
+    link: ScrobbleTarget,
+    action: 'start' | 'pause' | 'stop',
+    progress: number
+  ) => Promise<'watched' | 'paused' | 'playing' | 'already'>;
+};
 
 export type SimklDetailInfo = {
   overview: string | null;
@@ -103,13 +132,25 @@ export type SimklActions = {
   setReminders: (s: ReminderSettings) => Promise<boolean>;
   /** The library as a CSV file, through the share sheet. */
   exportCsv: () => Promise<void>;
+  /** Your own lists (kept in ReelVault). */
+  createList: (name: string, icon: string | null) => Promise<number>;
+  updateList: (id: number, name: string, icon: string | null) => Promise<void>;
+  deleteList: (id: number) => Promise<void>;
+  listEntries: (id: number) => Promise<ListEntry[]>;
+  setInList: (listId: number, title: CatalogTitle, on: boolean) => Promise<void>;
+  /** Pick an IMDb / Letterboxd CSV and send it to Simkl. null = cancelled, 'unknown' = not a known export. */
+  importFile: (onProgress: (done: number, total: number) => void) => Promise<ImportResult | null | 'unknown'>;
+  /** Upcoming episodes as an .ics file through the share sheet; resolves how many. */
+  exportCalendar: () => Promise<number>;
+  setPrefs: (p: SimklPrefs) => Promise<void>;
   openUrl: (url: string) => void;
 };
 
 export type SimklScreenProps = {
   category: Exclude<Category, 'videos'>;
-  /** The Videos · Movies · Shows · Anime switcher, drawn at the top. */
-  categoryBar: React.ReactNode;
+  /** Your own lists, shown as a shelf. */
+  lists?: SimklList[];
+  prefs?: SimklPrefs;
   /** A client id is built in. */
   configured: boolean;
   connected: boolean;
@@ -134,5 +175,9 @@ export type SimklScreenProps = {
     ratingOpen?: boolean;
     grid?: boolean;
     connectCode?: ConnectCode;
+    listOpen?: number;
+    pickOpen?: boolean;
+    importOpen?: boolean;
+    addToListOpen?: boolean;
   };
 };

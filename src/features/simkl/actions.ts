@@ -327,7 +327,7 @@ const detailPath = (type: SimklType) => (type === 'movie' ? 'movies' : type === 
 
 /** The detail record, cached for a day (catalog calls carry no user token). */
 export function loadDetail(type: SimklType, id: number): Promise<SimklDetail> {
-  return cached(`detail2:${type}:${id}`, 24 * HOUR, async () => {
+  return cached(`detail3:${type}:${id}`, 24 * HOUR, async () => {
     const d = await simklRequest<any>(`/${detailPath(type)}/${id}`);
     await saveMeta(id, {
       genres: Array.isArray(d?.genres) ? d.genres : [],
@@ -335,6 +335,7 @@ export function loadDetail(type: SimklType, id: number): Promise<SimklDetail> {
       country: typeof d?.country === 'string' ? d.country.toUpperCase() : null,
       language: typeof d?.original_language === 'string' ? d.original_language.toUpperCase() : null,
       runtime: typeof d?.runtime === 'number' ? d.runtime : null,
+      fanart: typeof d?.fanart === 'string' ? d.fanart : null,
     }).catch(() => undefined);
     return {
       overview: d?.overview ?? null,
@@ -421,3 +422,54 @@ export async function fillMissingMeta(onProgress: (done: number, total: number) 
   }
   return done;
 }
+
+/**
+ * The Up Next cards want each title's wide picture, which only its detail page
+ * has. After a sync, fetch it for what you are watching (a few at a time).
+ */
+export async function prefetchArt(limit = 24): Promise<number> {
+  const have = await metaMap();
+  const want = (await listSimklItems())
+    .filter((i) => !have.has(i.simklId) && (i.status === 'watching' || (i.type === 'movie' && i.status === 'plantowatch')))
+    .sort((a, b) => Date.parse(b.lastWatchedAt ?? b.addedAt ?? '') - Date.parse(a.lastWatchedAt ?? a.addedAt ?? ''))
+    .slice(0, limit);
+  for (const i of want) await loadDetail(i.type, i.simklId).catch(() => undefined);
+  return want.length;
+}
+
+/* ---------------------------------------------------------------- scrobble */
+
+export type ScrobbleTarget = { simklId: number; type: SimklType; season: number | null; episode: number | null };
+
+/**
+ * Tell Simkl you are watching one of your own videos (it shows as "watching
+ * now" on your profile). `stop` at 80 % or more adds it to your history;
+ * below that Simkl keeps it as paused. Returns 'watched' when it was logged.
+ */
+export async function scrobble(
+  t: ScrobbleTarget,
+  action: 'start' | 'pause' | 'stop',
+  progress: number
+): Promise<'watched' | 'paused' | 'playing' | 'already'> {
+  const media =
+    t.type === 'movie'
+      ? { movie: { ids: { simkl: t.simklId } } }
+      : {
+          [t.type === 'anime' ? 'anime' : 'show']: { ids: { simkl: t.simklId } },
+          episode: { season: t.season ?? 1, number: t.episode ?? 1 },
+        };
+  try {
+    const r = await simklRequest<any>(`/scrobble/${action}`, {
+      method: 'POST',
+      auth: true,
+      body: { ...media, progress: Math.max(0, Math.min(100, Math.round(progress))) },
+    });
+    if (action !== 'stop') return action === 'start' ? 'playing' : 'paused';
+    return r?.action === 'scrobble' || progress >= 80 ? 'watched' : 'paused';
+  } catch (e: any) {
+    // 409: the same thing was logged in the last hour - not an error for the viewer.
+    if (e?.status === 409) return 'already';
+    throw e;
+  }
+}
+

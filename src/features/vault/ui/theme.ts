@@ -52,6 +52,11 @@ export type Palette = {
   grabber: string;
   starOff: string;
   switchOff: string;
+  /** Behind glass controls where the system has no Liquid Glass. */
+  glassFallback: string;
+  /** Raised cards on the screen background (Up Next, grouped rows). */
+  elevated: string;
+  success: string;
 };
 
 /** The original ReelVault / HashPhotos dark look. */
@@ -83,6 +88,9 @@ export const DARK: Palette = {
   grabber: '#48484a',
   starOff: '#4a4a4e',
   switchOff: '#3a3a3e',
+  glassFallback: 'rgba(58,58,62,0.72)',
+  elevated: '#1c1c1e',
+  success: '#30D158',
 };
 
 /** iOS-style light look: white grid, grouped grey panels. */
@@ -114,6 +122,9 @@ export const LIGHT: Palette = {
   grabber: '#c7c7cc',
   starOff: '#c7c7cc',
   switchOff: '#d1d1d6',
+  glassFallback: 'rgba(242,242,247,0.86)',
+  elevated: '#f2f2f7',
+  success: '#34C759',
 };
 
 export const paletteFor = (scheme: Scheme): Palette => (scheme === 'light' ? LIGHT : DARK);
@@ -141,3 +152,11 @@ export function useStyles<T extends object>(factory: (p: Palette) => T): T {
 
 /** For factories: `StyleSheet.create`, re-exported so UI files need one import. */
 export const sheet = StyleSheet.create;
+
+/** "#0a84ff" → "10,132,255", for rgba() gradients that fade into a theme colour. */
+export function rgbOf(hex: string): string {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6);
+  const n = parseInt(full, 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}

@@ -1,6 +1,7 @@
 /**
- * Simkl settings: sync, Stats and Review, notifications, rewatches on Simkl,
- * CSV export, sign out. Presentational only.
+ * Simkl settings: sync, Stats and Review, import from IMDb / Letterboxd,
+ * spoilers, notifications, rewatches on Simkl, CSV and calendar export, sign
+ * out. Presentational only.
  */
 
 import { useEffect, useState } from 'react';
@@ -12,29 +13,34 @@ import { sheet, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { DELAYS } from '../reminders';
 import { fmtAgo } from './time';
-import type { ReminderSettings, SimklActions, SimklPlan } from './types';
+import type { ReminderSettings, SimklActions, SimklPlan, SimklPrefs } from './types';
 
 export function AccountSheet({
   lastSyncAt,
   syncing,
   count,
   actions,
+  prefs,
   onStats,
   onReview,
+  onImport,
   onClose,
 }: {
   lastSyncAt: number | null;
   syncing: boolean;
   count: number;
   actions: SimklActions;
+  prefs: SimklPrefs;
   onStats: () => void;
   onReview: () => void;
+  onImport: () => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
   const [note, setNote] = useState('');
   const [reminders, setReminders] = useState<ReminderSettings | null>(null);
   const [rewatch, setRewatch] = useState<{ on: boolean; plan: SimklPlan } | null>(null);
+  const [spoilers, setSpoilers] = useState(prefs.hideSpoilers);
 
   useEffect(() => {
     actions.getReminders().then(setReminders).catch(() => undefined);
@@ -70,6 +76,23 @@ export function AccountSheet({
         <Text style={styles.hint}>
           ReelVault syncs when you open the app, at most every 15 minutes - pull down on a list to sync right away.
         </Text>
+      </Section>
+
+      <Section label="Bring your history">
+        <Chip label="Import from IMDb or Letterboxd…" onPress={onImport} />
+        <Text style={styles.hint}>Your ratings, watched films and watchlists, from their CSV exports.</Text>
+      </Section>
+
+      <Section label="Spoilers">
+        <ToggleRow
+          label="Hide unwatched episode titles and pictures"
+          value={spoilers}
+          onChange={(on) => {
+            setSpoilers(on);
+            void actions.setPrefs({ ...prefs, hideSpoilers: on });
+          }}
+        />
+        <Text style={styles.hint}>Episode lists and Up Next show only "Episode 5" and a blurred still until you have seen it.</Text>
       </Section>
 
       <Section label="Notifications">
@@ -145,6 +168,16 @@ export function AccountSheet({
           }
         />
         <Text style={styles.hint}>Title, status, your rating, episodes, IMDb rating and the Simkl link - save it in Files.</Text>
+        <Chip
+          label="Add upcoming episodes to Calendar…"
+          onPress={() =>
+            actions
+              .exportCalendar()
+              .then((n) => setNote(n ? `${n} dates ready - tap Add All in the next screen` : 'Nothing coming up in the next two months'))
+              .catch((e) => setNote(`Calendar export failed: ${String(e?.message ?? e)}`))
+          }
+        />
+        <Text style={styles.hint}>The next two months of episodes and releases you follow, as a calendar file. No calendar permission needed.</Text>
       </Section>
 
       <Section label="Account">

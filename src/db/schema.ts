@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export type Migration = {
   version: number;
@@ -269,6 +269,53 @@ export const MIGRATIONS: Migration[] = [
         language   TEXT,
         runtime    INTEGER,
         fetched_at INTEGER NOT NULL
+      );
+    `,
+  },
+  {
+    version: 7,
+    sql: `
+      -- The wide picture behind a title (Up Next cards, the detail header).
+      ALTER TABLE simkl_meta ADD COLUMN fanart TEXT;
+
+      -- Your own lists ("Comfort shows", "Watch with Sam"). Kept in ReelVault:
+      -- Simkl's own custom lists are PRO-only and read-only through the API.
+      CREATE TABLE IF NOT EXISTS simkl_lists (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT    NOT NULL,
+        icon       TEXT,
+        created_at TEXT    NOT NULL,
+        position   INTEGER NOT NULL DEFAULT 0
+      );
+
+      -- A list entry keeps the title, year and poster, so a list can hold
+      -- titles that are not in your Simkl library.
+      CREATE TABLE IF NOT EXISTS simkl_list_items (
+        list_id  INTEGER NOT NULL REFERENCES simkl_lists(id) ON DELETE CASCADE,
+        simkl_id INTEGER NOT NULL,
+        type     TEXT    NOT NULL,
+        title    TEXT    NOT NULL,
+        year     INTEGER,
+        poster   TEXT,
+        slug     TEXT,
+        added_at TEXT    NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (list_id, simkl_id)
+      );
+
+      -- One of your videos is this movie or episode: finishing it in the
+      -- viewer marks it watched on Simkl.
+      CREATE TABLE IF NOT EXISTS vault_simkl_links (
+        video_id  TEXT PRIMARY KEY,
+        simkl_id  INTEGER NOT NULL,
+        type      TEXT    NOT NULL,
+        title     TEXT    NOT NULL,
+        year      INTEGER,
+        poster    TEXT,
+        season    INTEGER,
+        episode   INTEGER,
+        linked_at TEXT    NOT NULL,
+        logged_at TEXT                         -- last time it was marked watched from here
       );
     `,
   },

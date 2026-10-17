@@ -7,6 +7,7 @@ import { plural } from './confirm';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 import VideoMap from './VideoMap';
+import Glyph from './Glyph';
 
 export function MapModal({
   items,
@@ -26,7 +27,7 @@ export function MapModal({
       <View style={styles.screen}>
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-            <Text style={styles.circleIcon}>✕</Text>
+            <Glyph name="close" />
           </TouchableOpacity>
           <Text style={styles.title}>Places</Text>
           <Text style={styles.count}>{plural(count, 'video')}</Text>

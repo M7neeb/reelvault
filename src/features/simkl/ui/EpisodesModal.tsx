@@ -1,6 +1,7 @@
 /**
- * "Mark specific episodes": every season with checkmarks, mark a season,
- * unmark a season. Two modes:
+ * "Mark specific episodes": season pills, then that season's episodes with
+ * their stills, checkmarks, "Mark all aired" and "Unmark". With spoilers
+ * hidden, episodes you have not seen show no title or picture. Two modes:
  * - history: your Simkl watch history; hold an episode to log watching it again;
  * - rewatch: one rewatch session ("Rewatch #2"), with its own checkmarks.
  * Presentational only (see simkl/ui/types.ts).
@@ -8,13 +9,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction } from '@/features/vault/ui/confirm';
+import { tick } from '@/features/vault/ui/haptics';
+import Icon from '@/features/vault/ui/Icon';
+import IconButton from '@/features/vault/ui/IconButton';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { watchCounts } from '../insights';
-import { episodeCode, groupBySeason, parseEpisodeCode, watchedKey } from '../logic';
+import { episodeCode, episodeImageUrl, groupBySeason, parseEpisodeCode, watchedKey } from '../logic';
 import { fmtDay } from './time';
 import type { CatalogEpisode, Play, Session, SimklActions, SimklItem } from './types';
 
@@ -22,11 +27,14 @@ export default function EpisodesModal({
   item,
   actions,
   session = null,
+  hideSpoilers = false,
   onFinishSession,
   onClose,
 }: {
   item: SimklItem;
   actions: SimklActions;
+  /** No titles or stills for episodes you have not watched. */
+  hideSpoilers?: boolean;
   /** Set = rewatch mode for this session. */
   session?: Session | null;
   onFinishSession?: () => void;
@@ -89,6 +97,7 @@ export default function EpisodesModal({
 
   function toggle(eps: { season: number; episode: number }[], on: boolean) {
     if (!eps.length) return;
+    tick();
     if (rewatch) {
       // Only the ones that change, so "Mark all aired" does not log doubles.
       const change = eps.filter((e) => inSession.has(watchedKey(e.season, e.episode)) !== on);
@@ -110,19 +119,20 @@ export default function EpisodesModal({
     });
   }
 
+  const season = seasons.find((s) => s.season === shownSeason) ?? seasons[0];
+  const totalEps = item.totalEpisodes || episodes?.length || 0;
+
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-            <Text style={styles.circleIcon}>‹</Text>
-          </TouchableOpacity>
+          <IconButton icon="back" label="Close" onPress={onClose} />
           <View style={styles.headerText}>
             <Text style={styles.title} numberOfLines={1}>
-              {item.title}
+              {rewatch ? `Rewatch #${session!.number}` : item.title}
             </Text>
             <Text style={styles.sub}>
-              {rewatch ? `Rewatch #${session!.number} · ${inSession.size} of ${item.totalEpisodes || episodes?.length || '?'}` : `${watched.size} of ${item.totalEpisodes || episodes?.length || '?'} watched`}
+              {rewatch ? `${item.title} · ${inSession.size} of ${totalEps || '?'}` : `${watched.size} of ${totalEps || '?'} watched`}
             </Text>
           </View>
           {rewatch && onFinishSession && (
@@ -131,90 +141,132 @@ export default function EpisodesModal({
             </TouchableOpacity>
           )}
         </View>
+
+        {seasons.length > 1 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pills} style={styles.pillBar}>
+            {seasons.map((s) => {
+              const on = s.season === season?.season;
+              const done = s.episodes.filter((e) => checked.has(watchedKey(e.season, e.episode))).length;
+              const all = done === s.episodes.length && done > 0;
+              return (
+                <TouchableOpacity key={s.season} style={[styles.pill, on && styles.pillOn]} onPress={() => setOpenSeason(s.season)}>
+                  {all && <Icon name="check" size={12} color={on ? '#fff' : p.success} weight="bold" />}
+                  <Text style={[styles.pillText, on && styles.pillTextOn]}>{s.season === 0 ? 'Specials' : `Season ${s.season}`}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
         {!!note && <Text style={styles.note}>{note}</Text>}
-        {!rewatch && <Text style={styles.tip}>Hold an episode you watched to log watching it again.</Text>}
+
         <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
           {episodes === null ? (
-            <ActivityIndicator color={p.textSecondary} />
-          ) : seasons.length === 0 ? (
+            <ActivityIndicator color={p.textSecondary} style={{ marginTop: 30 }} />
+          ) : !season ? (
             <Text style={styles.empty}>Simkl has no episode list for this title.</Text>
           ) : (
-            seasons.map((s) => {
+            (() => {
+              const s = season;
               const aired = s.episodes.filter((e) => e.aired);
               const done = s.episodes.filter((e) => checked.has(watchedKey(e.season, e.episode))).length;
-              const isOpen = shownSeason === s.season;
               return (
-                <View key={s.season} style={styles.season}>
-                  <TouchableOpacity style={styles.seasonHead} onPress={() => setOpenSeason(isOpen ? -1 : s.season)}>
-                    <Text style={styles.seasonTitle}>{s.label}</Text>
-                    <Text style={styles.seasonCount}>
-                      {done}/{s.episodes.length} {isOpen ? '▾' : '▸'}
-                    </Text>
-                  </TouchableOpacity>
-                  <View style={styles.seasonTrack}>
-                    <View style={[styles.seasonFill, { width: `${s.episodes.length ? (done / s.episodes.length) * 100 : 0}%` }]} />
-                  </View>
-                  {isOpen && (
-                    <>
-                      <View style={styles.actions}>
-                        <TouchableOpacity style={styles.action} onPress={() => toggle(aired, true)}>
-                          <Text style={styles.actionText}>Mark all aired</Text>
+                <>
+                  <View style={styles.seasonCard}>
+                    <View style={styles.seasonHead}>
+                      <Text style={styles.seasonTitle}>{s.label}</Text>
+                      <Text style={styles.seasonCount}>
+                        {done} of {s.episodes.length}
+                      </Text>
+                    </View>
+                    <View style={styles.seasonTrack}>
+                      <View style={[styles.seasonFill, { width: `${s.episodes.length ? (done / s.episodes.length) * 100 : 0}%` }]} />
+                    </View>
+                    <View style={styles.actions}>
+                      <TouchableOpacity style={styles.action} onPress={() => toggle(aired, true)}>
+                        <Icon name="checkCircle" size={14} color={p.accent} />
+                        <Text style={styles.actionText}>Mark all aired</Text>
+                      </TouchableOpacity>
+                      {done > 0 && (
+                        <TouchableOpacity
+                          style={styles.action}
+                          onPress={() =>
+                            confirmAction(
+                              `Unmark ${s.label}?`,
+                              rewatch ? 'Removes these episodes from this rewatch.' : 'Removes these episodes from your Simkl watch history.',
+                              () => toggle(s.episodes, false),
+                              { label: 'Unmark', destructive: true }
+                            )
+                          }>
+                          <Icon name="rewatch" size={14} color={p.textSecondary} />
+                          <Text style={styles.actionText}>Unmark</Text>
                         </TouchableOpacity>
-                        {done > 0 && (
-                          <TouchableOpacity
-                            style={styles.action}
-                            onPress={() =>
-                              confirmAction(
-                                `Unmark ${s.label}?`,
-                                'Removes these episodes from your Simkl watch history.',
-                                () => toggle(s.episodes, false),
-                                { label: 'Unmark', destructive: true }
-                              )
-                            }>
-                            <Text style={styles.actionText}>Unmark</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                      {s.episodes.map((e) => {
-                        const on = checked.has(watchedKey(e.season, e.episode));
-                        const isNext = !rewatch && next?.season === e.season && next?.episode === e.episode;
-                        const times = counts.get(watchedKey(e.season, e.episode)) ?? 0;
-                        return (
-                          <TouchableOpacity
-                            key={`${e.season}-${e.episode}`}
-                            style={[styles.episode, isNext && styles.episodeNext]}
-                            disabled={!e.aired && !on}
-                            onPress={() => toggle([e], !on)}
-                            onLongPress={() => {
-                              if (!rewatch && watched.has(watchedKey(e.season, e.episode))) rewatchToggle([e], true, null);
-                            }}>
-                            <View style={[styles.check, on && styles.checkOn]}>{on && <Text style={styles.checkMark}>✓</Text>}</View>
-                            <View style={styles.episodeText}>
-                              <Text style={[styles.episodeTitle, !e.aired && styles.unaired]} numberOfLines={1}>
-                                <Text style={styles.code}>{e.special ? `SP${e.episode}` : episodeCode(item.type, e.season, e.episode)}</Text>
-                                {e.title ? `  ${e.title}` : ''}
-                              </Text>
-                              {!!e.date && (
-                                <Text style={styles.episodeDate}>
-                                  {e.aired ? 'Aired ' : 'Airs '}
-                                  {fmtDay(e.date)}
-                                  {isNext ? '  ·  up next' : ''}
-                                </Text>
-                              )}
+                      )}
+                    </View>
+                    {!rewatch && <Text style={styles.tip}>Hold an episode you watched to log watching it again.</Text>}
+                  </View>
+
+                  {s.episodes.map((e) => {
+                    const key = watchedKey(e.season, e.episode);
+                    const on = checked.has(key);
+                    const seen = watched.has(key);
+                    const isNext = !rewatch && next?.season === e.season && next?.episode === e.episode;
+                    const times = counts.get(key) ?? 0;
+                    const hidden = hideSpoilers && !seen && e.aired;
+                    const still = episodeImageUrl(e.img);
+                    const code = e.special ? `SP${e.episode}` : episodeCode(item.type, e.season, e.episode);
+                    return (
+                      <TouchableOpacity
+                        key={`${e.season}-${e.episode}`}
+                        style={[styles.episode, isNext && styles.episodeNext]}
+                        disabled={!e.aired && !on}
+                        onPress={() => toggle([e], !on)}
+                        onLongPress={() => {
+                          if (!rewatch && seen) rewatchToggle([e], true, null);
+                        }}
+                        accessibilityLabel={`${code} ${hidden ? '' : (e.title ?? '')}`}>
+                        <View style={styles.still}>
+                          {still ? (
+                            <Image source={{ uri: still }} style={styles.stillImg} contentFit="cover" blurRadius={hidden ? 40 : 0} transition={120} />
+                          ) : (
+                            <View style={[styles.stillImg, styles.stillEmpty]}>
+                              <Icon name="tv" size={18} color={p.textMuted} />
                             </View>
-                            {times > 1 && (
-                              <View style={styles.times}>
-                                <Text style={styles.timesText}>×{times}</Text>
-                              </View>
-                            )}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </>
-                  )}
-                </View>
+                          )}
+                          {hidden && (
+                            <View style={styles.stillCover}>
+                              <Icon name="spoiler" size={16} color="#fff" />
+                            </View>
+                          )}
+                          {times > 1 && (
+                            <View style={styles.times}>
+                              <Text style={styles.timesText}>×{times}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={styles.episodeText}>
+                          <Text style={[styles.code, !e.aired && styles.unaired]}>
+                            {code}
+                            {isNext ? <Text style={styles.nextTag}>{'  UP NEXT'}</Text> : null}
+                          </Text>
+                          <Text style={[styles.episodeTitle, !e.aired && styles.unaired]} numberOfLines={2}>
+                            {hidden ? `Episode ${e.episode}` : (e.title ?? `Episode ${e.episode}`)}
+                          </Text>
+                          {!!e.date && (
+                            <Text style={styles.episodeDate}>
+                              {e.aired ? '' : 'Airs '}
+                              {fmtDay(e.date)}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={[styles.check, on && styles.checkOn, !e.aired && !on && { opacity: 0.3 }]}>
+                          {on && <Icon name="check" size={14} color="#fff" weight="bold" />}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </>
               );
-            })
+            })()
           )}
         </ScrollView>
       </View>
@@ -226,36 +278,44 @@ const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
     header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingBottom: 10 },
-    circle: { width: 36, height: 36, borderRadius: 18, backgroundColor: p.circle, alignItems: 'center', justifyContent: 'center' },
-    circleIcon: { color: p.icon, fontSize: 24, fontWeight: '600', marginTop: -3 },
     headerText: { flex: 1 },
-    title: { color: p.text, fontSize: 19, fontWeight: '800' },
-    sub: { color: p.textSecondary, fontSize: 13 },
-    note: { color: p.link, fontSize: 13, fontWeight: '600', paddingHorizontal: 16 },
-    tip: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 16 },
-    finish: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+    title: { color: p.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+    sub: { color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
+    note: { color: p.link, fontSize: 13, fontWeight: '600', paddingHorizontal: 16, paddingBottom: 4 },
+    tip: { color: p.textSecondary, fontSize: 12 },
+    finish: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 9 },
     finishText: { color: '#fff', fontWeight: '800' },
-    times: { backgroundColor: p.card, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
-    timesText: { color: p.rating, fontSize: 12, fontWeight: '800' },
-    body: { padding: 14, gap: 10 },
+    pillBar: { flexGrow: 0 },
+    pills: { gap: 8, paddingHorizontal: 14, paddingBottom: 10 },
+    pill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+    pillOn: { backgroundColor: p.accent },
+    pillText: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
+    pillTextOn: { color: '#fff' },
+    body: { paddingHorizontal: 14, gap: 2 },
     empty: { color: p.textSecondary, textAlign: 'center', marginTop: 30 },
-    season: { backgroundColor: p.panel, borderRadius: 14, paddingHorizontal: 14, paddingBottom: 6 },
-    seasonHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-    seasonTitle: { color: p.text, fontSize: 16, fontWeight: '700' },
-    seasonCount: { color: p.textSecondary, fontSize: 14, fontVariant: ['tabular-nums'] },
-    seasonTrack: { height: 3, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginBottom: 8 },
-    seasonFill: { height: 3, backgroundColor: p.rating },
-    actions: { flexDirection: 'row', gap: 8, paddingVertical: 4 },
-    action: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+    seasonCard: { backgroundColor: p.elevated, borderRadius: 16, padding: 14, gap: 10, marginBottom: 8 },
+    seasonHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+    seasonTitle: { color: p.text, fontSize: 18, fontWeight: '800' },
+    seasonCount: { color: p.textSecondary, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    seasonTrack: { height: 6, borderRadius: 3, backgroundColor: p.card, overflow: 'hidden' },
+    seasonFill: { height: 6, borderRadius: 3, backgroundColor: p.accent },
+    actions: { flexDirection: 'row', gap: 8 },
+    action: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
     actionText: { color: p.textSoft, fontSize: 13, fontWeight: '600' },
-    episode: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, borderTopWidth: 1, borderTopColor: p.separator },
-    episodeNext: { backgroundColor: p.accentSoft, marginHorizontal: -14, paddingHorizontal: 14 },
-    check: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: p.textMuted, alignItems: 'center', justifyContent: 'center' },
-    checkOn: { backgroundColor: p.accent, borderColor: p.accent },
-    checkMark: { color: '#fff', fontSize: 14, fontWeight: '800' },
-    episodeText: { flex: 1 },
-    episodeTitle: { color: p.text, fontSize: 15 },
-    code: { color: p.link, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    episode: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 14 },
+    episodeNext: { backgroundColor: p.accentSoft },
+    still: { width: 118, height: 66, borderRadius: 10, overflow: 'hidden', backgroundColor: p.elevated },
+    stillImg: { width: 118, height: 66 },
+    stillEmpty: { alignItems: 'center', justifyContent: 'center' },
+    stillCover: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' },
+    times: { position: 'absolute', right: 4, bottom: 4, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
+    timesText: { color: p.rating, fontSize: 11, fontWeight: '800' },
+    episodeText: { flex: 1, gap: 1 },
+    code: { color: p.link, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 0.3 },
+    nextTag: { color: p.accent, fontSize: 11, fontWeight: '900' },
+    episodeTitle: { color: p.text, fontSize: 15, fontWeight: '600' },
     unaired: { color: p.textMuted },
-    episodeDate: { color: p.textSecondary, fontSize: 12, marginTop: 2 },
+    episodeDate: { color: p.textSecondary, fontSize: 12 },
+    check: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: p.textMuted, alignItems: 'center', justifyContent: 'center' },
+    checkOn: { backgroundColor: p.accent, borderColor: p.accent },
   });

@@ -37,24 +37,136 @@ import {
   type ViewOptions,
 } from '@/features/vault/ui/types';
 import VaultScreen from '@/features/vault/ui/VaultScreen';
-import CategoryBar from '@/features/simkl/ui/CategoryBar';
-import { FIXTURE_SIMKL, fixtureSimklActions } from '@/features/simkl/ui/fixtures';
+import { FIXTURE_LISTS, FIXTURE_SIMKL, fixtureBridge, fixtureSimklActions } from '@/features/simkl/ui/fixtures';
+import SearchScreen from '@/features/simkl/ui/SearchScreen';
 import SimklScreen from '@/features/simkl/ui/SimklScreen';
+import { Text, View } from 'react-native';
+import { TabBarSpace } from '@/features/vault/ui/chrome';
+import Icon from '@/features/vault/ui/Icon';
+import type { IconName } from '@/features/vault/ui/icons';
 import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/types';
 import { resolveScheme } from '@/features/vault/ui/logic';
-import { paletteFor, ThemeContext } from '@/features/vault/ui/theme';
+import { paletteFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
 
-/** Simkl surfaces: list, grid, detail, episodes, rewatch, rating, discover, calendar, stats, review, account, connect, notset. */
-function SimklPreview({ category, bar, surface }: { category: Exclude<Category, 'videos'>; bar: React.ReactNode; surface: string }) {
+/**
+ * A drawing of the iOS 26 tab bar (the real one is native and has no web
+ * version): a floating glass capsule with the four tabs, and the round
+ * search tab beside it. Only here so screenshots show what sits on top.
+ */
+function TabBarMock({ active }: { active: Category | 'search' }) {
+  const p = usePalette();
+  const tabs: { key: Category; label: string; icon: IconName }[] = [
+    { key: 'videos', label: 'Videos', icon: 'videos' },
+    { key: 'movie', label: 'Movies', icon: 'movie' },
+    { key: 'show', label: 'Shows', icon: 'tv' },
+    { key: 'anime', label: 'Anime', icon: 'anime' },
+  ];
+  const glass = {
+    backgroundColor: p.scheme === 'dark' ? 'rgba(40,40,44,0.86)' : 'rgba(250,250,252,0.9)',
+    borderWidth: 1,
+    borderColor: p.separator,
+  };
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        bottom: 22,
+        flexDirection: 'row',
+        gap: 10,
+        alignItems: 'center',
+      }}>
+      <View
+        style={[
+          {
+            flex: 1,
+            height: 62,
+            borderRadius: 31,
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingHorizontal: 4,
+          },
+          glass,
+        ]}>
+        {tabs.map((t) => {
+          const on = t.key === active;
+          return (
+            <View
+              key={t.key}
+              style={[
+                {
+                  flex: 1,
+                  height: 54,
+                  borderRadius: 27,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 2,
+                },
+                on && {
+                  backgroundColor: p.scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                },
+              ]}>
+              <Icon name={t.icon} size={22} color={on ? p.accent : p.text} />
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: '600',
+                  color: on ? p.accent : p.text,
+                }}>
+                {t.label}
+              </Text>
+              {t.key === 'show' && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 14,
+                    backgroundColor: '#FF3B30',
+                    borderRadius: 9,
+                    minWidth: 18,
+                    height: 18,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>2</Text>
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </View>
+      <View
+        style={[
+          {
+            width: 62,
+            height: 62,
+            borderRadius: 31,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          glass,
+        ]}>
+        <Icon name="search" size={22} color={active === 'search' ? p.accent : p.text} />
+      </View>
+    </View>
+  );
+}
+
+/** Space the mock tab bar takes, like the real one (home indicator + bar). */
+const MOCK_TAB_SPACE = 34 + 56;
+
+/**
+ * Simkl surfaces: list, grid, detail, episodes, rewatch, rating, addlist, lists, pick, import, discover,
+ * calendar, stats, review, account, connect, notset.
+ */
+function SimklPreview({ category, surface }: { category: Exclude<Category, 'videos'>; surface: string }) {
   const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
   const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
   const firstOfType = FIXTURE_SIMKL.find((i) => i.type === category)?.simklId;
   const dev: SimklScreenProps['devInitialState'] = {
-    detailId: ['detail', 'episodes', 'rating'].includes(surface)
-      ? firstOfType
-      : surface === 'rewatch'
-        ? 103
-        : undefined,
+    detailId: ['detail', 'episodes', 'rating'].includes(surface) ? firstOfType : surface === 'rewatch' ? 103 : undefined,
     rewatchOpen: surface === 'rewatch',
     ratingOpen: surface === 'rating',
     insightsTab: surface === 'review' ? 'review' : undefined,
@@ -65,11 +177,15 @@ function SimklPreview({ category, bar, surface }: { category: Exclude<Category, 
     calendarOpen: surface === 'calendar',
     statsOpen: surface === 'stats',
     connectCode: surface === 'connect' ? { code: 'ABCD-1234', url: 'https://simkl.com/pin' } : undefined,
+    listOpen: surface === 'lists' ? 1 : undefined,
+    pickOpen: surface === 'pick',
+    importOpen: surface === 'import',
+    addToListOpen: surface === 'addlist',
   };
+  if (surface === 'addlist') dev.detailId = firstOfType;
   return (
     <SimklScreen
       category={category}
-      categoryBar={bar}
       configured={surface !== 'notset'}
       connected={surface !== 'connect' && surface !== 'notset'}
       items={items}
@@ -77,9 +193,17 @@ function SimklPreview({ category, bar, surface }: { category: Exclude<Category, 
       status=""
       lastSyncAt={null}
       actions={actions}
+      lists={FIXTURE_LISTS}
+      prefs={{ hideSpoilers: surface === 'spoilers' }}
       devInitialState={dev}
     />
   );
+}
+
+function SearchPreview() {
+  const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
+  const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
+  return <SearchScreen connected items={items} lists={FIXTURE_LISTS} actions={actions} />;
 }
 
 const noop = async () => {};
@@ -105,18 +229,29 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   uncategorized: { filter: 'uncategorized' },
   album: { albumId: 1 },
   'view-options': { viewOptionsOpen: true },
-  bulk: { selectMode: true, selectedIds: [first, FIXTURE_ITEMS[1].id], bulkOpen: true },
+  bulk: {
+    selectMode: true,
+    selectedIds: [first, FIXTURE_ITEMS[1].id],
+    bulkOpen: true,
+  },
   'bulk-bar': { selectMode: true, selectedIds: [first, FIXTURE_ITEMS[1].id] },
   'smart-editor': { smartEditorOpen: true },
   private: { filter: 'private', privateUnlocked: true },
-  'private-menu': { privateUnlocked: true, viewerId: 'fixture-private-1', menuOpen: true },
+  'private-menu': {
+    privateUnlocked: true,
+    viewerId: 'fixture-private-1',
+    menuOpen: true,
+  },
   settings: { settingsOpen: true },
   calendar: { calendarOpen: true },
   timeline: { timelineOpen: true },
   overview: { overviewOpen: true },
   map: { mapOpen: true },
   importmenu: { importMenuOpen: true },
-  smaller: { smallerOpen: true, selectedIds: FIXTURE_ITEMS.slice(0, 3).map((v) => v.id) },
+  smaller: {
+    smallerOpen: true,
+    selectedIds: FIXTURE_ITEMS.slice(0, 3).map((v) => v.id),
+  },
   'smaller-one': { viewerId: first, smallerOpen: true },
   trim: { viewerId: first, editorTab: 'trim' },
   crop: { viewerId: first, editorTab: 'crop' },
@@ -155,10 +290,12 @@ export default function PreviewRoute() {
     info?: string;
     group?: string;
   }>();
-  const [viewOptions, setViewOptions] = useState<ViewOptions>(() =>
-    optionsFromUrl({ theme, layout, size, info, group })
-  );
-  const [security, setSecurity] = useState<SecurityState>({ passcodeKind: null, faceId: true, hasFakePasscode: false });
+  const [viewOptions, setViewOptions] = useState<ViewOptions>(() => optionsFromUrl({ theme, layout, size, info, group }));
+  const [security, setSecurity] = useState<SecurityState>({
+    passcodeKind: null,
+    faceId: true,
+    hasFakePasscode: false,
+  });
 
   // The web export pre-renders this page once, without URL options. Hydrating
   // that HTML with different options (e.g. the light theme) keeps the old
@@ -223,14 +360,22 @@ export default function PreviewRoute() {
           await new Promise((r) => setTimeout(r, 120));
           onProgress(i / 10);
         }
-        return { kind: 'done', before: item.sizeBytes, after: Math.round(item.sizeBytes * 0.55) };
+        return {
+          kind: 'done',
+          before: item.sizeBytes,
+          after: Math.round(item.sizeBytes * 0.55),
+        };
       },
       onEditVideo: async (item, _plan, _mode, onProgress) => {
         for (let i = 1; i <= 10; i++) {
           await new Promise((r) => setTimeout(r, 120));
           onProgress(i / 10);
         }
-        return { kind: 'done', before: item.sizeBytes, after: Math.round(item.sizeBytes * 0.4) };
+        return {
+          kind: 'done',
+          before: item.sizeBytes,
+          after: Math.round(item.sizeBytes * 0.4),
+        };
       },
       onCancelMakeSmaller: () => {},
       getImportQuality: async () => null,
@@ -240,12 +385,17 @@ export default function PreviewRoute() {
       onImportBackup: noop,
       getSecurity: async () => security,
       setPasscode: async (kind) => setSecurity((s) => ({ ...s, passcodeKind: kind })),
-      clearPasscode: async () => setSecurity((s) => ({ ...s, passcodeKind: null, hasFakePasscode: false })),
+      clearPasscode: async () =>
+        setSecurity((s) => ({
+          ...s,
+          passcodeKind: null,
+          hasFakePasscode: false,
+        })),
       setFakePasscode: async (code) => setSecurity((s) => ({ ...s, hasFakePasscode: code !== null })),
       setFaceId: async (enabled) => setSecurity((s) => ({ ...s, faceId: enabled })),
       checkPasscode: async (code) => (code === '123456' ? 'real' : code === '000000' ? 'fake' : 'wrong'),
     }),
-    [security]
+    [security],
   );
 
   const items = useMemo(() => {
@@ -266,45 +416,47 @@ export default function PreviewRoute() {
     }
   }, [viewOptions.sort]);
 
-  const [category, setCategory] = useState<Category>(
-    cat === 'movie' || cat === 'show' || cat === 'anime' ? cat : 'videos'
-  );
+  const category: Category | 'search' = cat === 'movie' || cat === 'show' || cat === 'anime' || cat === 'search' ? cat : 'videos';
   const palette = paletteFor(resolveScheme(viewOptions.theme, 'dark'));
-  const bar = (
-    <ThemeContext.Provider value={palette}>
-      <CategoryBar value={category} onChange={setCategory} />
-    </ThemeContext.Provider>
-  );
+  const bridge = useMemo(() => fixtureBridge(first), []);
 
   if (!inBrowser) return null;
 
   if (category !== 'videos') {
     return (
       <ThemeContext.Provider value={palette}>
-        <SimklPreview category={category} bar={bar} surface={sview ?? 'list'} />
+        <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
+          {category === 'search' ? <SearchPreview /> : <SimklPreview category={category} surface={sview ?? 'list'} />}
+          <TabBarMock active={category} />
+        </TabBarSpace.Provider>
       </ThemeContext.Provider>
     );
   }
 
   return (
-    <VaultScreen
-      categoryBar={bar}
-      items={items}
-      allTags={FIXTURE_TAGS}
-      tagMap={FIXTURE_TAG_MAP}
-      deletedItems={FIXTURE_DELETED}
-      duplicateGroups={FIXTURE_DUPLICATE_GROUPS}
-      smartFilters={FIXTURE_SMART_FILTERS}
-      albums={FIXTURE_ALBUMS}
-      folders={FIXTURE_FOLDERS}
-      viewOptions={viewOptions}
-      // The owner's real situation: an almost full 128 GB iPhone.
-      freeGb={2.1}
-      busy={false}
-      status=""
-      actions={actions}
-      enableVideo={false}
-      devInitialState={VIEWS[view ?? 'grid'] ?? {}}
-    />
+    <ThemeContext.Provider value={palette}>
+      <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
+        <VaultScreen
+          items={items}
+          allTags={FIXTURE_TAGS}
+          tagMap={FIXTURE_TAG_MAP}
+          deletedItems={FIXTURE_DELETED}
+          duplicateGroups={FIXTURE_DUPLICATE_GROUPS}
+          smartFilters={FIXTURE_SMART_FILTERS}
+          albums={FIXTURE_ALBUMS}
+          folders={FIXTURE_FOLDERS}
+          viewOptions={viewOptions}
+          // The owner's real situation: an almost full 128 GB iPhone.
+          freeGb={2.1}
+          busy={false}
+          status=""
+          actions={actions}
+          enableVideo={false}
+      simkl={bridge}
+          devInitialState={VIEWS[view ?? 'grid'] ?? {}}
+        />
+        {!VIEWS[view ?? 'grid']?.viewerId && <TabBarMock active="videos" />}
+      </TabBarSpace.Provider>
+    </ThemeContext.Provider>
   );
 }

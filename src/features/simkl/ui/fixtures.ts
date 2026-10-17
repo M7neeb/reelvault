@@ -6,7 +6,7 @@
 import { buildEvents, type Meta, type Play, type Session } from '../insights';
 import type { CatalogEpisode, CatalogTitle, SimklItem, SimklType } from '../logic';
 import { DEFAULT_REMINDERS } from '../reminders';
-import type { SimklActions, SimklDetailInfo } from './types';
+import type { ListEntry, SimklActions, SimklBridge, SimklDetailInfo, SimklList, VideoLink } from './types';
 
 const base = {
   poster: null,
@@ -139,6 +139,36 @@ const calendar = (type: SimklType): CatalogTitle[] => [
   { simklId: 104, type, title: 'Night Ferry', year: 2025, poster: null, slug: null, date: new Date(Date.now() + 4 * 86_400_000).toISOString(), episodeLabel: 'S01E01' },
 ];
 
+export const FIXTURE_LISTS: SimklList[] = [
+  {
+    id: 1,
+    name: 'Comfort shows',
+    icon: '🧸',
+    createdAt: day(40),
+    count: 3,
+    covers: [
+      { poster: null, title: 'Copper Street' },
+      { poster: null, title: 'Harbour Lights' },
+      { poster: null, title: 'Starlit Workshop' },
+    ],
+    ids: [103, 101, 301],
+  },
+  { id: 2, name: 'Watch with Sam', icon: '🍿', createdAt: day(10), count: 2, covers: [{ poster: null, title: 'Low Tide' }, { poster: null, title: 'Signal Hill' }], ids: [202, 203] },
+  { id: 3, name: 'Halloween', icon: '😱', createdAt: day(2), count: 0, covers: [], ids: [] },
+];
+
+const LIST_ENTRIES: Record<number, ListEntry[]> = {
+  1: [
+    { simklId: 103, type: 'show', title: 'Copper Street', year: 2019, poster: null, slug: null, addedAt: day(30) },
+    { simklId: 101, type: 'show', title: 'Harbour Lights', year: 2024, poster: null, slug: null, addedAt: day(20) },
+    { simklId: 301, type: 'anime', title: 'Starlit Workshop', year: 2025, poster: null, slug: null, addedAt: day(5) },
+  ],
+  2: [
+    { simklId: 202, type: 'movie', title: 'Low Tide', year: 2020, poster: null, slug: null, addedAt: day(8) },
+    { simklId: 203, type: 'movie', title: 'Signal Hill', year: 2012, poster: null, slug: null, addedAt: day(7) },
+  ],
+};
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const GENRES: Record<number, string[]> = {
@@ -186,6 +216,30 @@ const PLAYS: Play[] = [
   { id: 3, simklId: 103, season: 1, episode: 3, watchedAt: day(4), sessionId: 1 },
   { id: 4, simklId: 203, season: 0, episode: 0, watchedAt: day(30), sessionId: null },
 ];
+
+/** Preview: the first video is linked to an episode. */
+export function fixtureBridge(videoId: string): SimklBridge {
+  const link: VideoLink = {
+    videoId,
+    simklId: 101,
+    type: 'show',
+    title: 'Harbour Lights',
+    year: 2024,
+    poster: null,
+    season: 2,
+    episode: 4,
+    linkedAt: day(1),
+    loggedAt: null,
+  };
+  return {
+    connected: true,
+    search: async (type) => catalog(type),
+    loadEpisodes: async (type) => episodes(type),
+    links: async () => new Map([[videoId, link]]),
+    setLink: async () => {},
+    scrobble: async () => 'playing',
+  };
+}
 
 /** Fake actions that change nothing (the preview has no account). */
 export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, items: SimklItem[]): SimklActions {
@@ -238,6 +292,20 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
     setRewatchSync: async () => ({ ok: false, plan: 'free' }),
     getReminders: async () => ({ ...DEFAULT_REMINDERS, enabled: true }),
     setReminders: async () => true,
+    createList: async () => 4,
+    updateList: async () => {},
+    deleteList: async () => {},
+    listEntries: async (id) => LIST_ENTRIES[id] ?? [],
+    setInList: async () => {},
+    importFile: async (onProgress) => {
+      for (let i = 1; i <= 4; i++) {
+        await wait(200);
+        onProgress(i, 4);
+      }
+      return { source: 'letterboxd-diary', watched: 412, rated: 380, planned: 0, skipped: 0, notFound: ['Untitled Short (2011)', 'Home Movie (1998)'] };
+    },
+    exportCalendar: async () => 6,
+    setPrefs: async () => {},
     openUrl: () => {},
   };
 }

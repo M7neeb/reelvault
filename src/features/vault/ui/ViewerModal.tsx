@@ -13,6 +13,9 @@
  * Tapping the video hides all of it (full screen) and brings it back. The
  * metadata lives in a SEPARATE panel opened by the info button.
  *
+ * A video linked to a Simkl movie or episode scrobbles while it plays: Simkl
+ * shows it as "watching now", and finishing it marks it watched there.
+ *
  * Like the rest of `ui/`, this imports no native module except expo-video, which
  * has a real web implementation. `enableVideo=false` (the browser preview) skips
  * mounting the player and shows a placeholder stage instead.
@@ -24,7 +27,14 @@ import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { episodeCode } from '@/features/simkl/logic';
+import type { SimklBridge, VideoLink } from '@/features/simkl/ui/types';
+
 import { confirmAction } from './confirm';
+import { success } from './haptics';
+import Icon from './Icon';
+import IconButton from './IconButton';
+import LinkSheet from './LinkSheet';
 import DateSheet from './DateSheet';
 import { fmtBitrate, fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './format';
 import { fmtLocation, RECENTLY_DELETED_DAYS } from './logic';
@@ -44,6 +54,7 @@ import {
   type VaultItem,
   type VaultScreenProps,
 } from './types';
+import Glyph from './Glyph';
 
 const FRAME_W = 52;
 const FRAME_H = 36;
@@ -63,6 +74,9 @@ export default function ViewerModal({
   initialEditorTab,
   onSlideshow,
   onNearby,
+  simkl,
+  link = null,
+  onLinkChanged,
   onClose,
 }: {
   item: VaultItem;
@@ -80,6 +94,10 @@ export default function ViewerModal({
   onSlideshow: (item: VaultItem) => void;
   /** Show the videos filmed near this one. */
   onNearby: (item: VaultItem) => void;
+  /** Simkl, for linking this video to a movie or episode and scrobbling it. */
+  simkl?: SimklBridge;
+  link?: VideoLink | null;
+  onLinkChanged?: () => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -114,6 +132,7 @@ export default function ViewerModal({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'trim' | 'crop' | 'size' | null>(initialEditorTab ?? null);
   const [note, setNote] = useState('');
+  const [linkOpen, setLinkOpen] = useState(false);
 
   const framesRef = useRef<ThumbSource[]>([]);
   framesRef.current = frames;
@@ -152,6 +171,44 @@ export default function ViewerModal({
     });
     return () => sub.remove();
   }, [player, item.durationMs]);
+
+  // Scrobble a linked video: start / pause as it plays, stop (= watched at 80 %+) at 90 % or on close.
+  const scrob = useRef({ started: false, done: false, progress: 0 });
+  useEffect(() => {
+    if (!simkl?.connected || !link || !enableVideo) return;
+    const target = { simklId: link.simklId, type: link.type, season: link.season, episode: link.episode };
+    const state = { started: false, done: false, progress: 0 };
+    scrob.current = state;
+    const send = (action: 'start' | 'pause' | 'stop') =>
+      simkl.scrobble(item.id, target, action, state.progress * 100).catch((e) => console.log(`[SCROBBLE] ${action} failed: ${String(e)}`));
+    const playing = player.addListener('playingChange', ({ isPlaying }) => {
+      if (state.done) return;
+      if (isPlaying) {
+        state.started = true;
+        void send('start');
+      } else if (state.started) void send('pause');
+    });
+    const time = player.addListener('timeUpdate', ({ currentTime }) => {
+      const total = player.duration || (item.durationMs ?? 0) / 1000;
+      if (!total) return;
+      state.progress = Math.min(1, currentTime / total);
+      if (!state.done && state.started && state.progress >= 0.9) {
+        state.done = true;
+        void send('stop').then((r) => {
+          if (r === 'watched' || r === 'already') {
+            success();
+            setNote(`Marked ${link.type === 'movie' ? link.title : episodeCode(link.type, link.season ?? 1, link.episode ?? 1)} watched on Simkl`);
+            onLinkChanged?.();
+          }
+        });
+      }
+    });
+    return () => {
+      playing.remove();
+      time.remove();
+      if (state.started && !state.done) void send('stop');
+    };
+  }, [simkl, link, player, item.id, item.durationMs, enableVideo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Recently used albums first, then pinned, then the rest - HashPhotos' album bar. */
   const barAlbums = useMemo(
@@ -276,9 +333,7 @@ export default function ViewerModal({
           <>
             {/* ── header ──────────────────────────────────────────────── */}
             <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
-              <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Back">
-                <Text style={styles.circleIcon}>‹</Text>
-              </TouchableOpacity>
+              <IconButton icon="back" label="Back" clear onPress={onClose} size={38} />
 
               <View style={styles.titleWrap}>
                 <Text style={styles.titleDate}>{item.title || dt.date}</Text>
@@ -286,20 +341,20 @@ export default function ViewerModal({
               </View>
 
               <View style={styles.headerRight}>
-                <TouchableOpacity
-                  style={[styles.circle, infoOpen && styles.circleOn]}
-                  onPress={() => setInfoOpen((v) => !v)}
-                  accessibilityLabel="Info">
-                  <Text style={[styles.circleIcon, infoOpen && styles.circleIconOn]}>ⓘ</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.circle, menuOpen && styles.circleOn]}
-                  onPress={() => setMenuOpen(true)}
-                  accessibilityLabel="More">
-                  <Text style={[styles.circleIcon, menuOpen && styles.circleIconOn]}>≡</Text>
-                </TouchableOpacity>
+                <IconButton icon="info" label="Info" clear size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
+                <IconButton icon="more" label="More" clear size={38} onPress={() => setMenuOpen(true)} />
               </View>
             </View>
+            {link && (
+              <TouchableOpacity style={[styles.linkPill, { top: insets.top + 54 }]} onPress={() => setLinkOpen(true)} accessibilityLabel="Linked to Simkl">
+                <Icon name="tv" size={12} color="#fff" />
+                <Text style={styles.linkPillText} numberOfLines={1}>
+                  {link.title}
+                  {link.type !== 'movie' ? ` · ${episodeCode(link.type, link.season ?? 1, link.episode ?? 1)}` : ''}
+                  {link.loggedAt ? '  ✓' : ''}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* ── bottom stack ────────────────────────────────────────── */}
             <View style={styles.bottom}>
@@ -310,7 +365,7 @@ export default function ViewerModal({
               )}
               <View style={styles.scrub}>
                 <TouchableOpacity onPress={togglePlay} hitSlop={10} accessibilityLabel="Play or pause">
-                  <Text style={styles.scrubIcon}>{playing ? '❚❚' : '▶'}</Text>
+                  <Icon name={playing ? 'pause' : 'play'} size={18} color={p.text} />
                 </TouchableOpacity>
                 <View style={styles.scrubTrack} onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
                   <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
@@ -319,8 +374,8 @@ export default function ViewerModal({
                 <Text style={styles.scrubTime}>
                   {fmtDuration(elapsed * 1000) ?? '0:00'} / {fmtDuration(totalSec * 1000) ?? '--:--'}
                 </Text>
-                <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={10}>
-                  <Text style={styles.scrubIcon}>•••</Text>
+                <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={10} accessibilityLabel="More">
+                  <Icon name="more" size={18} color={p.text} />
                 </TouchableOpacity>
               </View>
 
@@ -352,10 +407,10 @@ export default function ViewerModal({
 
               <View style={[styles.toolbar, { paddingBottom: insets.bottom + 10 }]}>
                 <TouchableOpacity style={styles.tool} onPress={() => void onFlag(1)} accessibilityLabel="Pick">
-                  <Text style={[styles.toolIcon, flag === 1 && styles.toolPick]}>⚑</Text>
+                  <Icon name="flag" size={18} color={flag === 1 ? '#30d158' : p.textSecondary} />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.tool} onPress={() => void onFlag(-1)} accessibilityLabel="Reject">
-                  <Text style={[styles.toolIcon, flag === -1 && styles.toolReject]}>✕</Text>
+                  <Icon name="close" size={18} color={flag === -1 ? '#ff453a' : p.textSecondary} weight="bold" />
                 </TouchableOpacity>
                 <View style={styles.stars}>
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
@@ -364,11 +419,11 @@ export default function ViewerModal({
                     </TouchableOpacity>
                   ))}
                 </View>
-                <TouchableOpacity style={styles.tool} onPress={() => setMenuOpen(true)}>
-                  <Text style={styles.toolIcon}>•••</Text>
+                <TouchableOpacity style={styles.tool} onPress={() => setMenuOpen(true)} accessibilityLabel="More">
+                  <Icon name="more" size={18} color={p.textSecondary} />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.tool} onPress={confirmDelete} accessibilityLabel="Delete">
-                  <Text style={styles.toolDanger}>⌫</Text>
+                  <Icon name="trash" size={18} color={p.dangerText} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -382,7 +437,7 @@ export default function ViewerModal({
             <View style={[styles.infoSheet, { paddingBottom: insets.bottom + 16 }]}>
               <View style={styles.infoHeader}>
                 <TouchableOpacity style={styles.circle} onPress={() => setInfoOpen(false)}>
-                  <Text style={styles.circleIcon}>✕</Text>
+                  <Glyph name="close" />
                 </TouchableOpacity>
                 <Text style={styles.infoTitle}>Info</Text>
                 <View style={styles.circleGhost} />
@@ -577,6 +632,22 @@ export default function ViewerModal({
                     setInfoOpen(true);
                   }}
                 />
+                {simkl && (
+                  <MenuRow
+                    label={link ? 'Simkl Link…' : 'Link to Simkl…'}
+                    hint={
+                      link
+                        ? link.type === 'movie'
+                          ? link.title
+                          : `${link.title} ${episodeCode(link.type, link.season ?? 1, link.episode ?? 1)}`
+                        : 'Logs it when you finish'
+                    }
+                    onPress={() => {
+                      setMenuOpen(false);
+                      setLinkOpen(true);
+                    }}
+                  />
+                )}
                 <MenuRow
                   label={inTray ? 'Remove from Tray' : 'Add to Tray'}
                   hint=""
@@ -726,6 +797,10 @@ export default function ViewerModal({
           />
         )}
 
+        {linkOpen && simkl && (
+          <LinkSheet item={item} bridge={simkl} link={link} onChanged={() => onLinkChanged?.()} onClose={() => setLinkOpen(false)} />
+        )}
+
         {pickerOpen && (
           <RatingPicker
             title="Rate this video"
@@ -828,6 +903,19 @@ const makeStyles = (p: Palette) =>
     titleDate: { color: p.text, fontSize: 17, fontWeight: '700' },
     titleTime: { color: p.textSecondary, fontSize: 13 },
     headerRight: { flexDirection: 'row', gap: 8 },
+    linkPill: {
+      position: 'absolute',
+      alignSelf: 'center',
+      maxWidth: '80%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
+    linkPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
     circle: {
       width: 34,
       height: 34,

@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 
 import { dayKey, matchesRule } from './logic';
+import { tick } from './haptics';
+import Icon from './Icon';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
   GROUPINGS,
@@ -52,15 +54,17 @@ export function SheetFrame({
   children: ReactNode;
 }) {
   const styles = useStyles(makeStyles);
+  const p = usePalette();
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.kav} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.backdrop}>
           <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={onClose} />
           <View style={styles.sheet}>
+            <View style={styles.grabber} />
             <View style={styles.header}>
               <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-                <Text style={styles.circleIcon}>✕</Text>
+                <Icon name="close" size={15} color={p.icon} weight="bold" />
               </TouchableOpacity>
               <Text style={styles.title} numberOfLines={1}>
                 {title}
@@ -109,7 +113,12 @@ export function Chip({
 }) {
   const styles = useStyles(makeStyles);
   return (
-    <TouchableOpacity style={[styles.chip, on && styles.chipOn]} onPress={onPress}>
+    <TouchableOpacity
+      style={[styles.chip, on && styles.chipOn]}
+      onPress={() => {
+        tick();
+        onPress();
+      }}>
       <Text style={[styles.chipText, on && styles.chipTextOn, danger && styles.chipTextDanger]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -758,11 +767,12 @@ const makeStyles = (p: Palette) =>
     backdropTap: { flex: 1 },
     sheet: {
       backgroundColor: p.panel,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      paddingTop: 16,
-      maxHeight: '88%',
+      borderTopLeftRadius: 30,
+      borderTopRightRadius: 30,
+      paddingTop: 6,
+      maxHeight: '90%',
     },
+    grabber: { alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: p.grabber, marginBottom: 8 },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -771,7 +781,7 @@ const makeStyles = (p: Palette) =>
       paddingBottom: 8,
       gap: 10,
     },
-    title: { flex: 1, color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+    title: { flex: 1, color: p.text, fontSize: 18, fontWeight: '800', textAlign: 'center', letterSpacing: -0.2 },
     circle: {
       width: 34,
       height: 34,
@@ -791,20 +801,18 @@ const makeStyles = (p: Palette) =>
     hint: { color: p.textSecondary, fontSize: 12 },
 
     section: { gap: 10 },
-    sectionLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+    sectionLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
     wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
     chip: {
       alignSelf: 'flex-start',
-      borderWidth: 1,
-      borderColor: p.border,
       backgroundColor: p.card,
       borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
     },
-    chipOn: { backgroundColor: p.accent, borderColor: p.accent },
-    chipText: { color: p.textSoft, fontSize: 13, fontWeight: '600' },
+    chipOn: { backgroundColor: p.accent },
+    chipText: { color: p.textSoft, fontSize: 14, fontWeight: '600' },
     chipTextOn: { color: '#fff' },
     chipTextDanger: { color: p.dangerText },
 
