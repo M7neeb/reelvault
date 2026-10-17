@@ -37,6 +37,43 @@ import {
   type ViewOptions,
 } from '@/features/vault/ui/types';
 import VaultScreen from '@/features/vault/ui/VaultScreen';
+import CategoryBar from '@/features/simkl/ui/CategoryBar';
+import { FIXTURE_SIMKL, fixtureSimklActions } from '@/features/simkl/ui/fixtures';
+import SimklScreen from '@/features/simkl/ui/SimklScreen';
+import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/types';
+import { resolveScheme } from '@/features/vault/ui/logic';
+import { paletteFor, ThemeContext } from '@/features/vault/ui/theme';
+
+/** Simkl surfaces: list, grid, detail, episodes, discover, calendar, stats, account, connect, notset. */
+function SimklPreview({ category, bar, surface }: { category: Exclude<Category, 'videos'>; bar: React.ReactNode; surface: string }) {
+  const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
+  const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
+  const firstOfType = FIXTURE_SIMKL.find((i) => i.type === category)?.simklId;
+  const dev: SimklScreenProps['devInitialState'] = {
+    detailId: surface === 'detail' || surface === 'episodes' ? firstOfType : undefined,
+    episodesOpen: surface === 'episodes',
+    accountOpen: surface === 'account',
+    grid: surface === 'grid',
+    discoverOpen: surface === 'discover',
+    calendarOpen: surface === 'calendar',
+    statsOpen: surface === 'stats',
+    connectCode: surface === 'connect' ? { code: 'ABCD-1234', url: 'https://simkl.com/pin' } : undefined,
+  };
+  return (
+    <SimklScreen
+      category={category}
+      categoryBar={bar}
+      configured={surface !== 'notset'}
+      connected={surface !== 'connect' && surface !== 'notset'}
+      items={items}
+      syncing={false}
+      status=""
+      lastSyncAt={null}
+      actions={actions}
+      devInitialState={dev}
+    />
+  );
+}
 
 const noop = async () => {};
 
@@ -100,8 +137,11 @@ function optionsFromUrl(params: Record<string, string | undefined>): ViewOptions
 }
 
 export default function PreviewRoute() {
-  const { view, theme, layout, size, info, group } = useLocalSearchParams<{
+  const { view, theme, layout, size, info, group, cat, sview } = useLocalSearchParams<{
     view?: string;
+    /** movie | show | anime: preview the Simkl screens instead (`sview` picks a surface). */
+    cat?: string;
+    sview?: string;
     theme?: string;
     layout?: string;
     size?: string;
@@ -219,10 +259,29 @@ export default function PreviewRoute() {
     }
   }, [viewOptions.sort]);
 
+  const [category, setCategory] = useState<Category>(
+    cat === 'movie' || cat === 'show' || cat === 'anime' ? cat : 'videos'
+  );
+  const palette = paletteFor(resolveScheme(viewOptions.theme, 'dark'));
+  const bar = (
+    <ThemeContext.Provider value={palette}>
+      <CategoryBar value={category} onChange={setCategory} />
+    </ThemeContext.Provider>
+  );
+
   if (!inBrowser) return null;
+
+  if (category !== 'videos') {
+    return (
+      <ThemeContext.Provider value={palette}>
+        <SimklPreview category={category} bar={bar} surface={sview ?? 'list'} />
+      </ThemeContext.Provider>
+    );
+  }
 
   return (
     <VaultScreen
+      categoryBar={bar}
       items={items}
       allTags={FIXTURE_TAGS}
       tagMap={FIXTURE_TAG_MAP}

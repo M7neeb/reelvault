@@ -116,6 +116,7 @@ function VaultScreenBody({
   status,
   actions,
   enableVideo = true,
+  categoryBar,
   devInitialState: dev,
 }: VaultScreenProps) {
   const insets = useSafeAreaInsets();
@@ -745,6 +746,7 @@ function VaultScreenBody({
 
   const listHeader = (
     <View style={[styles.listHeader, { paddingTop: insets.top + 56 }]}>
+      {categoryBar && <View style={styles.categoryBar}>{categoryBar}</View>}
       <View style={styles.subRow}>
         <Text style={styles.subText}>
           {plural(shown.length, 'video')}
@@ -1265,6 +1267,7 @@ function HeaderPill({
 
 const makeStyles = (p: Palette) =>
   sheet({
+    categoryBar: { paddingHorizontal: 10 },
     screen: { flex: 1, backgroundColor: p.bg, overflow: 'hidden' },
 
     floatingHeader: {

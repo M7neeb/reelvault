@@ -18,8 +18,10 @@
  *     lock itself out until the code dies while polling furiously. Back off
  *     FIRST, then poll.
  *
- *  3. The refresh token lasts 180 days and ROTATES ON EVERY USE. Persist the new
- *     one immediately, every single time, or the next refresh fails.
+ *  3. The refresh token lasts 180 days, sliding: each refresh pushes it out again.
+ *     It does not rotate (the same one comes back), but refreshing replaces the
+ *     access token on the grant, so only one place in the app may refresh -
+ *     api.ts and getFreshSimklTokens() below, never anything else.
  */
 
 import * as SecureStore from 'expo-secure-store';
@@ -215,6 +217,19 @@ export async function clearSimklTokens(): Promise<void> {
   await SecureStore.deleteItemAsync(TOKENS_KEY);
 }
 
+/** Sign out: tell Simkl to end the grant (always answers 200), then forget the tokens. */
+export async function revokeSimklTokens(): Promise<void> {
+  const tokens = await loadSimklTokens();
+  if (tokens) {
+    try {
+      await postForm('/oauth2/revoke', { client_id: SIMKL_CLIENT_ID, token: tokens.refresh_token });
+    } catch (e) {
+      console.log(`[SIMKL] revoke failed (ignored): ${String(e)}`);
+    }
+  }
+  await clearSimklTokens();
+}
+
 export const isSimklConnected = async (): Promise<boolean> => (await loadSimklTokens()) !== null;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,9 +247,9 @@ export const accessTokenIsStale = (t: SimklTokens) =>
 /**
  * Exchange the refresh token for a new pair.
  *
- * Rule 3: the refresh token ROTATES on every use and the old one dies. We save
- * the new pair before returning, so a crash cannot lose the rotation and strand
- * the account.
+ * Rule 3: the old access token stops working at once. We save the new pair
+ * before returning; the refresh token normally comes back unchanged, and we
+ * keep the old one if the response leaves it out.
  */
 export async function refreshSimklTokens(tokens: SimklTokens): Promise<SimklTokens> {
   const { status, json } = await postForm('/oauth2/token', {
@@ -247,8 +262,12 @@ export async function refreshSimklTokens(tokens: SimklTokens): Promise<SimklToke
     throw new Error(`Simkl refresh failed (${status}): ${JSON.stringify(json)}`);
   }
 
-  const next: SimklTokens = { ...(json as Omit<SimklTokens, 'obtained_at'>), obtained_at: Date.now() };
-  await saveSimklTokens(next); // persist the rotation immediately - rule 3
+  const next: SimklTokens = {
+    ...(json as Omit<SimklTokens, 'obtained_at'>),
+    refresh_token: typeof json.refresh_token === 'string' ? json.refresh_token : tokens.refresh_token,
+    obtained_at: Date.now(),
+  };
+  await saveSimklTokens(next);
   console.log('[SIMKL] tokens refreshed');
   return next;
 }

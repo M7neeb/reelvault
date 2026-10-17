@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export type Migration = {
   version: number;
@@ -171,6 +171,57 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE videos ADD COLUMN original_size INTEGER;
       ALTER TABLE videos ADD COLUMN original_key TEXT;
       CREATE INDEX IF NOT EXISTS idx_videos_original_key ON videos(original_key);
+    `,
+  },
+  {
+    version: 5,
+    sql: `
+      -- The user's Simkl library (movies, shows, anime). Never linked to videos.
+      CREATE TABLE IF NOT EXISTS simkl_items (
+        simkl_id          INTEGER PRIMARY KEY,
+        type              TEXT    NOT NULL,          -- movie | show | anime
+        title             TEXT    NOT NULL,
+        year              INTEGER,
+        poster            TEXT,                      -- image path, see simkl/logic.ts posterUrl
+        slug              TEXT,
+        runtime           INTEGER,
+        status            TEXT    NOT NULL,          -- watching | plantowatch | hold | completed | dropped
+        rating            INTEGER,                   -- 1..10 or NULL
+        rated_at          TEXT,
+        added_at          TEXT,
+        last_watched_at   TEXT,
+        watched_episodes  INTEGER NOT NULL DEFAULT 0,
+        total_episodes    INTEGER NOT NULL DEFAULT 0,
+        not_aired         INTEGER NOT NULL DEFAULT 0,
+        next_to_watch     TEXT,
+        anime_type        TEXT,
+        memo              TEXT,
+        next_title        TEXT,                      -- next_to_watch_info
+        next_date         TEXT,
+        simkl_rating      REAL,                      -- community ratings (/ratings/all)
+        simkl_votes       INTEGER,
+        imdb_rating       REAL,
+        imdb_votes        INTEGER,
+        mal_rating        REAL,
+        rank              INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_simkl_items_type ON simkl_items(type, status);
+
+      -- Watched episodes per show / anime, as far as Simkl told us.
+      CREATE TABLE IF NOT EXISTS simkl_episodes (
+        simkl_id   INTEGER NOT NULL REFERENCES simkl_items(simkl_id) ON DELETE CASCADE,
+        season     INTEGER NOT NULL,
+        episode    INTEGER NOT NULL,
+        watched_at TEXT,
+        PRIMARY KEY (simkl_id, season, episode)
+      );
+
+      -- Cached catalog responses (details, episode lists, search, trending, calendar).
+      CREATE TABLE IF NOT EXISTS simkl_cache (
+        key        TEXT PRIMARY KEY,
+        json       TEXT    NOT NULL,
+        fetched_at INTEGER NOT NULL
+      );
     `,
   },
 ];
