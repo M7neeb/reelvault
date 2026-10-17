@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, ScrollView, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
 import type { VideoLink } from '@/features/simkl/ui/types';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +54,7 @@ import {
   type CompressQuality,
   type GroupBy,
   type ImportSource,
+  type OverviewData,
   type PasscodeKind,
   type SecurityState,
   type SmartFilter,
@@ -62,6 +63,7 @@ import {
   type UiFolder,
   type UiTag,
   type VaultItem,
+  type VaultPrefs,
   type VaultScreenProps,
   type ViewOptions,
 } from './types';
@@ -69,6 +71,8 @@ import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
 import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
+import OverviewScreen from './OverviewScreen';
+import { ModeSwitch } from './overviewParts';
 import PersonaliseSheet from './PersonaliseSheet';
 import { DesktopTable, DetailedList } from './VideoList';
 import { DEFAULT_VAULT_PREFS } from './types';
@@ -76,6 +80,7 @@ import { Image as ThumbImage } from 'expo-image';
 import { fmtClock } from '../stats';
 
 const EMPTY_RESUME = new Map<string, number>();
+const EMPTY_OVERVIEW: OverviewData = { kept: [], series: [], members: [] };
 
 /** Picks the light or dark colours, then renders the screen inside them. */
 export default function VaultScreen(props: VaultScreenProps) {
@@ -125,6 +130,7 @@ function VaultScreenBody({
   prefs = DEFAULT_VAULT_PREFS,
   wrappedRequest,
   onWrappedHandled,
+  overview = EMPTY_OVERVIEW,
   devInitialState: dev,
 }: VaultScreenProps) {
   const insets = useSafeAreaInsets();
@@ -799,8 +805,19 @@ function VaultScreenBody({
         ? { ...viewOptions, layout: 'grid', size: 'small', infos: [], showRating: false, showKeywords: false }
         : viewOptions;
 
+  const videosMode = prefs.videosMode;
+  function switchMode(m: VaultPrefs['videosMode']) {
+    if (selectMode) exitSelect();
+    actions.setPrefs({ ...prefs, videosMode: m }).catch(fail('MODE'));
+  }
+
   const listHeader = (
     <View style={[styles.listHeader, { paddingTop: look === 'desktop' ? 8 : insets.top + 56 }]}>
+      {!special && !inPrivate && (
+        <View style={styles.modeRow}>
+          <ModeSwitch mode="watch" onChange={switchMode} />
+        </View>
+      )}
       <View style={styles.subRow}>
         <Text style={styles.subText}>
           {plural(shown.length, 'video')}
@@ -1259,6 +1276,28 @@ function VaultScreenBody({
         />
       )}
 
+      {videosMode === 'overview' && (
+        <View style={StyleSheet.absoluteFill}>
+          <OverviewScreen
+            items={publicItems}
+            deletedItems={deletedItems.filter((v) => !v.isPrivate)}
+            data={overview}
+            look={look}
+            prefs={prefs}
+            actions={actions}
+            onPlay={(id) => {
+              const v = items.find((x) => x.id === id);
+              if (v) setPlaying(v);
+            }}
+            onMode={switchMode}
+            onStats={() => setInsights('dashboard')}
+            onPersonalise={() => setPersonalise(true)}
+            devKey={dev?.overviewKey}
+            devSheet={dev?.overviewSheet}
+          />
+        </View>
+      )}
+
       {personalise && (
         <PersonaliseSheet viewOptions={viewOptions} onViewOptions={setViewOptions} prefs={prefs} actions={actions} onClose={() => setPersonalise(false)} />
       )}
@@ -1449,6 +1488,7 @@ const makeStyles = (p: Palette) =>
     headerRight: { flexDirection: 'row', gap: 8 },
 
     listHeader: { paddingBottom: 8, gap: 6 },
+    modeRow: { paddingHorizontal: 12, paddingBottom: 2 },
     subRow: {
       flexDirection: 'row',
       alignItems: 'center',

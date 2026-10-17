@@ -1,7 +1,7 @@
 /**
  * The library-info backup file: everything the user added to their videos
- * (ratings, titles, keywords, albums, flags, status, dates, smart filters) -
- * not the videos themselves. Pure functions, no imports; `backup.ts` does the
+ * (ratings, titles, keywords, albums, flags, status, dates, smart filters,
+ * series, and the info kept for removed videos) - not the videos themselves. Pure functions, no imports; `backup.ts` does the
  * reading and writing.
  *
  * Videos are matched back by their content key (size + hash of both ends),
@@ -25,6 +25,31 @@ export type BackupVideo = {
   albums: string[];
 };
 
+/** A video removed for good: only its info is left. */
+export type BackupKept = {
+  id: string;
+  title: string | null;
+  filename: string;
+  size: number;
+  durationMs: number | null;
+  rating: number;
+  status: string | null;
+  notes: string | null;
+  keywords: string[];
+  createdAt: number;
+  importedAt: number;
+  removedAt: number;
+};
+
+/** An episode points at a video in `videos` (by index) or at a removed one in `kept` (by id). */
+export type BackupSeries = {
+  name: string;
+  description: string | null;
+  rating: number;
+  status: string | null;
+  episodes: { video?: number; kept?: string; label: string | null }[];
+};
+
 export type Backup = {
   kind: typeof BACKUP_KIND;
   version: number;
@@ -34,6 +59,8 @@ export type Backup = {
   folders: string[];
   smartFilters: { name: string; rule: unknown; folder: string | null }[];
   pinnedKeywords: string[];
+  kept: BackupKept[];
+  series: BackupSeries[];
 };
 
 /** Reads a backup file; null when it isn't one. */
@@ -56,6 +83,18 @@ export function parseBackup(json: string): Backup | null {
     folders: Array.isArray(b.folders) ? b.folders.filter((f) => typeof f === 'string') : [],
     smartFilters: Array.isArray(b.smartFilters) ? b.smartFilters : [],
     pinnedKeywords: Array.isArray(b.pinnedKeywords) ? b.pinnedKeywords.filter((k) => typeof k === 'string') : [],
+    kept: Array.isArray(b.kept) ? b.kept.filter((k) => k && typeof k.id === 'string' && typeof k.filename === 'string') : [],
+    series: Array.isArray(b.series)
+      ? b.series
+          .filter((x) => x && typeof x.name === 'string' && Array.isArray(x.episodes))
+          .map((x) => ({
+            name: x.name,
+            description: typeof x.description === 'string' ? x.description : null,
+            rating: typeof x.rating === 'number' ? x.rating : 0,
+            status: typeof x.status === 'string' ? x.status : null,
+            episodes: x.episodes.filter((e) => e && (typeof e.video === 'number' || typeof e.kept === 'string')),
+          }))
+      : [],
   };
 }
 
@@ -76,4 +115,22 @@ export function matchBackup(backup: Backup, library: Target[]): Map<number, stri
     if (id) out.set(i, id);
   });
   return out;
+}
+
+/**
+ * The episodes of each backed-up series as ids in this library: matched
+ * videos, and removed videos' kept ids. Episodes that match nothing are left out.
+ */
+export function seriesEpisodes(
+  backup: Backup,
+  matches: Map<number, string>
+): { series: BackupSeries; episodes: { videoId: string; label: string | null }[] }[] {
+  const kept = new Set(backup.kept.map((k) => k.id));
+  return backup.series.map((series) => ({
+    series,
+    episodes: series.episodes.flatMap((e) => {
+      const id = typeof e.video === 'number' ? matches.get(e.video) : e.kept && kept.has(e.kept) ? e.kept : undefined;
+      return id ? [{ videoId: id, label: e.label ?? null }] : [];
+    }),
+  }));
 }

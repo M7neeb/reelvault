@@ -1,5 +1,6 @@
 import { Directory, File } from 'expo-file-system';
 
+import { keepInfo, keepUnrated } from './overviewStore';
 import { purgeCutoff } from './ui/logic';
 import { deletedBefore, markDeleted, removeRow, restoreVideos } from './repo';
 import { coverFileName, thumbsDir } from './storage';
@@ -22,8 +23,16 @@ export async function restore(videos: Video[]): Promise<void> {
   console.log(`[RESTORE] ${videos.length} restored`);
 }
 
-/** Remove a video for good: its file, cover thumbnail, filmstrip folder, then the row. */
-export async function purgeVideo(video: Video): Promise<void> {
+/**
+ * Remove a video for good: its file, cover thumbnail, filmstrip folder, then
+ * the row. Its rating and info are kept first, for the Overview.
+ */
+export async function purgeVideo(video: Video, onlyRated?: boolean): Promise<void> {
+  try {
+    await keepInfo(video, onlyRated ?? !(await keepUnrated()));
+  } catch (e) {
+    console.log(`[PURGE] info not kept: ${String(e)}`);
+  }
   try {
     const source = new File(video.uri);
     if (source.exists) source.delete();
@@ -49,7 +58,8 @@ export async function purgeVideo(video: Video): Promise<void> {
 }
 
 export async function purgeVideos(videos: Video[]): Promise<void> {
-  for (const v of videos) await purgeVideo(v);
+  const onlyRated = !(await keepUnrated());
+  for (const v of videos) await purgeVideo(v, onlyRated);
   console.log(`[PURGE] batch done - ${videos.length} removed for good`);
 }
 

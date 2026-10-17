@@ -90,6 +90,23 @@ import {
   resumePoints,
   setResumePoint,
 } from '@/features/vault/watching';
+import {
+  addToSeries,
+  createSeries,
+  deleteSeries,
+  forgetKept,
+  listKept,
+  listMembers,
+  listSeries,
+  pickKeptCover,
+  removeFromSeries,
+  reorderSeries,
+  setEpisodeLabel,
+  setSeriesCover,
+  updateKept,
+  updateSeries,
+} from '@/features/vault/overviewStore';
+import type { OvMember, OvSeries, OvVideo } from '@/features/vault/overview';
 import { onWrappedTap, setWrappedReminder, wrappedReminderOn } from '@/features/vault/wrappedReminder';
 import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
 import { DEFAULT_VAULT_PREFS, type VaultPrefs } from '@/features/vault/ui/types';
@@ -212,6 +229,9 @@ export type VaultData = {
   prefs: VaultPrefs;
   wrappedRequest: boolean;
   clearWrappedRequest: () => void;
+  kept: OvVideo[];
+  series: OvSeries[];
+  members: OvMember[];
 };
 
 const PREFS_KEY = 'vault.prefs';
@@ -223,6 +243,9 @@ function parsePrefs(json: string | null): VaultPrefs {
       ratingLabels: parseRatingLabels(JSON.stringify(r?.ratingLabels ?? {})),
       resumeEnabled: typeof r?.resumeEnabled === 'boolean' ? r.resumeEnabled : DEFAULT_VAULT_PREFS.resumeEnabled,
       holdForSpeed: typeof r?.holdForSpeed === 'boolean' ? r.holdForSpeed : DEFAULT_VAULT_PREFS.holdForSpeed,
+      videosMode: r?.videosMode === 'overview' ? 'overview' : 'watch',
+      keepUnrated: typeof r?.keepUnrated === 'boolean' ? r.keepUnrated : DEFAULT_VAULT_PREFS.keepUnrated,
+      hiddenSuggestions: Array.isArray(r?.hiddenSuggestions) ? r.hiddenSuggestions.filter((x: unknown) => typeof x === 'string').slice(0, 200) : [],
     };
   } catch {
     return DEFAULT_VAULT_PREFS;
@@ -246,6 +269,9 @@ export function useVaultData(): VaultData {
   const [resume, setResume] = useState<Map<string, number>>(new Map());
   const [prefs, setPrefsState] = useState<VaultPrefs>(DEFAULT_VAULT_PREFS);
   const [wrappedRequest, setWrappedRequest] = useState(false);
+  const [kept, setKept] = useState<OvVideo[]>([]);
+  const [series, setSeries] = useState<OvSeries[]>([]);
+  const [members, setMembers] = useState<OvMember[]>([]);
 
   useEffect(() => {
     getSetting(PREFS_KEY)
@@ -261,7 +287,7 @@ export function useVaultData(): VaultData {
   sortRef.current = viewOptions.sort;
 
   const refresh = useCallback(async () => {
-    const [list, trash, map, index, tagList, filters, albumRows, folderRows, members] = await Promise.all([
+    const [list, trash, map, index, tagList, filters, albumRows, folderRows, members, keptRows, seriesRows, seriesMembers] = await Promise.all([
       listVideos(sortRef.current),
       listDeleted(),
       tagCounts(),
@@ -271,7 +297,13 @@ export function useVaultData(): VaultData {
       listAlbums(),
       listFolders(),
       albumMembership(),
+      listKept(),
+      listSeries(),
+      listMembers(),
     ]);
+    setKept(keptRows);
+    setSeries(seriesRows);
+    setMembers(seriesMembers);
     setVideos(list);
     setDeleted(trash);
     setCounts(map);
@@ -686,6 +718,29 @@ export function useVaultData(): VaultData {
       canChangeAppIcon: () => supportsAlternateIcons,
       getWrappedReminder: wrappedReminderOn,
       setWrappedReminder,
+      ovCreateSeries: async (name, ids) => {
+        const id = await createSeries(name, ids);
+        await refresh();
+        return id;
+      },
+      ovAddToSeries: andRefresh(addToSeries),
+      ovRemoveFromSeries: andRefresh(removeFromSeries),
+      ovReorder: andRefresh(reorderSeries),
+      ovEpisodeName: andRefresh(setEpisodeLabel),
+      ovUpdateSeries: andRefresh(updateSeries),
+      ovSeriesCover: async (id, from) => {
+        const ok = await setSeriesCover(id, from);
+        await refresh();
+        return ok;
+      },
+      ovDeleteSeries: andRefresh(deleteSeries),
+      ovUpdateKept: andRefresh(updateKept),
+      ovKeptCover: async (id) => {
+        const ok = await pickKeptCover(id);
+        await refresh();
+        return ok;
+      },
+      ovForget: andRefresh(forgetKept),
     }),
     [onImport, onImportFolder, onImportLink, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );
@@ -708,5 +763,8 @@ export function useVaultData(): VaultData {
     prefs,
     wrappedRequest,
     clearWrappedRequest: () => setWrappedRequest(false),
+    kept,
+    series,
+    members,
   };
 }

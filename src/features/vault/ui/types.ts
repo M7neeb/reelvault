@@ -426,6 +426,26 @@ export type VaultActions = {
   /** A notification every Monday morning: "Your weekly Wrapped is ready". */
   getWrappedReminder: () => Promise<boolean>;
   setWrappedReminder: (on: boolean) => Promise<boolean>;
+
+  /* Overview (rate and track your videos like shows). */
+  ovCreateSeries: (name: string, videoIds: string[]) => Promise<string>;
+  ovAddToSeries: (seriesId: string, videoIds: string[]) => Promise<void>;
+  ovRemoveFromSeries: (videoIds: string[]) => Promise<void>;
+  ovReorder: (seriesId: string, order: string[]) => Promise<void>;
+  ovEpisodeName: (videoId: string, name: string | null) => Promise<void>;
+  ovUpdateSeries: (
+    id: string,
+    change: { name?: string; description?: string | null; rating?: number; status?: UiStatus | null }
+  ) => Promise<void>;
+  /** 'photo' = pick one; { uri } = copy that picture (an episode's cover); null = first episode's cover. */
+  ovSeriesCover: (id: string, from: 'photo' | { uri: string } | null) => Promise<boolean>;
+  /** Ungroups: the videos stay. */
+  ovDeleteSeries: (id: string) => Promise<void>;
+  /** A video removed for good (only its info is left). */
+  ovUpdateKept: (id: string, change: { title?: string | null; notes?: string | null; rating?: number; status?: UiStatus | null }) => Promise<void>;
+  ovKeptCover: (id: string) => Promise<boolean>;
+  /** Forget removed videos completely. */
+  ovForget: (ids: string[]) => Promise<void>;
 };
 
 /** Your own settings for watching your videos. */
@@ -436,11 +456,33 @@ export type VaultPrefs = {
   resumeEnabled: boolean;
   /** Hold the left or right edge of the video to play at 2×. */
   holdForSpeed: boolean;
+  /** The Videos tab: watch your videos, or rate and track them (Overview). */
+  videosMode: 'watch' | 'overview';
+  /** Keep the info of removed videos you never rated too (not only rated ones). */
+  keepUnrated: boolean;
+  /** Series suggestions you dismissed (by their name). */
+  hiddenSuggestions: string[];
 };
 
-export const DEFAULT_VAULT_PREFS: VaultPrefs = { ratingLabels: {}, resumeEnabled: true, holdForSpeed: true };
+export const DEFAULT_VAULT_PREFS: VaultPrefs = {
+  ratingLabels: {},
+  resumeEnabled: true,
+  holdForSpeed: true,
+  videosMode: 'watch',
+  keepUnrated: true,
+  hiddenSuggestions: [],
+};
+
+/** What the Overview needs besides the library: removed videos' info, and series. */
+export type OverviewData = {
+  kept: import('../overview').OvVideo[];
+  series: import('../overview').OvSeries[];
+  members: import('../overview').OvMember[];
+};
 
 export type VaultScreenProps = {
+  /** Removed videos' info and series, for Overview mode. */
+  overview?: OverviewData;
   /** Saved "continue another time" points: video id → position (ms). */
   resume?: Map<string, number>;
   prefs?: VaultPrefs;
@@ -508,6 +550,9 @@ export type VaultScreenProps = {
     importMenuOpen?: boolean;
     insightsTab?: 'dashboard' | 'wrapped' | 'badges' | 'storage';
     personaliseOpen?: boolean;
+    /** Overview: open this title ('s:<id>' or 'v:<id>'), or a sheet. */
+    overviewKey?: string;
+    overviewSheet?: 'new' | 'edit' | 'add';
     passcodeOpen?: boolean;
     slideshowOpen?: boolean;
     compareOpen?: boolean;

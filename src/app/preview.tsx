@@ -29,6 +29,7 @@ import {
   fixtureSearch,
   fixturePlays,
   FIXTURE_BOOKMARKS,
+  FIXTURE_OVERVIEW,
 } from '@/features/vault/ui/fixtures';
 import { parseViewOptions } from '@/features/vault/ui/logic';
 import { SUGGESTED_LABELS } from '@/features/vault/stats';
@@ -270,6 +271,15 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   badges: { insightsTab: 'badges' },
   storage: { insightsTab: 'storage' },
   personalise: { personaliseOpen: true },
+  // Overview mode (rate and track your videos like shows).
+  ov: {},
+  'ov-series': { overviewKey: 's:fixture-series-1' },
+  'ov-walks': { overviewKey: 's:fixture-series-2' },
+  'ov-single': { overviewKey: 'v:fixture-2' },
+  'ov-kept': { overviewKey: 'v:fixture-kept-6' },
+  'ov-new': { overviewSheet: 'new' },
+  'ov-edit': { overviewKey: 's:fixture-series-1', overviewSheet: 'edit' },
+  'ov-add': { overviewKey: 's:fixture-series-2', overviewSheet: 'add' },
 };
 
 /**
@@ -304,7 +314,11 @@ export default function PreviewRoute() {
     group?: string;
   }>();
   const [viewOptions, setViewOptions] = useState<ViewOptions>(() => optionsFromUrl({ theme, layout, size, info, group, look, accent: accent ? `#${accent}` : undefined }));
-  const [prefs, setPrefs] = useState<VaultPrefs>({ ...DEFAULT_VAULT_PREFS, ratingLabels: SUGGESTED_LABELS });
+  const [prefs, setPrefs] = useState<VaultPrefs>({
+    ...DEFAULT_VAULT_PREFS,
+    ratingLabels: SUGGESTED_LABELS,
+    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : 'watch',
+  });
   const [security, setSecurity] = useState<SecurityState>({
     passcodeKind: null,
     faceId: true,
@@ -422,6 +436,17 @@ export default function PreviewRoute() {
       canChangeAppIcon: () => true,
       getWrappedReminder: async () => true,
       setWrappedReminder: async () => true,
+      ovCreateSeries: async () => 'fixture-series-1',
+      ovAddToSeries: noop,
+      ovRemoveFromSeries: noop,
+      ovReorder: noop,
+      ovEpisodeName: noop,
+      ovUpdateSeries: noop,
+      ovSeriesCover: async () => true,
+      ovDeleteSeries: noop,
+      ovUpdateKept: noop,
+      ovKeptCover: async () => true,
+      ovForget: noop,
     }),
     [security],
   );
@@ -484,6 +509,7 @@ export default function PreviewRoute() {
       prefs={prefs}
       wrappedRequest={view === 'wrapped-story'}
       resume={new Map([[(FIXTURE_ITEMS.find((v) => (v.durationMs ?? 0) >= 300_000) ?? FIXTURE_ITEMS[0]).id, 6 * 60_000]])}
+          overview={FIXTURE_OVERVIEW}
           devInitialState={VIEWS[view ?? 'grid'] ?? {}}
         />
         {!VIEWS[view ?? 'grid']?.viewerId && <TabBarMock active="videos" />}

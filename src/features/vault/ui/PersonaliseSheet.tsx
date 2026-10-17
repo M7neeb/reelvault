@@ -2,7 +2,7 @@
  * Settings → Personalise: the layout style (Standard, Simple, Detailed,
  * Compact, Desktop), the accent colour, the app icon, your own words for
  * ratings, and watching options (continue another time, hold for 2×, the
- * weekly Wrapped notification). Presentational only.
+ * weekly Wrapped notification, keeping removed videos' info). Presentational only.
  */
 
 import { useEffect, useState } from 'react';
@@ -245,6 +245,14 @@ export default function PersonaliseSheet({
         <ToggleRow label="Continue another time (videos of 5 min or more)" value={prefs.resumeEnabled} onChange={(v) => savePrefs({ resumeEnabled: v })} />
         <Text style={styles.hint}>Tap the clock in the player and it picks up 2.5 minutes before where you stopped next time.</Text>
         <ToggleRow label="Hold the left or right edge for 2× speed" value={prefs.holdForSpeed} onChange={(v) => savePrefs({ holdForSpeed: v })} />
+        <ToggleRow
+          label="Keep the info of removed videos I never rated"
+          value={prefs.keepUnrated}
+          onChange={(v) => savePrefs({ keepUnrated: v })}
+        />
+        <Text style={styles.hint}>
+          When a video is removed for good, its rating, status, keywords and picture stay in Overview. Off = only videos you rated, gave a status or put in a series.
+        </Text>
         {weekly !== null && (
           <ToggleRow
             label="Weekly Wrapped notification (Monday 10:00)"

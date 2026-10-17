@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export type Migration = {
   version: number;
@@ -348,6 +348,51 @@ export const MIGRATIONS: Migration[] = [
         position_ms INTEGER NOT NULL,
         saved_at    INTEGER NOT NULL
       );
+    `,
+  },
+  {
+    version: 9,
+    sql: `
+      -- What is kept after a video is removed for good: its rating and info,
+      -- so the Overview still shows it (the file itself is gone).
+      CREATE TABLE IF NOT EXISTS vault_kept (
+        video_id    TEXT PRIMARY KEY,         -- the id the video had
+        title       TEXT,
+        filename    TEXT NOT NULL,
+        size        INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER,
+        rating      REAL NOT NULL DEFAULT 0,
+        status      TEXT,
+        notes       TEXT,
+        tags        TEXT,                     -- JSON array of keyword names
+        is_private  INTEGER NOT NULL DEFAULT 0,
+        thumb       TEXT,                     -- file name in thumbs/kept, or null
+        created_at  INTEGER NOT NULL,
+        imported_at INTEGER NOT NULL,
+        removed_at  INTEGER NOT NULL
+      );
+
+      -- Videos that belong together ("a show"), rated as a whole and per episode.
+      CREATE TABLE IF NOT EXISTS vault_series (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        description TEXT,
+        cover       TEXT,                     -- file name in thumbs/series, or null = first episode
+        rating      REAL NOT NULL DEFAULT 0,
+        status      TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+
+      -- A video is in at most one series. No foreign key to videos: the
+      -- episode stays in its series after the video is removed for good.
+      CREATE TABLE IF NOT EXISTS vault_series_items (
+        video_id  TEXT PRIMARY KEY,
+        series_id TEXT NOT NULL REFERENCES vault_series(id) ON DELETE CASCADE,
+        position  INTEGER NOT NULL,
+        label     TEXT                        -- episode name, null = the video's own
+      );
+      CREATE INDEX IF NOT EXISTS idx_series_items ON vault_series_items(series_id, position);
     `,
   },
 ];
