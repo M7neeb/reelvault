@@ -78,6 +78,21 @@ import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share'
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
 import { cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
 import { planForQuality } from '@/features/vault/edit';
+import { parseRatingLabels } from '@/features/vault/stats';
+import {
+  addBookmark,
+  allVaultPlays,
+  bookmarkCount,
+  bookmarksFor,
+  deleteBookmark,
+  recordPlay,
+  renameBookmark,
+  resumePoints,
+  setResumePoint,
+} from '@/features/vault/watching';
+import { onWrappedTap, setWrappedReminder, wrappedReminderOn } from '@/features/vault/wrappedReminder';
+import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
+import { DEFAULT_VAULT_PREFS, type VaultPrefs } from '@/features/vault/ui/types';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -193,7 +208,26 @@ export type VaultData = {
   busy: boolean;
   status: string;
   actions: VaultActions;
+  resume: Map<string, number>;
+  prefs: VaultPrefs;
+  wrappedRequest: boolean;
+  clearWrappedRequest: () => void;
 };
+
+const PREFS_KEY = 'vault.prefs';
+
+function parsePrefs(json: string | null): VaultPrefs {
+  try {
+    const r = json ? JSON.parse(json) : {};
+    return {
+      ratingLabels: parseRatingLabels(JSON.stringify(r?.ratingLabels ?? {})),
+      resumeEnabled: typeof r?.resumeEnabled === 'boolean' ? r.resumeEnabled : DEFAULT_VAULT_PREFS.resumeEnabled,
+      holdForSpeed: typeof r?.holdForSpeed === 'boolean' ? r.holdForSpeed : DEFAULT_VAULT_PREFS.holdForSpeed,
+    };
+  } catch {
+    return DEFAULT_VAULT_PREFS;
+  }
+}
 
 export function useVaultData(): VaultData {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -209,6 +243,19 @@ export function useVaultData(): VaultData {
   const [status, setStatus] = useState('');
   const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
   const [freeGb, setFreeGb] = useState<number | null>(null);
+  const [resume, setResume] = useState<Map<string, number>>(new Map());
+  const [prefs, setPrefsState] = useState<VaultPrefs>(DEFAULT_VAULT_PREFS);
+  const [wrappedRequest, setWrappedRequest] = useState(false);
+
+  useEffect(() => {
+    getSetting(PREFS_KEY)
+      .then((v) => setPrefsState(parsePrefs(v)))
+      .catch(() => undefined);
+    resumePoints()
+      .then(setResume)
+      .catch(() => undefined);
+    return onWrappedTap(() => setWrappedRequest(true));
+  }, []);
 
   const sortRef = useRef<SortKey>(viewOptions.sort);
   sortRef.current = viewOptions.sort;
@@ -611,6 +658,34 @@ export function useVaultData(): VaultData {
       setFakePasscode,
       setFaceId: setFaceIdEnabled,
       checkPasscode,
+      recordPlay,
+      loadPlays: allVaultPlays,
+      loadBookmarks: bookmarksFor,
+      addBookmark,
+      renameBookmark,
+      deleteBookmark,
+      countBookmarks: bookmarkCount,
+      setResume: async (videoId, positionMs) => {
+        await setResumePoint(videoId, positionMs);
+        setResume(await resumePoints());
+      },
+      setPrefs: async (next) => {
+        setPrefsState(next);
+        await setSetting(PREFS_KEY, JSON.stringify(next));
+      },
+      appIcon: () => {
+        try {
+          return getAppIconName();
+        } catch {
+          return null;
+        }
+      },
+      setAppIcon: async (name) => {
+        await setAlternateAppIcon(name as never);
+      },
+      canChangeAppIcon: () => supportsAlternateIcons,
+      getWrappedReminder: wrappedReminderOn,
+      setWrappedReminder,
     }),
     [onImport, onImportFolder, onImportLink, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );
@@ -629,5 +704,9 @@ export function useVaultData(): VaultData {
     busy,
     status,
     actions,
+    resume,
+    prefs,
+    wrappedRequest,
+    clearWrappedRequest: () => setWrappedRequest(false),
   };
 }

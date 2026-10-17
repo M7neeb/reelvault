@@ -269,6 +269,8 @@ export function parseViewOptions(json: string | null, defaults: ViewOptions): Vi
 
   return {
     layout: oneOf(r.layout, LAYOUT_KEYS, defaults.layout),
+    look: oneOf(r.look, ['standard', 'simple', 'detailed', 'compact', 'desktop'] as const, defaults.look),
+    accent: typeof r.accent === 'string' && /^#[0-9a-f]{6}$/i.test(r.accent) ? r.accent : defaults.accent,
     size: oneOf(r.size, SIZE_KEYS, legacySize ?? defaults.size),
     sort: oneOf(r.sort, SORT_KEYS, defaults.sort),
     groupBy: oneOf(r.groupBy, GROUP_KEYS, defaults.groupBy),

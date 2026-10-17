@@ -218,6 +218,7 @@ export function SettingsSheet({
   canMakeSmaller,
   importQuality,
   onImportQuality,
+  onPersonalise,
   onClose,
 }: {
   security: SecurityState | null;
@@ -234,6 +235,7 @@ export function SettingsSheet({
   /** Make Smaller quality for every import; null = off. */
   importQuality: CompressQuality | null;
   onImportQuality: (quality: CompressQuality | null) => void;
+  onPersonalise?: () => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
@@ -242,6 +244,11 @@ export function SettingsSheet({
 
   return (
     <SheetFrame title="Settings" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
+      {onPersonalise && (
+        <Section label="Personalise">
+          <Chip label="Layout, accent colour, app icon, rating words…" onPress={onPersonalise} />
+        </Section>
+      )}
       <Section label="Private album">
         {on ? (
           <>

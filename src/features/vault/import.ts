@@ -8,6 +8,7 @@ import { readVideoMeta } from './metadata';
 import { findByContentKey, insertVideo } from './repo';
 import { probeDurationMs } from './duration';
 import { ensureDirs, thumbsDir, videosDir } from './storage';
+import { addTagToVideo } from './tags';
 import type { Video } from './types';
 
 export type ImportSummary = {
@@ -130,6 +131,10 @@ export async function importAssets(
         originalKey: null,
       };
       await insertVideo(video);
+      // Keywords another app saved inside the file (Photos, HashPhotos...) become tags.
+      for (const k of meta.keywords ?? []) {
+        await addTagToVideo(id, k).catch((e) => console.log(`[IMPORT] keyword ${k} skipped: ${String(e)}`));
+      }
 
       summary.imported++;
       console.log(`[IMPORT] ok ${asset.name} -> ${id} (${size} bytes)`);

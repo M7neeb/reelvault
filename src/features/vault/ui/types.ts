@@ -102,8 +102,41 @@ export const THEMES: { key: ThemeMode; label: string }[] = [
 ];
 
 /** How the app looks. Saved in the settings table, so it survives a restart. */
+/**
+ * How the whole app is laid out (Settings → Look). Each one is really
+ * different, not a tweak: Simple = big tiles and nothing else, Detailed =
+ * rows with every fact, Compact = as much on screen as fits, Desktop = a
+ * table with columns and a filter rail.
+ */
+export type Look = 'standard' | 'simple' | 'detailed' | 'compact' | 'desktop';
+
+export const LOOKS: { key: Look; label: string; hint: string }[] = [
+  { key: 'standard', label: 'Standard', hint: 'The grid with badges, like HashPhotos' },
+  { key: 'simple', label: 'Simple', hint: 'Big pictures, no badges, nothing to read' },
+  { key: 'detailed', label: 'Detailed', hint: 'A row per video with every fact, tags and your rating words' },
+  { key: 'compact', label: 'Compact', hint: 'Small tiles and short rows: the most on one screen' },
+  { key: 'desktop', label: 'Desktop', hint: 'A sortable table with columns and a filter rail on the left' },
+];
+
+/** Accent colours offered in Settings (null = the default blue). */
+export const ACCENTS: { key: string; label: string }[] = [
+  { key: '#0A84FF', label: 'Blue' },
+  { key: '#5E5CE6', label: 'Indigo' },
+  { key: '#BF5AF2', label: 'Purple' },
+  { key: '#FF375F', label: 'Pink' },
+  { key: '#FF453A', label: 'Red' },
+  { key: '#FF9F0A', label: 'Orange' },
+  { key: '#30D158', label: 'Green' },
+  { key: '#30B0C7', label: 'Teal' },
+  { key: '#00A86B', label: 'Jade' },
+  { key: '#AC8E68', label: 'Brown' },
+];
+
 export type ViewOptions = {
   layout: LayoutStyle;
+  look: Look;
+  /** null = the default blue. */
+  accent: string | null;
   size: ThumbSize;
   sort: VaultSort;
   groupBy: GroupBy;
@@ -117,6 +150,8 @@ export type ViewOptions = {
 
 export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   layout: 'grid',
+  look: 'standard',
+  accent: null,
   size: 'large',
   sort: 'recent',
   groupBy: 'none',
@@ -373,9 +408,45 @@ export type VaultActions = {
   onRestoreMany: (items: VaultItem[]) => Promise<void>;
   /** Remove videos in Recently Deleted for good (file, thumbnails, row). */
   onPurgeMany: (items: VaultItem[]) => Promise<void>;
+  /** Watching: every play is recorded for the dashboard, Wrapped and badges. */
+  recordPlay: (videoId: string, startedAt: number, watchedMs: number) => Promise<void>;
+  loadPlays: () => Promise<import('../stats').VaultPlay[]>;
+  loadBookmarks: (videoId: string) => Promise<import('../watching').Bookmark[]>;
+  addBookmark: (videoId: string, atMs: number, label: string | null) => Promise<void>;
+  renameBookmark: (id: number, label: string | null) => Promise<void>;
+  deleteBookmark: (id: number) => Promise<void>;
+  countBookmarks: () => Promise<number>;
+  /** null clears it. */
+  setResume: (videoId: string, positionMs: number | null) => Promise<void>;
+  setPrefs: (prefs: VaultPrefs) => Promise<void>;
+  /** Alternate app icons (names from APP_ICONS; null = default). */
+  appIcon: () => string | null;
+  setAppIcon: (name: string | null) => Promise<void>;
+  canChangeAppIcon: () => boolean;
+  /** A notification every Monday morning: "Your weekly Wrapped is ready". */
+  getWrappedReminder: () => Promise<boolean>;
+  setWrappedReminder: (on: boolean) => Promise<boolean>;
 };
 
+/** Your own settings for watching your videos. */
+export type VaultPrefs = {
+  /** Your words for ratings ("1 = Waste of time"). */
+  ratingLabels: import('../stats').RatingLabels;
+  /** Offer "Continue another time" on videos of 5 minutes or more. */
+  resumeEnabled: boolean;
+  /** Hold the left or right edge of the video to play at 2×. */
+  holdForSpeed: boolean;
+};
+
+export const DEFAULT_VAULT_PREFS: VaultPrefs = { ratingLabels: {}, resumeEnabled: true, holdForSpeed: true };
+
 export type VaultScreenProps = {
+  /** Saved "continue another time" points: video id → position (ms). */
+  resume?: Map<string, number>;
+  prefs?: VaultPrefs;
+  /** Open this week's Wrapped (the Monday notification was tapped). */
+  wrappedRequest?: boolean;
+  onWrappedHandled?: () => void;
   /** Simkl, for linking videos to a movie or episode and scrobbling them. */
   simkl?: import('@/features/simkl/ui/types').SimklBridge;
   /** All videos, already sorted by `viewOptions.sort`. Filtering happens inside the UI. */
@@ -435,6 +506,8 @@ export type VaultScreenProps = {
     /** With viewerId: open the editor on this tab. */
     editorTab?: 'trim' | 'crop' | 'size';
     importMenuOpen?: boolean;
+    insightsTab?: 'dashboard' | 'wrapped' | 'badges' | 'storage';
+    personaliseOpen?: boolean;
     passcodeOpen?: boolean;
     slideshowOpen?: boolean;
     compareOpen?: boolean;

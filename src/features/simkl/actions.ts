@@ -5,6 +5,7 @@
  */
 
 import { simklRequest } from './api';
+import { franchiseQuery, parseFranchises, simklTypeOf, WIKIDATA_SPARQL, type Franchise, type FranchiseEntry, type FranchiseItem } from './franchise';
 import {
   parseCatalog,
   parseEpisodes,
@@ -320,6 +321,7 @@ export type SimklDetail = {
   language: string | null;
   country: string | null;
   trailer: string | null;
+  imdb: string | null;
   related: CatalogTitle[];
 };
 
@@ -327,7 +329,7 @@ const detailPath = (type: SimklType) => (type === 'movie' ? 'movies' : type === 
 
 /** The detail record, cached for a day (catalog calls carry no user token). */
 export function loadDetail(type: SimklType, id: number): Promise<SimklDetail> {
-  return cached(`detail3:${type}:${id}`, 24 * HOUR, async () => {
+  return cached(`detail4:${type}:${id}`, 24 * HOUR, async () => {
     const d = await simklRequest<any>(`/${detailPath(type)}/${id}`);
     await saveMeta(id, {
       genres: Array.isArray(d?.genres) ? d.genres : [],
@@ -360,6 +362,7 @@ export function loadDetail(type: SimklType, id: number): Promise<SimklDetail> {
       language: typeof d?.original_language === 'string' ? d.original_language.toUpperCase() : null,
       country: typeof d?.country === 'string' ? d.country.toUpperCase() : null,
       trailer: trailerUrl(d?.trailers),
+      imdb: typeof d?.ids?.imdb === 'string' ? d.ids.imdb : null,
       related: [...parseRelated(d?.users_recommendations, type), ...parseRelated(d?.similar, type)]
         .filter((r, i, all) => all.findIndex((x) => x.simklId === r.simklId) === i)
         .slice(0, 15),
@@ -473,3 +476,39 @@ export async function scrobble(
   }
 }
 
+
+/* ---------------------------------------------------------------- franchise */
+
+/** The series this title belongs to (Wikidata), biggest first. Cached for a week. */
+export async function loadFranchises(type: SimklType, id: number): Promise<Franchise[]> {
+  const d = await loadDetail(type, id);
+  if (!d.imdb) return [];
+  const imdb = d.imdb;
+  return cached(`franchise:${imdb}`, 7 * 24 * HOUR, async () => {
+    const res = await fetch(`${WIKIDATA_SPARQL}?format=json&query=${encodeURIComponent(franchiseQuery(imdb))}`, {
+      headers: { Accept: 'application/sparql-results+json', 'User-Agent': 'ReelVault/1.4 (personal iPhone app)' },
+    });
+    if (!res.ok) throw new Error(`Wikidata ${res.status}`);
+    return parseFranchises(await res.json()).slice(0, 6);
+  });
+}
+
+/** Each entry's Simkl title (by IMDb id), one lookup at a time, cached for a month. */
+export async function matchFranchise(entries: FranchiseEntry[]): Promise<FranchiseItem[]> {
+  const out: FranchiseItem[] = [];
+  for (const e of entries) {
+    try {
+      const hit = await cached(`simklid:${e.imdb}`, 30 * 24 * HOUR, async () => {
+        const r = await simklRequest<any[]>('/search/id', { query: { imdb: e.imdb } });
+        const first = Array.isArray(r) ? r[0] : null;
+        return first
+          ? { simklId: Number(first.ids?.simkl) || null, type: simklTypeOf(first.type), poster: first.poster ?? null, year: first.year ?? null }
+          : null;
+      });
+      out.push({ ...e, simklId: hit?.simklId ?? null, type: hit?.type ?? null, poster: hit?.poster ?? null, year: hit?.year ?? null });
+    } catch {
+      out.push({ ...e, simklId: null, type: null, poster: null, year: null });
+    }
+  }
+  return out;
+}

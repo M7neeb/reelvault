@@ -144,3 +144,44 @@ test('linking guesses the title and episode from the file name', () => {
   assert.deepEqual(guessEpisode({ title: null, filename: 'show.s1e12.mp4' }), { season: 1, episode: 12 });
   assert.equal(guessEpisode({ title: null, filename: 'movie.mp4' }), null);
 });
+
+import { franchiseQuery, hasOrdinals, parseFranchises, simklTypeOf, sortOrdinal } from '../src/features/simkl/franchise.ts';
+
+const row = (series, sLabel, m, mLabel, imdb, date, ord) => ({
+  series: { value: `http://www.wikidata.org/entity/${series}` },
+  seriesLabel: { value: sLabel },
+  m: { value: `http://www.wikidata.org/entity/${m}` },
+  mLabel: { value: mLabel },
+  imdb: { value: imdb },
+  ...(date ? { date: { value: `${date}T00:00:00Z` } } : {}),
+  ...(ord ? { ord: { value: ord } } : {}),
+});
+
+test('franchise: series folded, biggest first, release and series order', () => {
+  const json = {
+    results: {
+      bindings: [
+        row('Q1', 'Big Saga', 'Q10', 'Second', 'tt2', '2012-05-01', '2'),
+        row('Q1', 'Big Saga', 'Q10', 'Second', 'tt2', '2012-04-25', '2'),
+        row('Q1', 'Big Saga', 'Q11', 'First', 'tt1', '2008-05-02', '1'),
+        row('Q1', 'Big Saga', 'Q12', 'Prequel', 'tt3', '2019-03-08', '0.5'),
+        row('Q2', 'Small Pair', 'Q10', 'Second', 'tt2', '2012-04-25'),
+        row('Q2', 'Small Pair', 'Q13', 'Other', 'tt4', null),
+        row('Q3', 'Alone', 'Q10', 'Second', 'tt2', '2012-04-25'),
+        row('Q1', 'Big Saga', 'Q14', 'Bad', 'nope', '2001-01-01'),
+      ],
+    },
+  };
+  const [big, small] = parseFranchises(json);
+  assert.equal(big.name, 'Big Saga');
+  assert.deepEqual(big.entries.map((e) => e.title), ['First', 'Second', 'Prequel']);
+  assert.equal(big.entries[1].date, '2012-04-25');
+  assert.deepEqual(sortOrdinal(big.entries).map((e) => e.title), ['Prequel', 'First', 'Second']);
+  assert.ok(hasOrdinals(big));
+  assert.equal(small.entries.at(-1).title, 'Other');
+  assert.equal(parseFranchises(json).length, 2);
+  assert.match(franchiseQuery('tt0848228'), /wdt:P345 "tt0848228"/);
+  assert.throws(() => franchiseQuery('x" } DROP'));
+  assert.equal(simklTypeOf('tv'), 'show');
+  assert.equal(simklTypeOf('book'), null);
+});

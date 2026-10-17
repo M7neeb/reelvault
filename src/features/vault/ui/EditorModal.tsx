@@ -6,13 +6,17 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, ScrollView, Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
+import { Modal, PanResponder, ScrollView, Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   ASPECTS,
+  freeCropOrNull,
+  moveCrop,
+  type Crop,
+  type CropHandle,
   cropFor,
   EMPTY_PLAN,
   estimateBytes,
@@ -80,6 +84,7 @@ export default function EditorModal({
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(1);
   const [aspect, setAspect] = useState('original');
+  const [free, setFree] = useState<Crop>({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
   const [zoom, setZoom] = useState(0);
   const [posX, setPosX] = useState(0.5);
   const [posY, setPosY] = useState(0.5);
@@ -122,7 +127,12 @@ export default function EditorModal({
 
   const ratio = ASPECTS.find((a) => a.key === aspect)?.ratio ?? null;
   const zoomFactor = 1 + zoom * 2;
-  const crop = item.width && item.height ? cropFor(ratio, item.width, item.height, zoomFactor, posX, posY) : null;
+  const crop =
+    aspect === 'free'
+      ? freeCropOrNull(free)
+      : item.width && item.height
+        ? cropFor(ratio, item.width, item.height, zoomFactor, posX, posY)
+        : null;
 
   const plan: EditPlan = useMemo(
     () => ({
@@ -224,7 +234,8 @@ export default function EditorModal({
           ) : (
             <Image source={item.thumbSource} style={styles.video} contentFit="contain" />
           )}
-          {crop && box.w > 0 && (
+          {aspect === 'free' && tab === 'crop' && box.w > 0 && <FreeFrame box={box} crop={free} onChange={setFree} />}
+          {crop && box.w > 0 && aspect !== 'free' && (
             <View pointerEvents="none" style={StyleFill}>
               {/* Dim everything outside the crop. */}
               <View style={[styles.dim, { left: box.x, top: box.y, width: box.w, height: crop.y * box.h }]} />
@@ -310,19 +321,29 @@ export default function EditorModal({
           {tab === 'crop' && (
             <>
               <Wrap>
+                <Chip label="Free" on={aspect === 'free'} onPress={() => setAspect('free')} />
                 {ASPECTS.map((a) => (
                   <Chip key={a.key} label={a.label} on={aspect === a.key} onPress={() => setAspect(a.key)} />
                 ))}
               </Wrap>
-              <Text style={styles.label}>Zoom {zoomFactor.toFixed(1)}×</Text>
-              <Slider value={zoom} onChange={setZoom} />
-              {(freeAxis === 'x' || freeAxis === 'both') && (
+              {aspect === 'free' ? (
+                <Text style={styles.hint}>
+                  Drag the corners or edges of the frame to crop exactly what you want; drag inside it to move it.
+                  {item.width && item.height && crop ? ` ${Math.round(crop.w * item.width)} × ${Math.round(crop.h * item.height)}` : ''}
+                </Text>
+              ) : (
+                <>
+                  <Text style={styles.label}>Zoom {zoomFactor.toFixed(1)}×</Text>
+                  <Slider value={zoom} onChange={setZoom} />
+                </>
+              )}
+              {aspect !== 'free' && (freeAxis === 'x' || freeAxis === 'both') && (
                 <>
                   <Text style={styles.label}>Left ↔ right</Text>
                   <Slider value={posX} onChange={setPosX} />
                 </>
               )}
-              {(freeAxis === 'y' || freeAxis === 'both') && (
+              {aspect !== 'free' && (freeAxis === 'y' || freeAxis === 'both') && (
                 <>
                   <Text style={styles.label}>Up ↕ down</Text>
                   <Slider value={posY} onChange={setPosY} />
@@ -332,6 +353,7 @@ export default function EditorModal({
                 label="No crop"
                 onPress={() => {
                   setAspect('original');
+                  setFree({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
                   setZoom(0);
                   setPosX(0.5);
                   setPosY(0.5);
@@ -416,6 +438,79 @@ export default function EditorModal({
   );
 }
 
+/**
+ * The free crop frame: drag a corner or an edge to resize, drag inside to
+ * move. Everything outside is dimmed; thirds lines help line things up.
+ */
+function FreeFrame({
+  box,
+  crop,
+  onChange,
+}: {
+  box: { x: number; y: number; w: number; h: number };
+  crop: Crop;
+  onChange: (c: Crop) => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const startRef = useRef(crop);
+  const latest = useRef({ crop, box, onChange });
+  latest.current = { crop, box, onChange };
+
+  const responders = useMemo(() => {
+    const make = (h: CropHandle) =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          startRef.current = latest.current.crop;
+        },
+        onPanResponderMove: (_, g) => {
+          const b = latest.current.box;
+          latest.current.onChange(moveCrop(startRef.current, h, g.dx / b.w, g.dy / b.h));
+        },
+      });
+    const all = ['move', 'tl', 'tr', 'bl', 'br', 'l', 'r', 't', 'b'] as CropHandle[];
+    return Object.fromEntries(all.map((h) => [h, make(h)])) as Record<CropHandle, ReturnType<typeof PanResponder.create>>;
+  }, []);
+
+  const L = box.x + crop.x * box.w;
+  const T = box.y + crop.y * box.h;
+  const W = crop.w * box.w;
+  const H = crop.h * box.h;
+  const HS = 30; // touch size of a handle
+  const corner = (h: CropHandle, left: number, top: number) => (
+    <View {...responders[h].panHandlers} style={[styles.handleHit, { left: left - HS / 2, top: top - HS / 2, width: HS, height: HS }]}>
+      <View style={styles.handleDot} />
+    </View>
+  );
+  const edge = (h: CropHandle, left: number, top: number, w: number, hh: number) => (
+    <View {...responders[h].panHandlers} style={{ position: 'absolute', left, top, width: w, height: hh }} />
+  );
+  return (
+    <View style={StyleFill} pointerEvents="box-none">
+      <View pointerEvents="none" style={[styles.dim, { left: box.x, top: box.y, width: box.w, height: T - box.y }]} />
+      <View pointerEvents="none" style={[styles.dim, { left: box.x, top: T + H, width: box.w, height: box.y + box.h - T - H }]} />
+      <View pointerEvents="none" style={[styles.dim, { left: box.x, top: T, width: L - box.x, height: H }]} />
+      <View pointerEvents="none" style={[styles.dim, { left: L + W, top: T, width: box.x + box.w - L - W, height: H }]} />
+      <View {...responders.move.panHandlers} style={[styles.cropFrame, { left: L, top: T, width: W, height: H }]}>
+        <View pointerEvents="none" style={[styles.third, { left: '33.3%', top: 0, bottom: 0, width: 1 }]} />
+        <View pointerEvents="none" style={[styles.third, { left: '66.6%', top: 0, bottom: 0, width: 1 }]} />
+        <View pointerEvents="none" style={[styles.third, { top: '33.3%', left: 0, right: 0, height: 1 }]} />
+        <View pointerEvents="none" style={[styles.third, { top: '66.6%', left: 0, right: 0, height: 1 }]} />
+      </View>
+      {edge('t', L + HS / 2, T - 12, Math.max(0, W - HS), 24)}
+      {edge('b', L + HS / 2, T + H - 12, Math.max(0, W - HS), 24)}
+      {edge('l', L - 12, T + HS / 2, 24, Math.max(0, H - HS))}
+      {edge('r', L + W - 12, T + HS / 2, 24, Math.max(0, H - HS))}
+      {corner('tl', L, T)}
+      {corner('tr', L + W, T)}
+      {corner('bl', L, T + H)}
+      {corner('br', L + W, T + H)}
+    </View>
+  );
+}
+
 const StyleFill = { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 } as const;
 
 const makeStyles = (p: Palette) =>
@@ -433,6 +528,9 @@ const makeStyles = (p: Palette) =>
     video: { width: '100%', height: '100%' },
     dim: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.6)' },
     cropFrame: { position: 'absolute', borderWidth: 2, borderColor: '#fff' },
+    third: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.35)' },
+    handleHit: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+    handleDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#fff', borderWidth: 2, borderColor: 'rgba(0,0,0,0.35)' },
 
     tabs: { paddingHorizontal: 16, paddingTop: 12 },
     panel: { flex: 1 },

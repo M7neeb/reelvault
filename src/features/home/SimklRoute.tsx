@@ -10,7 +10,7 @@ import { ThemeContext } from '@/features/vault/ui/theme';
 import { useHome } from './HomeData';
 
 export default function SimklRoute({ type }: { type: SimklType }) {
-  const { simkl, palette } = useHome();
+  const { simkl, vault, palette } = useHome();
   const insets = useSafeAreaInsets();
   return (
     <ThemeContext.Provider value={palette}>
@@ -26,6 +26,7 @@ export default function SimklRoute({ type }: { type: SimklType }) {
           actions={simkl.actions}
           lists={simkl.lists}
           prefs={simkl.prefs}
+          look={vault.viewOptions.look}
           openRequest={simkl.openRequest}
           onOpenHandled={simkl.clearOpenRequest}
         />

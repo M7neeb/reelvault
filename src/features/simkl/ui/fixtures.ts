@@ -236,6 +236,10 @@ export function fixtureBridge(videoId: string): SimklBridge {
     search: async (type) => catalog(type),
     loadEpisodes: async (type) => episodes(type),
     links: async () => new Map([[videoId, link]]),
+    insights: async () => {
+      const meta = fixtureMeta();
+      return { events: buildEvents(FIXTURE_SIMKL, fixtureHistory(FIXTURE_SIMKL), PLAYS, meta), items: FIXTURE_SIMKL, meta, lists: FIXTURE_LISTS.length };
+    },
     setLink: async () => {},
     scrobble: async () => 'playing',
   };
@@ -305,6 +309,27 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
       return { source: 'letterboxd-diary', watched: 412, rated: 380, planned: 0, skipped: 0, notFound: ['Untitled Short (2011)', 'Home Movie (1998)'] };
     },
     exportCalendar: async () => 6,
+    loadFranchises: async () => [
+      {
+        qid: 'Q1',
+        name: 'Harbour Saga',
+        entries: [
+          { qid: 'Q11', title: 'Amber Coast', imdb: 'tt1', date: '2019-05-01', ordinal: 2 },
+          { qid: 'Q12', title: 'Harbour Lights', imdb: 'tt2', date: '2024-03-01', ordinal: 3 },
+          { qid: 'Q13', title: 'Northern Rooms', imdb: 'tt3', date: '2016-02-01', ordinal: 1 },
+          { qid: 'Q14', title: 'Open Water', imdb: 'tt4', date: '2026-11-20', ordinal: 4 },
+        ],
+      },
+      { qid: 'Q2', name: 'Coastal Universe', entries: [] },
+    ],
+    matchFranchise: async (entries) =>
+      entries.map((e) => ({
+        ...e,
+        simklId: e.title === 'Harbour Lights' ? 101 : 911 + Number(e.qid.slice(2)),
+        type: 'show' as const,
+        poster: null,
+        year: e.date ? Number(e.date.slice(0, 4)) : null,
+      })),
     setPrefs: async () => {},
     openUrl: () => {},
   };

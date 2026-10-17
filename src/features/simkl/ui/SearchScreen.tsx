@@ -248,6 +248,7 @@ export default function SearchScreen({
           title={open}
           actions={actions}
           lists={lists}
+          library={library}
           hideSpoilers={prefs?.hideSpoilers}
           onOpen={setOpen}
           onClose={() => setOpen(null)}

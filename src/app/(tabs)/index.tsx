@@ -33,6 +33,10 @@ export default function VideosRoute() {
         status={vault.status}
         actions={vault.actions}
         simkl={simkl.bridge}
+        resume={vault.resume}
+        prefs={vault.prefs}
+        wrappedRequest={vault.wrappedRequest}
+        onWrappedHandled={vault.clearWrappedRequest}
       />
     </TabBarSpace.Provider>
   );

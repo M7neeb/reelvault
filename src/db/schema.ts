@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export type Migration = {
   version: number;
@@ -316,6 +316,37 @@ export const MIGRATIONS: Migration[] = [
         episode   INTEGER,
         linked_at TEXT    NOT NULL,
         logged_at TEXT                         -- last time it was marked watched from here
+      );
+    `,
+  },
+  {
+    version: 8,
+    sql: `
+      -- Every time you watch one of your videos (for the dashboard, Wrapped, badges).
+      CREATE TABLE IF NOT EXISTS vault_plays (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id   TEXT    NOT NULL,
+        started_at INTEGER NOT NULL,          -- ms since epoch
+        watched_ms INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_vault_plays_video ON vault_plays(video_id);
+      CREATE INDEX IF NOT EXISTS idx_vault_plays_time ON vault_plays(started_at);
+
+      -- Moments inside a video you can jump back to.
+      CREATE TABLE IF NOT EXISTS vault_bookmarks (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id   TEXT    NOT NULL,
+        at_ms      INTEGER NOT NULL,
+        label      TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_vault_bookmarks_video ON vault_bookmarks(video_id);
+
+      -- "Continue another time": where to pick a long video up again.
+      CREATE TABLE IF NOT EXISTS vault_resume (
+        video_id    TEXT PRIMARY KEY,
+        position_ms INTEGER NOT NULL,
+        saved_at    INTEGER NOT NULL
       );
     `,
   },

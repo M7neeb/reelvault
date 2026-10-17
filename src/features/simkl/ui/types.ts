@@ -55,6 +55,8 @@ export type SimklBridge = {
   loadEpisodes: (type: SimklType, id: number) => Promise<CatalogEpisode[]>;
   links: () => Promise<Map<string, VideoLink>>;
   setLink: (videoId: string, link: Omit<VideoLink, 'videoId' | 'linkedAt' | 'loggedAt'> | null) => Promise<void>;
+  /** Watch history and lists, for Wrapped and badges on the Videos side. */
+  insights: () => Promise<{ events: WatchEvent[]; items: SimklItem[]; meta: Map<number, Meta>; lists: number }>;
   scrobble: (
     videoId: string,
     link: ScrobbleTarget,
@@ -86,6 +88,7 @@ export type SimklDetailInfo = {
   language: string | null;
   country: string | null;
   trailer: string | null;
+  imdb?: string | null;
   related: CatalogTitle[];
 };
 
@@ -130,6 +133,9 @@ export type SimklActions = {
   /** Notifications for new episodes and releases. setReminders resolves false when iOS permission was refused. */
   getReminders: () => Promise<ReminderSettings>;
   setReminders: (s: ReminderSettings) => Promise<boolean>;
+  /** Franchise watch order (Wikidata) and each entry's Simkl title. */
+  loadFranchises: (type: SimklType, id: number) => Promise<import('../franchise').Franchise[]>;
+  matchFranchise: (entries: import('../franchise').FranchiseEntry[]) => Promise<import('../franchise').FranchiseItem[]>;
   /** The library as a CSV file, through the share sheet. */
   exportCsv: () => Promise<void>;
   /** Your own lists (kept in ReelVault). */
@@ -150,6 +156,8 @@ export type SimklScreenProps = {
   category: Exclude<Category, 'videos'>;
   /** Your own lists, shown as a shelf. */
   lists?: SimklList[];
+  /** Settings → Personalise → Layout (shared with the Videos tab). */
+  look?: import('@/features/vault/ui/types').Look;
   prefs?: SimklPrefs;
   /** A client id is built in. */
   configured: boolean;

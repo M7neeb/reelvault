@@ -118,6 +118,8 @@ test('a saved rule with junk in it is cleaned, never fatal', () => {
 
 const DEFAULTS = {
   layout: 'grid',
+  look: 'standard',
+  accent: null,
   size: 'large',
   sort: 'recent',
   groupBy: 'none',
@@ -126,6 +128,13 @@ const DEFAULTS = {
   showKeywords: true,
   theme: 'system',
 };
+
+test('look and accent are read, bad values fall back', () => {
+  assert.equal(parseViewOptions('{"look":"desktop","accent":"#FF375F"}', DEFAULTS).look, 'desktop');
+  assert.equal(parseViewOptions('{"look":"fancy","accent":"red"}', DEFAULTS).look, 'standard');
+  assert.equal(parseViewOptions('{"accent":"red"}', DEFAULTS).accent, null);
+  assert.equal(parseViewOptions('{"accent":"#ff375f"}', DEFAULTS).accent, '#ff375f');
+});
 
 test('missing view options fall back to the defaults', () => {
   assert.deepEqual(parseViewOptions(null, DEFAULTS), DEFAULTS);

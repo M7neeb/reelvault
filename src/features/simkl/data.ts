@@ -36,7 +36,7 @@ import {
   startRewatch,
 } from './actions';
 import { allHistory, allPlays, metaMap, playsFor, sessionsFor } from './history';
-import { prefetchArt, scrobble } from './actions';
+import { loadFranchises, matchFranchise, prefetchArt, scrobble } from './actions';
 import { allLinks, allLists, createList, deleteList, listEntries, setInList, setLink, markLinkLogged, updateList, type SimklList } from './collections';
 import { buildIcs, calendarEntries } from './ics';
 import { pickImportFile, runImport } from './importer';
@@ -208,6 +208,8 @@ export function useSimklData() {
         file.write(libraryCsv(await listSimklItems()));
         await Share.share({ url: file.uri });
       },
+      loadFranchises,
+      matchFranchise,
       createList: async (name, icon) => {
         const id = await createList(name, icon);
         await reload();
@@ -257,6 +259,10 @@ export function useSimklData() {
       search: searchSimkl,
       loadEpisodes,
       links: allLinks,
+      insights: async () => {
+        const [list, history, plays, meta, lists] = await Promise.all([listSimklItems(), allHistory(), allPlays(), metaMap(), allLists()]);
+        return { events: buildEvents(list, history, plays, meta), items: list, meta, lists: lists.length };
+      },
       setLink,
       scrobble: async (videoId, link, action, progress) => {
         const r = await scrobble(link, action, progress);

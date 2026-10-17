@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -66,9 +66,62 @@
           "savePhotosPermission": "ReelVault saves the videos you choose to Photos.",
           "isAccessMediaLocationEnabled": true
         }
+      ],
+      [
+        "expo-alternate-app-icons",
+        [
+          {
+            "name": "Midnight",
+            "ios": "./assets/icons/midnight.png",
+            "android": {
+              "foregroundImage": "./assets/icons/midnight.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Sunset",
+            "ios": "./assets/icons/sunset.png",
+            "android": {
+              "foregroundImage": "./assets/icons/sunset.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Forest",
+            "ios": "./assets/icons/forest.png",
+            "android": {
+              "foregroundImage": "./assets/icons/forest.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Mono",
+            "ios": "./assets/icons/mono.png",
+            "android": {
+              "foregroundImage": "./assets/icons/mono.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Grape",
+            "ios": "./assets/icons/grape.png",
+            "android": {
+              "foregroundImage": "./assets/icons/grape.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Classic",
+            "ios": "./assets/icons/classic.png",
+            "android": {
+              "foregroundImage": "./assets/icons/classic.png",
+              "backgroundColor": "#000000"
+            }
+          }
+        ]
       ]
     ],
-    "runtimeVersion": "1.3.0",
+    "runtimeVersion": "1.4.0",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {

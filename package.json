@@ -6,6 +6,7 @@
     "@expo/ui": "~57.0.23",
     "@expo/vector-icons": "^15.0.2",
     "expo": "~57.0.28",
+    "expo-alternate-app-icons": "^8.0.0",
     "expo-auth-session": "~57.0.15",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.21",

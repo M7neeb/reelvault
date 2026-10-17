@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><mask id="m"><rect width="1024" height="1024" fill="white"/><circle cx="512.0" cy="316.0" r="67.6" fill="black"/><circle cx="698.4" cy="451.4" r="67.6" fill="black"/><circle cx="627.2" cy="670.6" r="67.6" fill="black"/><circle cx="396.8" cy="670.6" r="67.6" fill="black"/><circle cx="325.6" cy="451.4" r="67.6" fill="black"/><circle cx="512.0" cy="512.0" r="91.2" fill="black"/><rect x="620.1" y="767.2" width="40.6" height="50.6" rx="6.9" fill="black"/><rect x="711.4" y="767.2" width="40.6" height="50.6" rx="6.9" fill="black"/><rect x="802.6" y="767.2" width="40.6" height="50.6" rx="6.9" fill="black"/><rect x="893.8" y="767.2" width="40.6" height="50.6" rx="6.9" fill="black"/></mask></defs>
+<g mask="url(#m)" fill="white"><circle cx="512.0" cy="512.0" r="337.9"/><rect x="562.7" y="735.0" width="415.6" height="114.9" rx="28.7"/></g>
+<polygon fill="white" points="480.9,455.4 480.9,568.6 565.7,512.0"/>
+</svg>
