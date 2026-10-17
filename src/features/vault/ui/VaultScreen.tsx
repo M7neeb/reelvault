@@ -1150,6 +1150,7 @@ function VaultScreenBody({
           initialInfoOpen={dev?.infoOpen}
           initialMenuOpen={dev?.menuOpen}
           initialSmallerOpen={dev?.smallerOpen}
+          initialEditorTab={dev?.editorTab}
           onSlideshow={(item) => {
             const start = Math.max(0, shown.findIndex((v) => v.id === item.id));
             setPlaying(null);

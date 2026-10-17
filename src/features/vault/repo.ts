@@ -190,12 +190,20 @@ export async function setCoverAt(videoId: string, coverAt: number | null): Promi
 }
 
 /**
- * After "Make Smaller" replaced the file: the new size, key and shape. The first
- * original size and key are kept, so a second pass still remembers the import.
+ * After Make Smaller or an edit replaced the file: the new size, key, shape and
+ * length. The first original size and key are kept, so a second pass still
+ * remembers the import (and re-importing that original is caught as a duplicate).
  */
-export async function recordSmaller(
+export async function recordReplaced(
   videoId: string,
-  next: { size: number; contentKey: string; width: number | null; height: number | null; metaJson: string | null }
+  next: {
+    size: number;
+    contentKey: string;
+    width: number | null;
+    height: number | null;
+    durationMs: number | null;
+    metaJson: string | null;
+  }
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
@@ -204,9 +212,23 @@ export async function recordSmaller(
        original_key  = COALESCE(original_key, content_key),
        size = ?, content_key = ?,
        width = COALESCE(?, width), height = COALESCE(?, height),
+       duration_ms = COALESCE(?, duration_ms),
        meta_json = COALESCE(?, meta_json)
      WHERE id = ?;`,
-    [next.size, next.contentKey, next.width, next.height, next.metaJson, videoId]
+    [next.size, next.contentKey, next.width, next.height, next.durationMs, next.metaJson, videoId]
+  );
+}
+
+/** An edited copy keeps the original's keywords and albums. */
+export async function copyLinks(fromId: string, toId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'INSERT OR IGNORE INTO video_tags (video_id, tag_id) SELECT ?, tag_id FROM video_tags WHERE video_id = ?;',
+    [toId, fromId]
+  );
+  await db.runAsync(
+    'INSERT OR IGNORE INTO album_videos (album_id, video_id, added_at) SELECT album_id, ?, ? FROM album_videos WHERE video_id = ?;',
+    [toId, Date.now(), fromId]
   );
 }
 

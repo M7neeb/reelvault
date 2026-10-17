@@ -10,9 +10,10 @@
  * here rather than imported from `repo.ts`/`tags.ts` - those pull in sqlite.
  */
 
+import type { EditPlan } from '../edit';
 import type { CompressQuality } from '../smaller';
 
-export type { CompressQuality };
+export type { CompressQuality, EditPlan };
 
 export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
 
@@ -242,7 +243,7 @@ export type ImportSource = 'files' | 'photos' | 'camera';
 
 /** What Make Smaller did to one video. */
 export type UiSmallerResult =
-  | { kind: 'done'; before: number; after: number }
+  | { kind: 'done'; before: number; after: number; newId?: string }
   | { kind: 'skipped'; reason: string }
   | { kind: 'failed'; reason: string };
 
@@ -340,7 +341,15 @@ export type VaultActions = {
   onResetCover: (item: VaultItem) => Promise<void>;
   /** Make Smaller is only there in app builds with the encoder (1.1+). */
   canMakeSmaller: () => boolean;
-  onMakeSmaller: (item: VaultItem, quality: CompressQuality, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
+  /** Replace the file with a re-encoded one, only if it saves at least 10%. */
+  onMakeSmaller: (item: VaultItem, plan: EditPlan, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
+  /** Trim / crop / resolution / frame rate: replace the video or save a new copy. */
+  onEditVideo: (
+    item: VaultItem,
+    plan: EditPlan,
+    mode: 'replace' | 'copy',
+    onProgress: (f: number) => void
+  ) => Promise<UiSmallerResult>;
   onCancelMakeSmaller: () => void;
   /** Make every imported video smaller right away (null = off). */
   getImportQuality: () => Promise<CompressQuality | null>;
@@ -421,6 +430,8 @@ export type VaultScreenProps = {
     timelineOpen?: boolean;
     overviewOpen?: boolean;
     mapOpen?: boolean;
+    /** With viewerId: open the editor on this tab. */
+    editorTab?: 'trim' | 'crop' | 'size';
     importMenuOpen?: boolean;
     passcodeOpen?: boolean;
     slideshowOpen?: boolean;
