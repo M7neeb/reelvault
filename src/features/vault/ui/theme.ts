@@ -160,3 +160,10 @@ export function rgbOf(hex: string): string {
   const n = parseInt(full, 16);
   return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
 }
+
+/** The palette with your accent colour (Settings → Personalise); null keeps the default blue. */
+export function withAccent(p: Palette, accent: string | null | undefined): Palette {
+  if (!accent) return p;
+  const rgb = rgbOf(accent);
+  return { ...p, accent, accentSoft: `rgba(${rgb},${p.scheme === 'dark' ? 0.22 : 0.14})`, link: accent };
+}

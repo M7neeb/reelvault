@@ -278,3 +278,24 @@ export function fixtureFrames(item: VaultItem, count = 8): ThumbSource[] {
   const swatch = require('@/assets/images/logo-glow.png');
   return Array.from({ length: count }, () => swatch);
 }
+
+/** Preview: a believable few weeks of watching the fixture videos. */
+export function fixturePlays(): { videoId: string; startedAt: number; watchedMs: number }[] {
+  const out: { videoId: string; startedAt: number; watchedMs: number }[] = [];
+  let seed = 11;
+  const rand = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const ids = FIXTURE_ITEMS.map((v) => v.id);
+  for (let i = 0; i < 70; i++) {
+    const id = ids[Math.floor(Math.pow(rand(), 1.8) * ids.length)];
+    const item = FIXTURE_ITEMS.find((v) => v.id === id)!;
+    const d = new Date(Date.now() - Math.floor(rand() * 40) * 86_400_000);
+    d.setHours(17 + Math.floor(rand() * 6), Math.floor(rand() * 60));
+    out.push({ videoId: id, startedAt: d.getTime(), watchedMs: Math.round((item.durationMs ?? 60000) * (0.4 + rand() * 0.6)) });
+  }
+  return out.sort((a, b) => a.startedAt - b.startedAt);
+}
+
+export const FIXTURE_BOOKMARKS = [
+  { id: 1, videoId: FIXTURE_ITEMS[0].id, atMs: 42_000, label: 'The view from the top', createdAt: Date.now() },
+  { id: 2, videoId: FIXTURE_ITEMS[0].id, atMs: 131_000, label: null, createdAt: Date.now() },
+];

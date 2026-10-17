@@ -60,6 +60,14 @@ export const ICONS = {
   ticket: { sf: 'ticket', ion: 'ticket-outline' },
   hourglass: { sf: 'hourglass', ion: 'hourglass-outline' },
   trophy: { sf: 'trophy.fill', ion: 'trophy' },
+  bookmark: { sf: 'bookmark.fill', ion: 'bookmark' },
+  bookmarkAdd: { sf: 'bookmark', ion: 'bookmark-outline' },
+  later: { sf: 'clock.arrow.circlepath', ion: 'time-outline' },
+  fast: { sf: 'forward.fill', ion: 'play-forward' },
+  storage: { sf: 'internaldrive', ion: 'server-outline' },
+  dashboard: { sf: 'chart.pie.fill', ion: 'pie-chart' },
+  paint: { sf: 'paintpalette', ion: 'color-palette-outline' },
+  layout: { sf: 'rectangle.3.group', ion: 'grid-outline' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

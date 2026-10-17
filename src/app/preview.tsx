@@ -27,12 +27,17 @@ import {
   FIXTURE_TAG_MAP,
   fixtureFrames,
   fixtureSearch,
+  fixturePlays,
+  FIXTURE_BOOKMARKS,
 } from '@/features/vault/ui/fixtures';
 import { parseViewOptions } from '@/features/vault/ui/logic';
+import { SUGGESTED_LABELS } from '@/features/vault/stats';
 import {
   DEFAULT_VIEW_OPTIONS,
   type SecurityState,
   type VaultActions,
+  DEFAULT_VAULT_PREFS,
+  type VaultPrefs,
   type VaultScreenProps,
   type ViewOptions,
 } from '@/features/vault/ui/types';
@@ -46,7 +51,7 @@ import Icon from '@/features/vault/ui/Icon';
 import type { IconName } from '@/features/vault/ui/icons';
 import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/types';
 import { resolveScheme } from '@/features/vault/ui/logic';
-import { paletteFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
+import { paletteFor, ThemeContext, usePalette, withAccent } from '@/features/vault/ui/theme';
 
 /**
  * A drawing of the iOS 26 tab bar (the real one is native and has no web
@@ -161,7 +166,7 @@ const MOCK_TAB_SPACE = 34 + 56;
  * Simkl surfaces: list, grid, detail, episodes, rewatch, rating, addlist, lists, pick, import, discover,
  * calendar, stats, review, account, connect, notset.
  */
-function SimklPreview({ category, surface }: { category: Exclude<Category, 'videos'>; surface: string }) {
+function SimklPreview({ category, surface, look }: { category: Exclude<Category, 'videos'>; surface: string; look: ViewOptions['look'] }) {
   const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
   const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
   const firstOfType = FIXTURE_SIMKL.find((i) => i.type === category)?.simklId;
@@ -194,6 +199,7 @@ function SimklPreview({ category, surface }: { category: Exclude<Category, 'vide
       lastSyncAt={null}
       actions={actions}
       lists={FIXTURE_LISTS}
+      look={look}
       prefs={{ hideSpoilers: surface === 'spoilers' }}
       devInitialState={dev}
     />
@@ -259,6 +265,11 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   passcode: { passcodeOpen: true },
   slideshow: { slideshowOpen: true },
   compare: { compareOpen: true },
+  dashboard: { insightsTab: 'dashboard' },
+  wrapped: { insightsTab: 'wrapped' },
+  badges: { insightsTab: 'badges' },
+  storage: { insightsTab: 'storage' },
+  personalise: { personaliseOpen: true },
 };
 
 /**
@@ -279,7 +290,9 @@ function optionsFromUrl(params: Record<string, string | undefined>): ViewOptions
 }
 
 export default function PreviewRoute() {
-  const { view, theme, layout, size, info, group, cat, sview } = useLocalSearchParams<{
+  const { view, theme, layout, size, info, group, cat, sview, look, accent } = useLocalSearchParams<{
+    look?: string;
+    accent?: string;
     view?: string;
     /** movie | show | anime: preview the Simkl screens instead (`sview` picks a surface). */
     cat?: string;
@@ -290,7 +303,8 @@ export default function PreviewRoute() {
     info?: string;
     group?: string;
   }>();
-  const [viewOptions, setViewOptions] = useState<ViewOptions>(() => optionsFromUrl({ theme, layout, size, info, group }));
+  const [viewOptions, setViewOptions] = useState<ViewOptions>(() => optionsFromUrl({ theme, layout, size, info, group, look, accent: accent ? `#${accent}` : undefined }));
+  const [prefs, setPrefs] = useState<VaultPrefs>({ ...DEFAULT_VAULT_PREFS, ratingLabels: SUGGESTED_LABELS });
   const [security, setSecurity] = useState<SecurityState>({
     passcodeKind: null,
     faceId: true,
@@ -394,6 +408,20 @@ export default function PreviewRoute() {
       setFakePasscode: async (code) => setSecurity((s) => ({ ...s, hasFakePasscode: code !== null })),
       setFaceId: async (enabled) => setSecurity((s) => ({ ...s, faceId: enabled })),
       checkPasscode: async (code) => (code === '123456' ? 'real' : code === '000000' ? 'fake' : 'wrong'),
+      recordPlay: noop,
+      loadPlays: async () => fixturePlays(),
+      loadBookmarks: async (id) => FIXTURE_BOOKMARKS.filter((b) => b.videoId === id),
+      addBookmark: noop,
+      renameBookmark: noop,
+      deleteBookmark: noop,
+      countBookmarks: async () => FIXTURE_BOOKMARKS.length,
+      setResume: noop,
+      setPrefs: async (next) => setPrefs(next),
+      appIcon: () => null,
+      setAppIcon: noop,
+      canChangeAppIcon: () => true,
+      getWrappedReminder: async () => true,
+      setWrappedReminder: async () => true,
     }),
     [security],
   );
@@ -417,7 +445,7 @@ export default function PreviewRoute() {
   }, [viewOptions.sort]);
 
   const category: Category | 'search' = cat === 'movie' || cat === 'show' || cat === 'anime' || cat === 'search' ? cat : 'videos';
-  const palette = paletteFor(resolveScheme(viewOptions.theme, 'dark'));
+  const palette = withAccent(paletteFor(resolveScheme(viewOptions.theme, 'dark')), viewOptions.accent);
   const bridge = useMemo(() => fixtureBridge(first), []);
 
   if (!inBrowser) return null;
@@ -426,7 +454,7 @@ export default function PreviewRoute() {
     return (
       <ThemeContext.Provider value={palette}>
         <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
-          {category === 'search' ? <SearchPreview /> : <SimklPreview category={category} surface={sview ?? 'list'} />}
+          {category === 'search' ? <SearchPreview /> : <SimklPreview category={category} surface={sview ?? 'list'} look={viewOptions.look} />}
           <TabBarMock active={category} />
         </TabBarSpace.Provider>
       </ThemeContext.Provider>
@@ -453,6 +481,9 @@ export default function PreviewRoute() {
           actions={actions}
           enableVideo={false}
       simkl={bridge}
+      prefs={prefs}
+      wrappedRequest={view === 'wrapped-story'}
+      resume={new Map([[(FIXTURE_ITEMS.find((v) => (v.durationMs ?? 0) >= 300_000) ?? FIXTURE_ITEMS[0]).id, 6 * 60_000]])}
           devInitialState={VIEWS[view ?? 'grid'] ?? {}}
         />
         {!VIEWS[view ?? 'grid']?.viewerId && <TabBarMock active="videos" />}

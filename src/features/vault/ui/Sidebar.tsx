@@ -10,7 +10,9 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { gbFromBytes } from './format';
 import { sameFilter, type Filter } from './filters';
 import { describeRule, matchesRule, safeBatchGb } from './logic';
-import { sheet, useStyles, type Palette } from './theme';
+import Icon from './Icon';
+import type { IconName } from './icons';
+import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { STATUSES, type SmartFilter, type UiAlbum, type UiFolder, type UiTag, type VaultItem } from './types';
 
 function DrawerRow({
@@ -97,7 +99,16 @@ export type SidebarProps = {
   onMap: () => void;
   onSettings: () => void;
   onImport: () => void;
+  onInsights: (tab: 'dashboard' | 'wrapped' | 'badges' | 'storage') => void;
+  onPersonalise: () => void;
 };
+
+const TILES: { tab: 'dashboard' | 'wrapped' | 'badges' | 'storage'; label: string; icon: IconName; color: string }[] = [
+  { tab: 'dashboard', label: 'Dashboard', icon: 'dashboard', color: '#0A84FF' },
+  { tab: 'wrapped', label: 'Wrapped', icon: 'sparkle', color: '#BF5AF2' },
+  { tab: 'badges', label: 'Badges', icon: 'trophy', color: '#FF9F0A' },
+  { tab: 'storage', label: 'Storage', icon: 'storage', color: '#30D158' },
+];
 
 export default function Sidebar(props: SidebarProps) {
   const {
@@ -117,6 +128,7 @@ export default function Sidebar(props: SidebarProps) {
     onClose,
   } = props;
   const styles = useStyles(makeStyles);
+  const p = usePalette();
   const [openFolders, setOpenFolders] = useState<number[]>([]);
 
   const favorites = items.filter((v) => v.rating >= 8).length;
@@ -167,6 +179,16 @@ export default function Sidebar(props: SidebarProps) {
       <View style={styles.drawer}>
         <Text style={styles.title}>ReelVault</Text>
         <ScrollView contentContainerStyle={styles.scroll}>
+          <View style={styles.tiles}>
+            {TILES.map((t) => (
+              <TouchableOpacity key={t.tab} style={styles.tileBtn} onPress={() => props.onInsights(t.tab)}>
+                <View style={[styles.tileIcon, { backgroundColor: t.color }]}>
+                  <Icon name={t.icon} size={15} color="#fff" />
+                </View>
+                <Text style={styles.tileLabel}>{t.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <Text style={styles.section}>Library</Text>
           <DrawerRow {...row} label="All Videos" count={items.length} f={{ kind: 'all' }} />
           <DrawerRow {...row} label="★ Favorites" count={favorites} f={{ kind: 'favorites' }} />
@@ -275,6 +297,9 @@ export default function Sidebar(props: SidebarProps) {
           <TouchableOpacity style={styles.action} onPress={props.onImport}>
             <Text style={styles.actionText}>+ Import</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.ghost} onPress={props.onPersonalise} accessibilityLabel="Personalise">
+            <Icon name="paint" size={16} color={p.text} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.ghost} onPress={props.onSettings}>
             <Text style={styles.ghostText}>Settings</Text>
           </TouchableOpacity>
@@ -289,6 +314,10 @@ export default function Sidebar(props: SidebarProps) {
 
 const makeStyles = (p: Palette) =>
   sheet({
+    tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 8 },
+    tileBtn: { width: '48%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.card, borderRadius: 12, padding: 10 },
+    tileIcon: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+    tileLabel: { color: p.text, fontSize: 14, fontWeight: '700' },
     root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 20 },
     backdrop: {
       position: 'absolute',

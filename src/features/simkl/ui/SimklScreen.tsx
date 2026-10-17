@@ -77,6 +77,7 @@ const SORT_HINT: Partial<Record<SimklSort, string>> = {
 export default function SimklScreen(props: SimklScreenProps) {
   const { category, configured, connected, items, syncing, status, actions, devInitialState: dev } = props;
   const lists = props.lists ?? [];
+  const look = props.look ?? 'standard';
   const hideSpoilers = props.prefs?.hideSpoilers ?? false;
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
@@ -133,6 +134,7 @@ export default function SimklScreen(props: SimklScreenProps) {
     [ofType, category]
   );
   const library = useMemo(() => new Set(items.map((i) => i.simklId)), [items]);
+  const libraryMap = useMemo(() => new Map(items.map((i) => [i.simklId, i])), [items]);
   const openItem = open ? (items.find((i) => i.simklId === open.simklId) ?? null) : null;
   const liveList = openList ? (lists.find((l) => l.id === openList.id) ?? null) : null;
 
@@ -161,7 +163,7 @@ export default function SimklScreen(props: SimklScreenProps) {
     }
   }
 
-  const cols = 3;
+  const cols = look === 'simple' ? 2 : look === 'compact' ? 4 : 3;
   const posterW = Math.floor((width - SIDE * 2 - GAP * (cols - 1)) / cols);
   const posterH = Math.round(posterW * 1.48);
   const cardW = Math.min(width - SIDE * 2 - 28, 420);
@@ -246,13 +248,17 @@ export default function SimklScreen(props: SimklScreenProps) {
             </>
           )}
 
-          <SectionHead title="My Lists" detail={lists.length ? `${lists.length}` : undefined} />
-          <ListShelf lists={lists} onOpen={setOpenList} onNew={() => setNewList(true)} />
+          {look !== 'simple' && look !== 'compact' && (
+            <>
+              <SectionHead title="My Lists" detail={lists.length ? `${lists.length}` : undefined} />
+              <ListShelf lists={lists} onOpen={setOpenList} onNew={() => setNewList(true)} />
+            </>
+          )}
 
           <SectionHead
             title="Library"
             detail={`${ofType.length}`}
-            action={grid ? 'List' : 'Grid'}
+            action={look === 'simple' || look === 'desktop' ? undefined : grid ? 'List' : 'Grid'}
             actionIcon={grid ? 'list' : 'grid'}
             onAction={() => {
               tick();
@@ -277,6 +283,7 @@ export default function SimklScreen(props: SimklScreenProps) {
             })}
           </ScrollView>
 
+          {look !== 'simple' && (
           <View style={styles.searchRow}>
             <View style={styles.search}>
               <Icon name="search" size={16} color={p.textMuted} />
@@ -296,7 +303,17 @@ export default function SimklScreen(props: SimklScreenProps) {
               <Text style={styles.sortText}>{sortLabel}</Text>
             </TouchableOpacity>
           </View>
-          {!!SORT_HINT[sort] && !query && <Text style={styles.hint}>{SORT_HINT[sort]}</Text>}
+          )}
+          {!!SORT_HINT[sort] && !query && look !== 'simple' && look !== 'compact' && <Text style={styles.hint}>{SORT_HINT[sort]}</Text>}
+          {look === 'desktop' && shown.length > 0 && (
+            <View style={styles.thead}>
+              <Text style={[styles.th, { flex: 3 }]}>Title</Text>
+              <Text style={[styles.th, { flex: 1.3 }]}>{category === 'movie' ? 'Year' : 'Next'}</Text>
+              <Text style={[styles.th, styles.thRight, { flex: 1 }]}>{category === 'movie' ? 'Min' : 'Left'}</Text>
+              <Text style={[styles.th, styles.thRight, { flex: 1 }]}>IMDb</Text>
+              <Text style={[styles.th, styles.thRight, { flex: 0.8 }]}>★</Text>
+            </View>
+          )}
           {shown.length === 0 && (
             <View style={styles.emptyBox}>
               <Icon name={category === 'movie' ? 'movie' : category === 'anime' ? 'anime' : 'tv'} size={34} color={p.textMuted} />
@@ -339,7 +356,7 @@ export default function SimklScreen(props: SimklScreenProps) {
   return (
     <View style={styles.screen}>
       <StatusBar style={p.scheme === 'dark' ? 'light' : 'dark'} />
-      {grid ? (
+      {(grid || look === 'simple') && look !== 'desktop' ? (
         <FlatList
           key="grid"
           data={connected ? shown : []}
@@ -350,7 +367,7 @@ export default function SimklScreen(props: SimklScreenProps) {
           columnWrapperStyle={styles.gridRow}
           contentContainerStyle={{ paddingBottom: bottom }}
           refreshControl={refresh}
-          renderItem={({ item }) => <GridPoster item={item} width={posterW} height={posterH} onPress={() => setOpen(asTitle(item))} />}
+          renderItem={({ item }) => <GridPoster item={item} width={posterW} height={posterH} bare={look === 'simple' || look === 'compact'} onPress={() => setOpen(asTitle(item))} />}
         />
       ) : (
         <FlatList
@@ -361,7 +378,15 @@ export default function SimklScreen(props: SimklScreenProps) {
           ListFooterComponent={footer}
           contentContainerStyle={{ paddingBottom: bottom }}
           refreshControl={refresh}
-          renderItem={({ item }) => <Row item={item} sort={sort} onPress={() => setOpen(asTitle(item))} />}
+          renderItem={({ item, index }) =>
+            look === 'desktop' ? (
+              <TableRow item={item} odd={index % 2 === 1} onPress={() => setOpen(asTitle(item))} />
+            ) : look === 'compact' ? (
+              <CompactRow item={item} onPress={() => setOpen(asTitle(item))} />
+            ) : (
+              <Row item={item} sort={sort} detailed={look === 'detailed'} onPress={() => setOpen(asTitle(item))} />
+            )
+          }
         />
       )}
 
@@ -382,6 +407,7 @@ export default function SimklScreen(props: SimklScreenProps) {
           title={open}
           actions={actions}
           lists={lists}
+          library={libraryMap}
           hideSpoilers={hideSpoilers}
           initialEpisodesOpen={dev?.episodesOpen}
           initialRewatchOpen={dev?.rewatchOpen}
@@ -525,7 +551,7 @@ function UpNextCard({
 }
 
 /** One title in the list: poster, next episode, progress, date, ratings. */
-function Row({ item, sort, onPress }: { item: SimklItem; sort: SimklSort; onPress: () => void }) {
+function Row({ item, sort, detailed, onPress }: { item: SimklItem; sort: SimklSort; detailed?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const isMovie = item.type === 'movie';
   const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
@@ -565,23 +591,82 @@ function Row({ item, sort, onPress }: { item: SimklItem; sort: SimklSort; onPres
         )}
         {isMovie && !!date && <Text style={styles.rowDate}>{date}</Text>}
         <RatingsLine imdb={item.imdbRating} mal={item.type === 'anime' ? item.malRating : null} simkl={item.simklRating} mine={item.rating} />
+        {detailed && (
+          <Text style={styles.rowDate} numberOfLines={2}>
+            {[
+              STATUS_LABELS[item.status],
+              item.year ? String(item.year) : null,
+              item.runtime ? `${item.runtime} min${isMovie ? '' : ' / ep'}` : null,
+              !isMovie && item.totalEpisodes ? `${item.watchedEpisodes}/${item.totalEpisodes} episodes` : null,
+              item.rank ? `#${item.rank} on Simkl` : null,
+              item.addedAt ? `added ${fmtAgo(item.addedAt)}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        )}
+        {detailed && !!item.memo && (
+          <Text style={styles.rowMemo} numberOfLines={2}>
+            “{item.memo}”
+          </Text>
+        )}
       </View>
     </TouchableOpacity>
   );
 }
 
-function GridPoster({ item, width, height, onPress }: { item: SimklItem; width: number; height: number; onPress: () => void }) {
+/** Compact layout: one short line per title. */
+function CompactRow({ item, onPress }: { item: SimklItem; onPress: () => void }) {
+  const styles = useStyles(makeStyles);
+  const left = episodesLeft(item);
+  return (
+    <TouchableOpacity style={styles.crow} onPress={onPress} accessibilityLabel={item.title}>
+      <Poster path={item.poster} title={item.title} width={30} height={44} radius={5} size="_cm" hideTitle />
+      <Text style={styles.ctitle} numberOfLines={1}>
+        {item.title}
+      </Text>
+      {item.type !== 'movie' && item.nextToWatch ? <Text style={styles.cnext}>{item.nextToWatch}</Text> : null}
+      {left > 0 && <Text style={styles.cleft}>{left}</Text>}
+      {item.rating !== null && <Text style={styles.cmine}>★{fmtRating(item.rating)}</Text>}
+    </TouchableOpacity>
+  );
+}
+
+/** Desktop layout: a table row with columns. */
+function TableRow({ item, odd, onPress }: { item: SimklItem; odd: boolean; onPress: () => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const isMovie = item.type === 'movie';
+  return (
+    <TouchableOpacity style={[styles.trow, odd && styles.trowAlt]} onPress={onPress} accessibilityLabel={item.title}>
+      <View style={{ flex: 3, flexDirection: 'row', alignItems: 'center', gap: 7, paddingRight: 6 }}>
+        <Poster path={item.poster} title={item.title} width={22} height={32} radius={3} size="_cm" hideTitle />
+        <Text style={styles.tname} numberOfLines={1}>
+          {item.title}
+        </Text>
+      </View>
+      <Text style={[styles.td, { flex: 1.3, color: isMovie ? p.textSoft : p.link }]} numberOfLines={1}>
+        {isMovie ? (item.year ?? '–') : (item.nextToWatch ?? '✓')}
+      </Text>
+      <Text style={[styles.td, styles.thRight, { flex: 1 }]}>{isMovie ? (item.runtime ?? '–') : episodesLeft(item) || '–'}</Text>
+      <Text style={[styles.td, styles.thRight, { flex: 1 }]}>{item.imdbRating?.toFixed(1) ?? '–'}</Text>
+      <Text style={[styles.td, styles.thRight, { flex: 0.8, color: item.rating ? p.rating : p.textMuted }]}>{item.rating !== null ? fmtRating(item.rating) : '–'}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function GridPoster({ item, width, height, bare, onPress }: { item: SimklItem; width: number; height: number; bare?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
   return (
     <TouchableOpacity style={{ width }} onPress={onPress} accessibilityLabel={item.title}>
       <Poster path={item.poster} title={item.title} width={width} height={height} radius={10}>
-        {item.rating !== null && (
+        {!bare && item.rating !== null && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>★ {fmtRating(item.rating)}</Text>
           </View>
         )}
-        {item.imdbRating !== null && (
+        {!bare && item.imdbRating !== null && (
           <View style={styles.imdbBadge}>
             <Text style={styles.imdbBadgeText}>{item.imdbRating.toFixed(1)}</Text>
           </View>
@@ -679,6 +764,19 @@ const makeStyles = (p: Palette) =>
     gridTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
     gridSub: { color: p.textSecondary, fontSize: 12 },
 
+    rowMemo: { color: p.textSoft, fontSize: 12, fontStyle: 'italic' },
+    crow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: SIDE, paddingVertical: 5 },
+    ctitle: { flex: 1, color: p.text, fontSize: 15, fontWeight: '600' },
+    cnext: { color: p.link, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    cleft: { color: p.textSecondary, fontSize: 12, fontWeight: '700', minWidth: 18, textAlign: 'right' },
+    cmine: { color: p.rating, fontSize: 12, fontWeight: '800' },
+    thead: { flexDirection: 'row', marginTop: 12, paddingHorizontal: SIDE, paddingVertical: 7, backgroundColor: p.panel, borderBottomWidth: 1, borderBottomColor: p.border },
+    th: { color: p.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
+    thRight: { textAlign: 'right' },
+    trow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SIDE, height: 42 },
+    trowAlt: { backgroundColor: p.elevated },
+    tname: { flex: 1, color: p.text, fontSize: 13, fontWeight: '600' },
+    td: { color: p.textSoft, fontSize: 12, fontVariant: ['tabular-nums'] },
     footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 22 },
     footerIcon: { width: 16, height: 16, borderRadius: 3 },
     footerText: { color: p.textSecondary, fontSize: 12 },

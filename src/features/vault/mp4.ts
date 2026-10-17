@@ -16,6 +16,7 @@
  *   moov/trak/mdia/minf/stbl/stts frame durations -> frame rate
  *   moov/udta/©xyz ©mak ©mod      location, make, model (older style)
  *   moov/meta/keys + ilst         Apple's com.apple.quicktime.* keys (iPhone)
+ *   moov/udta/©key, XMP_          keywords other apps wrote (Photos, HashPhotos, Lightroom)
  */
 
 export type Mp4Meta = {
@@ -32,7 +33,40 @@ export type Mp4Meta = {
   model?: string;
   software?: string;
   location?: { lat: number; lon: number; alt?: number };
+  /** Keywords written into the file by another app; they become tags on import. */
+  keywords?: string[];
 };
+
+/** "a, b;c" or several entries → unique, trimmed keywords. */
+export function splitKeywords(values: string[]): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    for (const k of v.split(/[,;\n]/)) {
+      const t = k.trim();
+      if (t && t.length <= 64 && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+    }
+  }
+  return out;
+}
+
+/** dc:subject (and lr:hierarchicalSubject leaves) from an XMP packet. */
+export function xmpKeywords(xml: string): string[] {
+  const out: string[] = [];
+  for (const tag of ['dc:subject', 'lr:hierarchicalSubject']) {
+    const block = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml);
+    if (!block) continue;
+    for (const m of block[1].matchAll(/<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/g)) {
+      const leaf = m[1].split('|').pop() ?? '';
+      out.push(leaf.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'"));
+    }
+  }
+  return out;
+}
+
+function addKeywords(meta: Mp4Meta, values: string[]) {
+  const merged = splitKeywords([...(meta.keywords ?? []), ...values]);
+  if (merged.length) meta.keywords = merged;
+}
 
 type Box = { type: string; start: number; content: number; end: number };
 
@@ -237,7 +271,10 @@ function parseUdta(b: Uint8Array, udta: Box, meta: Mp4Meta) {
     else if (name === 'mak' && !meta.make) meta.make = value;
     else if (name === 'mod' && !meta.model) meta.model = value;
     else if (name === 'swr' && !meta.software) meta.software = value;
+    else if (name === 'key') addKeywords(meta, [value]);
   }
+  const xmp = children(b, udta.content, udta.end).find((c) => c.type === 'XMP_');
+  if (xmp) addKeywords(meta, xmpKeywords(utf8(b, xmp.content, xmp.end)));
 }
 
 /** Apple's keyed metadata: `keys` names the entries, `ilst` holds a `data` box per entry. */
@@ -276,6 +313,9 @@ function parseKeyedMeta(b: Uint8Array, metaBox: Box, meta: Mp4Meta) {
         break;
       case 'com.apple.quicktime.software':
         meta.software = value;
+        break;
+      case 'com.apple.quicktime.keywords':
+        addKeywords(meta, [value]);
         break;
       case 'com.apple.quicktime.creationdate': {
         const t = Date.parse(value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));

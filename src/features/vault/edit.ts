@@ -64,6 +64,33 @@ export const ASPECTS: { key: string; label: string; ratio: number | null }[] = [
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** Which part of a free crop frame is being dragged. */
+export type CropHandle = 'move' | 'tl' | 'tr' | 'bl' | 'br' | 'l' | 'r' | 't' | 'b';
+
+/**
+ * A free crop after dragging one handle by (dx, dy), as fractions of the
+ * frame. The frame stays inside the video and never gets smaller than `min`.
+ */
+export function moveCrop(start: Crop, handle: CropHandle, dx: number, dy: number, min = 0.08): Crop {
+  if (handle === 'move') {
+    return { ...start, x: clamp(start.x + dx, 0, 1 - start.w), y: clamp(start.y + dy, 0, 1 - start.h) };
+  }
+  let left = start.x;
+  let top = start.y;
+  let right = start.x + start.w;
+  let bottom = start.y + start.h;
+  if (handle.includes('l')) left = clamp(left + dx, 0, right - min);
+  if (handle.includes('r')) right = clamp(right + dx, left + min, 1);
+  if (handle === 't' || handle === 'tl' || handle === 'tr') top = clamp(top + dy, 0, bottom - min);
+  if (handle === 'b' || handle === 'bl' || handle === 'br') bottom = clamp(bottom + dy, top + min, 1);
+  return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+/** A free crop that covers (almost) everything is no crop at all. */
+export function freeCropOrNull(c: Crop): Crop | null {
+  return c.w > 0.995 && c.h > 0.995 ? null : c;
+}
+
 /** Video encoders want even sizes. */
 const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 

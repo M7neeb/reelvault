@@ -25,6 +25,7 @@ import { rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/va
 import { episodesLeft, fanartUrl, fmtVotes, parseEpisodeCode, posterUrl, simklUrl, STATUS_LABELS, statusesFor } from '../logic';
 import { activeSession, fmtDuration, fmtRating, toSimklRating } from '../insights';
 import EpisodesModal from './EpisodesModal';
+import WatchOrder from './FranchiseUI';
 import { AddToListSheet } from './ListsUI';
 import { IMDB_YELLOW, MAL_BLUE, SIMKL_ICON } from './parts';
 import Poster, { hueFor } from './Poster';
@@ -32,6 +33,7 @@ import { fmtDay } from './time';
 import type { CatalogTitle, Play, Session, SimklActions, SimklDetailInfo, SimklItem, SimklList, SimklStatus } from './types';
 
 const HERO = 400;
+const EMPTY_LIBRARY = new Map<number, SimklItem>();
 const STATUS_ICON: Record<SimklStatus, IconName> = {
   watching: 'play',
   plantowatch: 'clock',
@@ -45,6 +47,7 @@ export default function DetailModal({
   title,
   actions,
   lists = [],
+  library,
   hideSpoilers = false,
   initialEpisodesOpen = false,
   initialRewatchOpen = false,
@@ -58,6 +61,8 @@ export default function DetailModal({
   title: CatalogTitle;
   actions: SimklActions;
   lists?: SimklList[];
+  /** Your library, for ticking what you have seen in the watch order. */
+  library?: Map<number, SimklItem>;
   hideSpoilers?: boolean;
   initialEpisodesOpen?: boolean;
   initialRewatchOpen?: boolean;
@@ -365,6 +370,8 @@ export default function DetailModal({
               </View>
             </View>
           )}
+
+          <WatchOrder type={type} id={id} actions={actions} library={library ?? EMPTY_LIBRARY} onOpen={onOpen} />
 
           {item && sessions.length > 0 && (
             <View style={styles.section}>

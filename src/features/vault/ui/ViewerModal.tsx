@@ -16,13 +16,18 @@
  * A video linked to a Simkl movie or episode scrobbles while it plays: Simkl
  * shows it as "watching now", and finishing it marks it watched there.
  *
+ * Also: hold the left or right edge for 2× speed, bookmarks (ticks on the
+ * scrubber, chips to jump), "Continue another time" on long videos (it picks
+ * up 2.5 min before where you stopped), and every play is recorded for the
+ * dashboard and Wrapped.
+ *
  * Like the rest of `ui/`, this imports no native module except expo-video, which
  * has a real web implementation. `enableVideo=false` (the browser preview) skips
  * mounting the player and shows a placeholder stage instead.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,8 +35,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { episodeCode } from '@/features/simkl/logic';
 import type { SimklBridge, VideoLink } from '@/features/simkl/ui/types';
 
+import { canResume, fmtClock, ratingLabel, resumeFrom } from '../stats';
+import type { Bookmark } from '../watching';
 import { confirmAction } from './confirm';
-import { success } from './haptics';
+import { OptionsSheet } from './prompts';
+import { success, tick } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
 import LinkSheet from './LinkSheet';
@@ -53,6 +61,8 @@ import {
   type UiTag,
   type VaultItem,
   type VaultScreenProps,
+  DEFAULT_VAULT_PREFS,
+  type VaultPrefs,
 } from './types';
 import Glyph from './Glyph';
 
@@ -77,6 +87,8 @@ export default function ViewerModal({
   simkl,
   link = null,
   onLinkChanged,
+  resumeAt = null,
+  prefs = DEFAULT_VAULT_PREFS,
   onClose,
 }: {
   item: VaultItem;
@@ -98,6 +110,9 @@ export default function ViewerModal({
   simkl?: SimklBridge;
   link?: VideoLink | null;
   onLinkChanged?: () => void;
+  /** A saved "continue another time" point (ms), if there is one. */
+  resumeAt?: number | null;
+  prefs?: VaultPrefs;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -133,6 +148,95 @@ export default function ViewerModal({
   const [editorTab, setEditorTab] = useState<'trim' | 'crop' | 'size' | null>(initialEditorTab ?? null);
   const [note, setNote] = useState('');
   const [linkOpen, setLinkOpen] = useState(false);
+  const [fast, setFast] = useState(false);
+  const [marks, setMarks] = useState<Bookmark[]>([]);
+  const [markMenu, setMarkMenu] = useState<Bookmark | null>(null);
+  const [renaming, setRenaming] = useState<Bookmark | null>(null);
+  const [resumedFrom, setResumedFrom] = useState<number | null>(null);
+  const resumeDone = useRef(false);
+
+  const loadMarks = () => {
+    actions
+      .loadBookmarks(item.id)
+      .then(setMarks)
+      .catch(() => undefined);
+  };
+  useEffect(loadMarks, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Record how much of the video was watched (content time; seeks are not counted).
+  const watched = useRef({ ms: 0, last: -1, openedAt: Date.now() });
+  useEffect(() => {
+    const w = watched.current;
+    const sub = player.addListener('timeUpdate', ({ currentTime }) => {
+      if (w.last >= 0 && player.playing) {
+        const delta = currentTime - w.last;
+        if (delta > 0 && delta < 1.5) w.ms += delta * 1000;
+      }
+      w.last = currentTime;
+    });
+    return () => {
+      sub.remove();
+      void actions.recordPlay(item.id, w.openedAt, w.ms).catch(() => undefined);
+    };
+  }, [player, item.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pick a saved video up again, 2.5 minutes before where you stopped.
+  useEffect(() => {
+    if (!enableVideo || !prefs.resumeEnabled || resumeAt === null || resumeDone.current) return;
+    const go = () => {
+      if (resumeDone.current) return;
+      resumeDone.current = true;
+      const from = resumeFrom(resumeAt, item.durationMs ?? (player.duration ? player.duration * 1000 : null));
+      player.currentTime = from / 1000;
+      setResumedFrom(from);
+    };
+    if (player.status === 'readyToPlay') go();
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') go();
+    });
+    return () => sub.remove();
+  }, [player, resumeAt, enableVideo, prefs.resumeEnabled, item.durationMs]);
+
+  // Played to the end: the saved point is no longer needed.
+  useEffect(() => {
+    if (resumeAt !== null && progress > 0.97) void actions.setResume(item.id, null);
+  }, [progress > 0.97]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function holdFast(on: boolean) {
+    if (!enableVideo || !prefs.holdForSpeed) return;
+    if (!on && player.playbackRate === 1) return;
+    player.playbackRate = on ? 2 : 1;
+    if (on && !player.playing) {
+      player.play();
+      setPlaying(true);
+    }
+    if (on) tick();
+    setFast(on);
+  }
+
+  function addMark() {
+    const at = Math.round(progress * totalSec * 1000);
+    success();
+    actions
+      .addBookmark(item.id, at, null)
+      .then(() => {
+        setNote(`Bookmarked ${fmtClock(at)} - hold it to name it`);
+        loadMarks();
+      })
+      .catch((e) => setNote(`Not saved: ${String(e)}`));
+  }
+
+  function continueLater() {
+    const at = Math.round(progress * totalSec * 1000);
+    if (player.playing) player.pause();
+    actions
+      .setResume(item.id, at)
+      .then(() => {
+        success();
+        onClose();
+      })
+      .catch((e) => setNote(`Not saved: ${String(e)}`));
+  }
 
   const framesRef = useRef<ThumbSource[]>([]);
   framesRef.current = frames;
@@ -327,6 +431,33 @@ export default function ViewerModal({
               </View>
             )}
           </TouchableOpacity>
+          {/* Hold either edge for 2x; a short tap still shows or hides the controls. */}
+          {prefs.holdForSpeed && (
+            <>
+              <Pressable
+                style={[styles.edge, { left: 0 }]}
+                onPress={() => setChrome((c) => !c)}
+                onLongPress={() => holdFast(true)}
+                onPressOut={() => holdFast(false)}
+                delayLongPress={280}
+                accessibilityLabel="Hold for double speed"
+              />
+              <Pressable
+                style={[styles.edge, { right: 0 }]}
+                onPress={() => setChrome((c) => !c)}
+                onLongPress={() => holdFast(true)}
+                onPressOut={() => holdFast(false)}
+                delayLongPress={280}
+                accessibilityLabel="Hold for double speed"
+              />
+            </>
+          )}
+          {fast && (
+            <View style={[styles.fastPill, { top: insets.top + 60 }]} pointerEvents="none">
+              <Icon name="fast" size={13} color="#fff" />
+              <Text style={styles.fastText}>2×</Text>
+            </View>
+          )}
         </View>
 
         {chrome && (
@@ -369,15 +500,60 @@ export default function ViewerModal({
                 </TouchableOpacity>
                 <View style={styles.scrubTrack} onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
                   <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                  {totalSec > 0 &&
+                    marks.map((m) => (
+                      <View key={m.id} style={[styles.scrubMark, { left: Math.min(1, m.atMs / 1000 / totalSec) * Math.max(0, trackW - 3) }]} />
+                    ))}
                   <View style={[styles.scrubThumb, { left: progress * Math.max(0, trackW - 3) }]} />
                 </View>
                 <Text style={styles.scrubTime}>
                   {fmtDuration(elapsed * 1000) ?? '0:00'} / {fmtDuration(totalSec * 1000) ?? '--:--'}
                 </Text>
+                <TouchableOpacity onPress={addMark} hitSlop={8} accessibilityLabel="Bookmark this moment">
+                  <Icon name="bookmarkAdd" size={17} color={p.text} />
+                </TouchableOpacity>
+                {prefs.resumeEnabled && canResume(item.durationMs) && (
+                  <TouchableOpacity onPress={continueLater} hitSlop={8} accessibilityLabel="Continue another time">
+                    <Icon name="later" size={17} color={p.text} />
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={10} accessibilityLabel="More">
                   <Icon name="more" size={18} color={p.text} />
                 </TouchableOpacity>
               </View>
+
+              {resumedFrom !== null && (
+                <View style={styles.resumeRow}>
+                  <Icon name="later" size={13} color={p.accent} />
+                  <Text style={styles.resumeText}>Continuing from {fmtClock(resumedFrom)}</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      player.currentTime = 0;
+                      setResumedFrom(null);
+                      void actions.setResume(item.id, null);
+                    }}>
+                    <Text style={styles.resumeLink}>Start over</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {marks.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.markRow}>
+                  {marks.map((m) => (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={styles.markChip}
+                      onPress={() => seek(Math.min(1, m.atMs / 1000 / Math.max(1, totalSec)))}
+                      onLongPress={() => setMarkMenu(m)}>
+                      <Icon name="bookmark" size={11} color={p.accent} />
+                      <Text style={styles.markText} numberOfLines={1}>
+                        {fmtClock(m.atMs)}
+                        {m.label ? `  ${m.label}` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
 
               <ScrollView ref={stripRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
                 {frames.map((src, i) => (
@@ -419,6 +595,11 @@ export default function ViewerModal({
                     </TouchableOpacity>
                   ))}
                 </View>
+                {!!ratingLabel(rating, prefs.ratingLabels) && (
+                  <Text style={styles.rateWord} numberOfLines={1}>
+                    {ratingLabel(rating, prefs.ratingLabels)}
+                  </Text>
+                )}
                 <TouchableOpacity style={styles.tool} onPress={() => setMenuOpen(true)} accessibilityLabel="More">
                   <Icon name="more" size={18} color={p.textSecondary} />
                 </TouchableOpacity>
@@ -632,6 +813,24 @@ export default function ViewerModal({
                     setInfoOpen(true);
                   }}
                 />
+                <MenuRow
+                  label="Bookmark This Moment"
+                  hint={fmtDuration(elapsed * 1000) ?? '0:00'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    addMark();
+                  }}
+                />
+                {prefs.resumeEnabled && canResume(item.durationMs) && (
+                  <MenuRow
+                    label="Continue Another Time"
+                    hint={`From ${fmtClock(Math.max(0, elapsed * 1000 - 150_000))}`}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      continueLater();
+                    }}
+                  />
+                )}
                 {simkl && (
                   <MenuRow
                     label={link ? 'Simkl Link…' : 'Link to Simkl…'}
@@ -801,11 +1000,36 @@ export default function ViewerModal({
           <LinkSheet item={item} bridge={simkl} link={link} onChanged={() => onLinkChanged?.()} onClose={() => setLinkOpen(false)} />
         )}
 
+        {markMenu && (
+          <OptionsSheet
+            title={`Bookmark ${fmtClock(markMenu.atMs)}`}
+            options={[
+              { label: 'Jump here', onPress: () => seek(Math.min(1, markMenu.atMs / 1000 / Math.max(1, totalSec))) },
+              { label: markMenu.label ? 'Rename' : 'Name it', onPress: () => setRenaming(markMenu) },
+              {
+                label: 'Delete',
+                danger: true,
+                onPress: () => void actions.deleteBookmark(markMenu.id).then(loadMarks),
+              },
+            ]}
+            onClose={() => setMarkMenu(null)}
+          />
+        )}
+        {renaming && (
+          <PromptSheet
+            title="Name this moment"
+            initial={renaming.label ?? ''}
+            placeholder="The best part"
+            onSubmit={(name) => void actions.renameBookmark(renaming.id, name).then(loadMarks)}
+            onClose={() => setRenaming(null)}
+          />
+        )}
+
         {pickerOpen && (
           <RatingPicker
             title="Rate this video"
             value={rating > 0 ? rating : null}
-            note={() => 'Tip: hold the stars to open this.'}
+            note={(n) => ratingLabel(n, prefs.ratingLabels) ?? 'Tip: hold the stars to open this.'}
             onPick={(n) => {
               const next = n ?? 0;
               setRating(next);
@@ -916,6 +1140,27 @@ const makeStyles = (p: Palette) =>
       paddingVertical: 6,
     },
     linkPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    edge: { position: 'absolute', top: 90, bottom: 40, width: '22%' },
+    fastPill: {
+      position: 'absolute',
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      borderRadius: 999,
+      paddingHorizontal: 14,
+      paddingVertical: 6,
+    },
+    fastText: { color: '#fff', fontSize: 14, fontWeight: '900' },
+    scrubMark: { position: 'absolute', top: -3, width: 3, height: 9, borderRadius: 1.5, backgroundColor: p.rating },
+    resumeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingBottom: 6 },
+    resumeText: { color: p.textSoft, fontSize: 12, fontWeight: '600', flex: 1 },
+    resumeLink: { color: p.link, fontSize: 12, fontWeight: '700' },
+    markRow: { gap: 6, paddingHorizontal: 14, paddingBottom: 8 },
+    markChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 200 },
+    markText: { color: p.textSoft, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    rateWord: { color: p.rating, fontSize: 11, fontWeight: '700', maxWidth: 70 },
     circle: {
       width: 34,
       height: 34,

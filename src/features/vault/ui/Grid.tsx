@@ -58,6 +58,8 @@ type Props = {
   onLongPressTile?: (item: VaultItem) => void;
   /** Videos linked to a Simkl movie or episode (a small TV mark). */
   linked?: Set<string>;
+  /** "Continue another time" points: a thin bar where you stopped. */
+  resume?: Map<string, number>;
 };
 
 export default function Grid({
@@ -75,6 +77,7 @@ export default function Grid({
   onPressTile,
   onLongPressTile,
   linked,
+  resume,
 }: Props) {
   const styles = useStyles(makeStyles);
   const tabSpace = useTabBarSpace();
@@ -173,6 +176,7 @@ export default function Grid({
                 copyRank={dupRank.get(item.id)}
                 albumNames={albumNames}
                 linked={linked?.has(item.id) ?? false}
+                resumeAt={resume?.get(item.id)}
                 now={now}
                 styles={styles}
                 onPress={onPressTile}
@@ -196,6 +200,7 @@ function TileView({
   copyRank,
   albumNames,
   linked,
+  resumeAt,
   now,
   styles,
   onPress,
@@ -210,6 +215,7 @@ function TileView({
   copyRank: number | undefined;
   albumNames: Map<number, string>;
   linked: boolean;
+  resumeAt?: number;
   now: number;
   styles: ReturnType<typeof makeStyles>;
   onPress: (item: VaultItem) => void;
@@ -241,6 +247,11 @@ function TileView({
         recyclingKey={item.id}
       />
       {item.inTray && <View style={styles.trayOutline} pointerEvents="none" />}
+      {resumeAt !== undefined && !!item.durationMs && (
+        <View style={styles.resumeTrack} pointerEvents="none">
+          <View style={[styles.resumeFill, { width: `${Math.min(100, (resumeAt / item.durationMs) * 100)}%` }]} />
+        </View>
+      )}
       {info && (
         <Text style={[styles.infoBadge, { maxWidth: tile.w * (crowded ? 0.5 : 0.9) }]} numberOfLines={1}>
           {info}
@@ -292,6 +303,8 @@ const makeStyles = (p: Palette) =>
     cell: { position: 'absolute', backgroundColor: p.tile, overflow: 'hidden' },
     thumb: { width: '100%', height: '100%' },
     thumbDimmed: { opacity: 0.55 },
+    resumeTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, backgroundColor: 'rgba(0,0,0,0.5)' },
+    resumeFill: { height: 3, backgroundColor: p.accent },
     trayOutline: {
       position: 'absolute',
       top: 0,

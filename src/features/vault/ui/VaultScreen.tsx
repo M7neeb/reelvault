@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import { AppState, ScrollView, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
 import type { VideoLink } from '@/features/simkl/ui/types';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,7 +48,7 @@ import SearchSheet from './SearchSheet';
 import { PasscodeSheet, SettingsSheet, type PasscodeMode } from './security';
 import { BulkEditSheet, newSmartFilterDraft, SmartFilterSheet, ViewOptionsSheet } from './sheets';
 import Sidebar from './Sidebar';
-import { paletteFor, rgbOf, sheet, ThemeContext, usePalette, useStyles, type Palette } from './theme';
+import { paletteFor, rgbOf, sheet, ThemeContext, usePalette, useStyles, withAccent, type Palette } from './theme';
 import {
   SORTS,
   type CompressQuality,
@@ -68,11 +68,19 @@ import {
 import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
+import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
+import PersonaliseSheet from './PersonaliseSheet';
+import { DesktopTable, DetailedList } from './VideoList';
+import { DEFAULT_VAULT_PREFS } from './types';
+import { Image as ThumbImage } from 'expo-image';
+import { fmtClock } from '../stats';
+
+const EMPTY_RESUME = new Map<string, number>();
 
 /** Picks the light or dark colours, then renders the screen inside them. */
 export default function VaultScreen(props: VaultScreenProps) {
   const system = useColorScheme();
-  const palette = paletteFor(resolveScheme(props.viewOptions.theme, system));
+  const palette = withAccent(paletteFor(resolveScheme(props.viewOptions.theme, system)), props.viewOptions.accent);
   return (
     <ThemeContext.Provider value={palette}>
       <StatusBar style={palette.scheme === 'dark' ? 'light' : 'dark'} />
@@ -113,6 +121,10 @@ function VaultScreenBody({
   actions,
   enableVideo = true,
   simkl,
+  resume = EMPTY_RESUME,
+  prefs = DEFAULT_VAULT_PREFS,
+  wrappedRequest,
+  onWrappedHandled,
   devInitialState: dev,
 }: VaultScreenProps) {
   const insets = useSafeAreaInsets();
@@ -130,6 +142,31 @@ function VaultScreenBody({
   };
   useEffect(reloadLinks, [simkl]); // eslint-disable-line react-hooks/exhaustive-deps
   const linkedIds = useMemo(() => new Set(links.keys()), [links]);
+
+  const [insights, setInsights] = useState<InsightsTab | null>(dev?.insightsTab ?? null);
+  const [openWrapped, setOpenWrapped] = useState(false);
+  const [personalise, setPersonalise] = useState(dev?.personaliseOpen ?? false);
+  // Play counts for the Detailed layout.
+  const [playCounts, setPlayCounts] = useState<Map<string, number>>(new Map());
+  const loadPlayCounts = () => {
+    actions
+      .loadPlays()
+      .then((ps) => {
+        const m = new Map<string, number>();
+        for (const x of ps) m.set(x.videoId, (m.get(x.videoId) ?? 0) + 1);
+        setPlayCounts(m);
+      })
+      .catch(() => undefined);
+  };
+  useEffect(loadPlayCounts, [actions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Monday notification was tapped: last week's Wrapped.
+  useEffect(() => {
+    if (!wrappedRequest) return;
+    setInsights('wrapped');
+    setOpenWrapped(true);
+    onWrappedHandled?.();
+  }, [wrappedRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VaultItem[] | null>(null);
@@ -753,8 +790,17 @@ function VaultScreenBody({
 
   /* ---------------------------------------------------------------- render */
 
+  const look = viewOptions.look;
+  const continuing = !special && !results && look !== 'desktop' ? shown.filter((v) => resume.has(v.id)).slice(0, 12) : [];
+  const gridOptions: ViewOptions =
+    look === 'simple'
+      ? { ...viewOptions, layout: 'grid', size: 'xlarge', infos: [], showRating: false, showKeywords: false, groupBy: 'none' }
+      : look === 'compact'
+        ? { ...viewOptions, layout: 'grid', size: 'small', infos: [], showRating: false, showKeywords: false }
+        : viewOptions;
+
   const listHeader = (
-    <View style={[styles.listHeader, { paddingTop: insets.top + 56 }]}>
+    <View style={[styles.listHeader, { paddingTop: look === 'desktop' ? 8 : insets.top + 56 }]}>
       <View style={styles.subRow}>
         <Text style={styles.subText}>
           {plural(shown.length, 'video')}
@@ -806,7 +852,32 @@ function VaultScreenBody({
       {inPrivate && (
         <Text style={styles.note}>Only you can see these. Private locks again when you leave the app.</Text>
       )}
-      {!results && !special && (
+      {continuing.length > 0 && (
+        <View style={styles.continueBox}>
+          <Text style={styles.continueTitle}>Continue watching</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.continueRow}>
+            {continuing.map((v) => {
+              const at = resume.get(v.id) ?? 0;
+              return (
+                <TouchableOpacity key={v.id} style={styles.continueCard} onPress={() => setPlaying(v)} accessibilityLabel={`Continue ${v.title || v.filename}`}>
+                  <ThumbImage source={v.thumbSource} style={styles.continueThumb} contentFit="cover" />
+                  <View style={styles.continueTrack}>
+                    <View style={[styles.continueFill, { width: `${v.durationMs ? Math.min(100, (at / v.durationMs) * 100) : 0}%` }]} />
+                  </View>
+                  <View style={styles.continuePlay}>
+                    <Icon name="play" size={14} color="#fff" />
+                  </View>
+                  <Text style={styles.continueName} numberOfLines={1}>
+                    {v.title || v.filename}
+                  </Text>
+                  <Text style={styles.continueAt}>Stopped at {fmtClock(at)}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+      {!results && !special && look !== 'simple' && look !== 'desktop' && (
         <View style={styles.sortRow}>
           <TouchableOpacity style={styles.chip} onPress={() => setViewOptionsOpen(true)}>
             <Text style={styles.chipText}>
@@ -839,22 +910,61 @@ function VaultScreenBody({
 
   return (
     <View style={styles.screen}>
-      <Grid
-        items={shown}
-        viewOptions={viewOptions}
-        header={listHeader}
-        empty={empty}
-        resetKey={JSON.stringify(filter)}
-        selectMode={selectMode}
-        selected={selected}
-        mode={mode}
-        dupRank={dupRank}
-        albumNames={albumNames}
-        jumpTo={jumpTo}
-        onPressTile={onPressTile}
-        onLongPressTile={mode === 'normal' ? onLongPressTile : undefined}
-        linked={linkedIds}
-      />
+      {look === 'detailed' && mode === 'normal' ? (
+        <DetailedList
+          items={shown}
+          header={listHeader}
+          empty={empty}
+          selectMode={selectMode}
+          selected={selected}
+          labels={prefs.ratingLabels}
+          resume={resume}
+          linked={linkedIds}
+          plays={playCounts}
+          onPress={onPressTile}
+          onLongPress={onLongPressTile}
+        />
+      ) : look === 'desktop' && mode === 'normal' ? (
+        <View style={{ flex: 1, paddingTop: insets.top + 56 }}>
+          <DesktopTable
+            items={shown}
+            header={listHeader}
+            empty={empty}
+            selectMode={selectMode}
+            selected={selected}
+            labels={prefs.ratingLabels}
+            resume={resume}
+            linked={linkedIds}
+            plays={playCounts}
+            onPress={onPressTile}
+            onLongPress={onLongPressTile}
+            sort={viewOptions.sort}
+            onSort={(sort) => setViewOptions({ ...viewOptions, sort })}
+            filter={filter}
+            onFilter={pickFilter}
+            onMore={() => setSidebarOpen(true)}
+            topInset={8}
+          />
+        </View>
+      ) : (
+        <Grid
+          items={shown}
+          viewOptions={gridOptions}
+          header={listHeader}
+          empty={empty}
+          resetKey={JSON.stringify(filter)}
+          selectMode={selectMode}
+          selected={selected}
+          mode={mode}
+          dupRank={dupRank}
+          albumNames={albumNames}
+          jumpTo={jumpTo}
+          onPressTile={onPressTile}
+          onLongPressTile={mode === 'normal' ? onLongPressTile : undefined}
+          linked={look === 'simple' ? undefined : linkedIds}
+          resume={look === 'simple' ? undefined : resume}
+        />
+      )}
 
       <Fade color={rgbOf(p.bg)} from={0} to={0.92} reverse style={[styles.headerFade, { height: insets.top + 64 }]} />
       <View style={[styles.floatingHeader, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
@@ -988,6 +1098,14 @@ function VaultScreenBody({
             setSidebarOpen(false);
             refreshSecurity();
             setSettingsOpen(true);
+          }}
+          onInsights={(tab) => {
+            setSidebarOpen(false);
+            setInsights(tab);
+          }}
+          onPersonalise={() => {
+            setSidebarOpen(false);
+            setPersonalise(true);
           }}
           onImport={() => {
             setSidebarOpen(false);
@@ -1133,7 +1251,40 @@ function VaultScreenBody({
             setImportQualityState(q);
             actions.setImportQuality(q).catch(fail('SETTINGS'));
           }}
+          onPersonalise={() => {
+            setSettingsOpen(false);
+            setPersonalise(true);
+          }}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {personalise && (
+        <PersonaliseSheet viewOptions={viewOptions} onViewOptions={setViewOptions} prefs={prefs} actions={actions} onClose={() => setPersonalise(false)} />
+      )}
+
+      {insights && (
+        <VideoInsightsModal
+          initialTab={insights}
+          initialWrapped={openWrapped}
+          items={inPrivate ? privateItems : publicItems}
+          deleted={visibleTrash}
+          albums={albums.length}
+          actions={actions}
+          simkl={simkl}
+          ratingLabels={prefs.ratingLabels}
+          onOpenVideo={(id) => {
+            const v = items.find((x) => x.id === id);
+            if (v) setPlaying(v);
+          }}
+          onMakeSmaller={(ids) => {
+            setInsights(null);
+            setSmallerFor(items.filter((v) => ids.includes(v.id)));
+          }}
+          onClose={() => {
+            setInsights(null);
+            setOpenWrapped(false);
+          }}
         />
       )}
 
@@ -1159,7 +1310,12 @@ function VaultScreenBody({
           simkl={simkl}
           link={links.get(playing.id) ?? null}
           onLinkChanged={reloadLinks}
-          onClose={() => setPlaying(null)}
+          resumeAt={resume.get(playing.id) ?? null}
+          prefs={prefs}
+          onClose={() => {
+            setPlaying(null);
+            loadPlayCounts();
+          }}
         />
       )}
 
@@ -1267,6 +1423,16 @@ const makeStyles = (p: Palette) =>
     screen: { flex: 1, backgroundColor: p.bg, overflow: 'hidden' },
 
     headerFade: { position: 'absolute', top: 0, left: 0, right: 0 },
+    continueBox: { gap: 8, paddingTop: 4, paddingBottom: 6 },
+    continueTitle: { color: p.text, fontSize: 18, fontWeight: '800', paddingHorizontal: 8 },
+    continueRow: { gap: 10, paddingHorizontal: 8 },
+    continueCard: { width: 168 },
+    continueThumb: { width: 168, height: 95, borderRadius: 12, backgroundColor: p.tile },
+    continueTrack: { position: 'absolute', left: 8, right: 8, top: 84, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.5)', overflow: 'hidden' },
+    continueFill: { height: 4, backgroundColor: p.accent },
+    continuePlay: { position: 'absolute', top: 8, left: 8, width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+    continueName: { color: p.text, fontSize: 13, fontWeight: '700', marginTop: 5 },
+    continueAt: { color: p.textSecondary, fontSize: 11 },
     floatingHeader: {
       position: 'absolute',
       top: 0,

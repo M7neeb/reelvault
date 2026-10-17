@@ -13,7 +13,7 @@ import { useSimklData } from '@/features/simkl/data';
 import type { SimklType } from '@/features/simkl/ui/types';
 import { useVaultData } from '@/features/vault/data';
 import { resolveScheme } from '@/features/vault/ui/logic';
-import { paletteFor, type Palette } from '@/features/vault/ui/theme';
+import { paletteFor, withAccent, type Palette } from '@/features/vault/ui/theme';
 
 type Home = {
   vault: ReturnType<typeof useVaultData>;
@@ -33,7 +33,7 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
   const vault = useVaultData();
   const simkl = useSimklData();
   const system = useColorScheme();
-  const palette = paletteFor(resolveScheme(vault.viewOptions.theme, system));
+  const palette = withAccent(paletteFor(resolveScheme(vault.viewOptions.theme, system)), vault.viewOptions.accent);
   const router = useRouter();
 
   // A tapped notification jumps to that title's tab; the screen then opens it.
