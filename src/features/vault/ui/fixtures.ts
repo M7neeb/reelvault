@@ -12,6 +12,7 @@
 
 import { groupDuplicates } from './logic';
 import type {
+  OverviewData,
   SmartFilter,
   ThumbSource,
   UiAlbum,
@@ -299,3 +300,64 @@ export const FIXTURE_BOOKMARKS = [
   { id: 1, videoId: FIXTURE_ITEMS[0].id, atMs: 42_000, label: 'The view from the top', createdAt: Date.now() },
   { id: 2, videoId: FIXTURE_ITEMS[0].id, atMs: 131_000, label: null, createdAt: Date.now() },
 ];
+
+/** Overview mode: two series, and a few videos removed for good whose info is kept. */
+const KEPT_NAMES: [string, string | null, number, number][] = [
+  ['Terra Formars (2016) S01E01.mp4', null, 7, 1440],
+  ['Terra Formars (2016) S01E02.mp4', null, 6, 1430],
+  ['Terra Formars (2016) S01E03.mp4', 'The roaches return', 0, 1450],
+  ['lecture_part1.mp4', null, 8, 3100],
+  ['lecture_part2.mp4', null, 0, 2950],
+  ['old_trailer_cut.mp4', 'Trailer (first cut)', 3, 95],
+];
+
+export const FIXTURE_OVERVIEW: OverviewData = {
+  kept: KEPT_NAMES.map(([filename, title, rating, secs], i) => ({
+    id: `fixture-kept-${i + 1}`,
+    title,
+    filename,
+    durationMs: secs * 1000,
+    sizeBytes: 300 * 1024 * 1024,
+    rating,
+    status: i < 2 ? 'completed' : null,
+    notes: null,
+    tagNames: i < 3 ? ['Anime'] : [],
+    thumb: i % 2 ? PLACEHOLDERS[(i + 1) % PLACEHOLDERS.length] : null,
+    createdAt: Date.UTC(2026, 7, 1 + i),
+    importedAt: Date.UTC(2026, 7, 2 + i),
+    where: 'kept' as const,
+    removedAt: Date.UTC(2026, 9, 3 + i),
+    isPrivate: false,
+  })),
+  series: [
+    {
+      id: 'fixture-series-1',
+      name: 'Terra Formars',
+      description: 'Season 1, watched from the files a friend sent. Removed the first episodes to free space.',
+      cover: null,
+      rating: 7,
+      status: 'watching',
+      createdAt: Date.UTC(2026, 7, 2),
+      updatedAt: Date.UTC(2026, 9, 10),
+    },
+    {
+      id: 'fixture-series-2',
+      name: 'City walks',
+      description: null,
+      cover: null,
+      rating: 0,
+      status: null,
+      createdAt: Date.UTC(2026, 9, 1),
+      updatedAt: Date.UTC(2026, 9, 12),
+    },
+  ],
+  members: [
+    { videoId: 'fixture-kept-1', seriesId: 'fixture-series-1', position: 1, label: null },
+    { videoId: 'fixture-kept-2', seriesId: 'fixture-series-1', position: 2, label: null },
+    { videoId: 'fixture-kept-3', seriesId: 'fixture-series-1', position: 3, label: null },
+    { videoId: 'fixture-5', seriesId: 'fixture-series-1', position: 4, label: 'Episode 4' },
+    { videoId: 'fixture-1', seriesId: 'fixture-series-2', position: 1, label: null },
+    { videoId: 'fixture-10', seriesId: 'fixture-series-2', position: 2, label: 'The long walk home' },
+    { videoId: 'fixture-7', seriesId: 'fixture-series-2', position: 3, label: null },
+  ],
+};

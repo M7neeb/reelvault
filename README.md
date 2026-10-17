@@ -16,6 +16,7 @@ search. Everything stays on the device — no account, no server, no telemetry.
 - **Full-text search** across filenames, notes and keywords
 - **Multi-select** with batch delete
 - **Storage readout** — what the app holds vs what's free on the device
+- **Overview mode** — rate and track your videos like shows: status, ratings, series with per-episode ratings, and the info of removed videos kept
 
 ## Tech stack
 

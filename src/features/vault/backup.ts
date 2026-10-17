@@ -10,8 +10,10 @@ import { File, Paths } from 'expo-file-system';
 import { getDb } from '@/db';
 
 import { addToAlbums, createAlbum, createFolder, listAlbums, listFolders } from './albums';
-import { BACKUP_KIND, BACKUP_VERSION, matchBackup, parseBackup, type Backup } from './backupFormat';
+import { BACKUP_KIND, BACKUP_VERSION, matchBackup, parseBackup, seriesEpisodes, type Backup, type BackupSeries } from './backupFormat';
 import { saveSmartFilter, setTagPinned } from './library';
+import { addToSeries, createSeries, listSeries, setEpisodeLabel, updateSeries } from './overviewStore';
+import type { OvStatus } from './overview';
 import { shareFile } from './share';
 import { addTagToVideo, listTags } from './tags';
 
@@ -47,6 +49,36 @@ export async function exportLibraryInfo(): Promise<number> {
     'SELECT name, rule_json, folder_id FROM smart_filters;'
   );
   const tags = await listTags();
+  const kept = await db.getAllAsync<{
+    video_id: string;
+    title: string | null;
+    filename: string;
+    size: number;
+    duration_ms: number | null;
+    rating: number;
+    status: string | null;
+    notes: string | null;
+    tags: string | null;
+    created_at: number;
+    imported_at: number;
+    removed_at: number;
+  }>('SELECT * FROM vault_kept WHERE is_private = 0;');
+  const seriesRows = await db.getAllAsync<{ id: string; name: string; description: string | null; rating: number; status: string | null }>(
+    'SELECT id, name, description, rating, status FROM vault_series;'
+  );
+  const seriesItems = await db.getAllAsync<{ video_id: string; series_id: string; label: string | null }>(
+    'SELECT video_id, series_id, label FROM vault_series_items ORDER BY series_id, position;'
+  );
+  const videoIndex = new Map(videos.map((v, i) => [v.id, i]));
+  const keptIds = new Set(kept.map((k) => k.video_id));
+  const keywordsOf = (json: string | null): string[] => {
+    try {
+      const t = JSON.parse(json ?? '[]');
+      return Array.isArray(t) ? t.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
 
   const group = (rows: { video_id: string; name: string }[]) => {
     const m = new Map<string, string[]>();
@@ -81,6 +113,36 @@ export async function exportLibraryInfo(): Promise<number> {
       folder: folderName(s.folder_id),
     })),
     pinnedKeywords: tags.filter((t) => t.pinned === 1).map((t) => t.name),
+    kept: kept.map((k) => ({
+      id: k.video_id,
+      title: k.title,
+      filename: k.filename,
+      size: k.size,
+      durationMs: k.duration_ms,
+      rating: k.rating,
+      status: k.status,
+      notes: k.notes,
+      keywords: keywordsOf(k.tags),
+      createdAt: k.created_at,
+      importedAt: k.imported_at,
+      removedAt: k.removed_at,
+    })),
+    // Private videos are not in the file, so they are left out of series too.
+    series: seriesRows.map((s) => ({
+      name: s.name,
+      description: s.description,
+      rating: s.rating,
+      status: s.status,
+      episodes: seriesItems
+        .filter((i) => i.series_id === s.id)
+        .flatMap((i): BackupSeries['episodes'] =>
+          videoIndex.has(i.video_id)
+            ? [{ video: videoIndex.get(i.video_id)!, label: i.label }]
+            : keptIds.has(i.video_id)
+              ? [{ kept: i.video_id, label: i.label }]
+              : []
+        ),
+    })),
   };
 
   const day = new Date().toISOString().slice(0, 10);
@@ -139,6 +201,25 @@ export async function importLibraryInfo(): Promise<{ matched: number; total: num
   for (const name of backup.pinnedKeywords) {
     const t = tags.find((x) => x.name === name);
     if (t) await setTagPinned(t.id, true);
+  }
+
+  // Removed videos' info (never over what is already kept), then series by name.
+  for (const k of backup.kept) {
+    await db.runAsync(
+      `INSERT OR IGNORE INTO vault_kept
+         (video_id, title, filename, size, duration_ms, rating, status, notes, tags, is_private, thumb, created_at, imported_at, removed_at)
+       VALUES (?,?,?,?,?,?,?,?,?,0,NULL,?,?,?);`,
+      [k.id, k.title, k.filename, k.size ?? 0, k.durationMs ?? null, k.rating ?? 0, k.status, k.notes, JSON.stringify(k.keywords ?? []), k.createdAt ?? 0, k.importedAt ?? 0, k.removedAt ?? Date.now()]
+    );
+  }
+  const existingSeries = new Map((await listSeries()).map((s) => [s.name, s.id]));
+  for (const { series, episodes } of seriesEpisodes(backup, matches)) {
+    const ids = episodes.map((e) => e.videoId);
+    let id = existingSeries.get(series.name);
+    if (id) await addToSeries(id, ids);
+    else id = await createSeries(series.name, ids);
+    await updateSeries(id, { description: series.description, rating: series.rating, status: (series.status as OvStatus | null) ?? null });
+    for (const e of episodes) if (e.label) await setEpisodeLabel(e.videoId, e.label);
   }
 
   return { matched: matches.size, total: backup.videos.length };
