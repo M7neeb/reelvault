@@ -23,8 +23,21 @@ import {
 import { SimklError } from './api';
 import { isSimklConnected, revokeSimklTokens, runSimklDeviceFlow } from './auth';
 import { hasSimklClientId } from './config';
-import { libraryCsv, type SimklItem } from './logic';
+import { libraryCsv, type SimklItem, type SimklType } from './logic';
 import { allWatchTimes, clearSimklLibrary, listSimklItems, watchedEpisodes } from './repo';
+import {
+  cachedPlan,
+  deleteRewatch,
+  endRewatch,
+  fillMissingMeta,
+  logRewatch,
+  rewatchesOnSimkl,
+  setRewatchesOnSimkl,
+  startRewatch,
+} from './actions';
+import { allHistory, allPlays, metaMap, playsFor, sessionsFor } from './history';
+import { buildEvents } from './insights';
+import { onReminderTap, reminderSettings, rescheduleReminders, saveReminderSettings } from './notify';
 import { forgetSyncState, lastSyncAt as readLastSync, syncSimkl } from './sync';
 import type { SimklActions } from './ui/types';
 
@@ -37,6 +50,7 @@ export function useSimklData() {
   const [syncing, setSyncing] = useState(false);
   const [status, setStatus_] = useState('');
   const [lastSync, setLastSync] = useState<number | null>(null);
+  const [openRequest, setOpenRequest] = useState<{ simklId: number; type: SimklType } | null>(null);
   const cancelled = useRef(false);
   const busy = useRef(false);
 
@@ -52,7 +66,10 @@ export function useSimklData() {
       setSyncing(true);
       try {
         const result = await syncSimkl(force, setStatus_);
-        if (result.kind !== 'skipped') await reload();
+        if (result.kind !== 'skipped') {
+          await reload();
+          await rescheduleReminders().catch((e) => console.log(`[NOTIFY] ${String(e)}`));
+        }
         setStatus_(result.kind === 'synced' ? `Synced · ${result.changed} updated` : result.kind === 'unchanged' ? 'Up to date' : '');
       } catch (e) {
         console.log(`[SIMKL] sync failed: ${message(e)}`);
@@ -74,6 +91,9 @@ export function useSimklData() {
       if (on) await sync(false);
     })().catch((e) => console.log(`[SIMKL] start failed: ${message(e)}`));
   }, [configured, reload, sync]);
+
+  // A tapped reminder opens its title.
+  useEffect(() => onReminderTap(setOpenRequest), []);
 
   // Back from the background counts as opening the app.
   useEffect(() => {
@@ -141,6 +161,25 @@ export function useSimklData() {
       trending: loadTrending,
       calendar: loadCalendar,
       watchTimes: allWatchTimes,
+      loadInsights: async () => {
+        const [list, history, plays, meta] = await Promise.all([listSimklItems(), allHistory(), allPlays(), metaMap()]);
+        return { events: buildEvents(list, history, plays, meta), meta };
+      },
+      fillMeta: fillMissingMeta,
+      loadSessions: sessionsFor,
+      loadPlays: playsFor,
+      startRewatch: async (item) => {
+        const s = await startRewatch(item);
+        await reload();
+        return s;
+      },
+      endRewatch: write(endRewatch),
+      deleteRewatch: write(deleteRewatch),
+      logRewatch: write(logRewatch),
+      getRewatchSync: async () => ({ on: await rewatchesOnSimkl(), plan: await cachedPlan() }),
+      setRewatchSync: setRewatchesOnSimkl,
+      getReminders: reminderSettings,
+      setReminders: saveReminderSettings,
       exportCsv: async () => {
         const file = new File(Paths.cache, `simkl-library-${new Date().toISOString().slice(0, 10)}.csv`);
         if (file.exists) file.delete();
@@ -155,5 +194,15 @@ export function useSimklData() {
     [sync, write, reload]
   );
 
-  return { configured, connected, items, syncing, status, lastSyncAt: lastSync, actions };
+  return {
+    configured,
+    connected,
+    items,
+    syncing,
+    status,
+    lastSyncAt: lastSync,
+    actions,
+    openRequest,
+    clearOpenRequest: () => setOpenRequest(null),
+  };
 }

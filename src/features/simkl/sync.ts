@@ -8,6 +8,7 @@
 
 import { getSetting, setSetting } from '@/features/vault/library';
 
+import { cachedPlan, refreshPlan } from './actions';
 import { simklRequest } from './api';
 import { parseAllItems, parseCommunityRatings, parseIds, planSync, shouldSync, type Activities } from './logic';
 import { deleteSimklItems, listSimklItems, saveCommunityRatings, setWatchedEpisodes, upsertSimklItems } from './repo';
@@ -62,7 +63,12 @@ export async function syncSimkl(force = false, onStep?: (label: string) => void)
   if (!shouldSync(await lastSyncAt(), now, force)) return { kind: 'skipped', changed: 0 };
 
   const fresh = await simklRequest<Activities>('/sync/activities', { auth: true });
-  const plan = planSync(await readSnapshot(), fresh);
+  const saved = await readSnapshot();
+  const plan = planSync(saved, fresh);
+  // The account plan (free / PRO / VIP) only changes with the settings timestamp.
+  if (fresh?.settings?.all !== saved?.settings?.all || (await cachedPlan()) === 'unknown') {
+    await refreshPlan().catch((e) => console.log(`[SIMKL] plan: ${String(e)}`));
+  }
   let changed = 0;
 
   if (plan.kind === 'nothing') {

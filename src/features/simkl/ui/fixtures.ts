@@ -3,7 +3,9 @@
  * no real accounts, no network (posters fall back to Simkl's placeholder).
  */
 
+import { buildEvents, type Meta, type Play, type Session } from '../insights';
 import type { CatalogEpisode, CatalogTitle, SimklItem, SimklType } from '../logic';
+import { DEFAULT_REMINDERS } from '../reminders';
 import type { SimklActions, SimklDetailInfo } from './types';
 
 const base = {
@@ -139,6 +141,52 @@ const calendar = (type: SimklType): CatalogTitle[] => [
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const GENRES: Record<number, string[]> = {
+  101: ['Drama', 'Mystery'],
+  102: ['Drama'],
+  103: ['Comedy'],
+  105: ['Crime', 'Drama'],
+  106: ['Comedy'],
+  201: ['Drama', 'Romance'],
+  203: ['Thriller', 'Mystery'],
+  301: ['Fantasy', 'Adventure'],
+  302: ['Action', 'Fantasy'],
+};
+const NETWORKS: Record<number, string> = { 101: 'Placeholder TV', 102: 'North One', 103: 'Placeholder TV', 105: 'Channel 9', 301: 'Studio Lark', 302: 'Studio Lark' };
+
+function fixtureMeta(): Map<number, Meta> {
+  const m = new Map<number, Meta>();
+  for (const [id, genres] of Object.entries(GENRES)) {
+    m.set(Number(id), { genres, network: NETWORKS[Number(id)] ?? null, country: Number(id) >= 300 ? 'JP' : 'US', language: null, runtime: null });
+  }
+  return m;
+}
+
+/** A believable spread of watches over the last few months (evenings, more at weekends). */
+function fixtureHistory(items: SimklItem[]): { simklId: number; watchedAt: string }[] {
+  const out: { simklId: number; watchedAt: string }[] = [];
+  let seed = 7;
+  const rand = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+  for (const i of items) {
+    if (i.type === 'movie') continue;
+    for (let e = 0; e < i.watchedEpisodes; e++) {
+      const daysAgo = Math.floor(rand() * 150);
+      const d = new Date(Date.now() - daysAgo * 86_400_000);
+      d.setHours(18 + Math.floor(rand() * 5), Math.floor(rand() * 60));
+      out.push({ simklId: i.simklId, watchedAt: d.toISOString() });
+    }
+  }
+  return out;
+}
+
+const SESSIONS: Session[] = [{ id: 1, simklId: 103, number: 2, startedAt: day(12), finishedAt: null, remoteId: null }];
+const PLAYS: Play[] = [
+  { id: 1, simklId: 103, season: 1, episode: 1, watchedAt: day(12), sessionId: 1 },
+  { id: 2, simklId: 103, season: 1, episode: 2, watchedAt: day(10), sessionId: 1 },
+  { id: 3, simklId: 103, season: 1, episode: 3, watchedAt: day(4), sessionId: 1 },
+  { id: 4, simklId: 203, season: 0, episode: 0, watchedAt: day(30), sessionId: null },
+];
+
 /** Fake actions that change nothing (the preview has no account). */
 export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, items: SimklItem[]): SimklActions {
   const patch = async (id: number, p: Partial<SimklItem>) => onChange(items.map((i) => (i.simklId === id ? { ...i, ...p } : i)));
@@ -169,6 +217,27 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
     watchTimes: async () =>
       Array.from({ length: 70 }, (_, i) => new Date(Date.now() - ((i * 37) % 110) * 86_400_000).toISOString()),
     exportCsv: async () => {},
+    loadInsights: async () => {
+      const meta = fixtureMeta();
+      return { events: buildEvents(items, fixtureHistory(items), PLAYS, meta), meta };
+    },
+    fillMeta: async (onProgress) => {
+      for (let i = 1; i <= 3; i++) {
+        await wait(150);
+        onProgress(i, 3);
+      }
+      return 3;
+    },
+    loadSessions: async (id) => SESSIONS.filter((s) => s.simklId === id),
+    loadPlays: async (id) => PLAYS.filter((p) => p.simklId === id),
+    startRewatch: async (item) => ({ id: 9, simklId: item.simklId, number: 2, startedAt: new Date().toISOString(), finishedAt: null, remoteId: null }),
+    endRewatch: async () => {},
+    deleteRewatch: async () => {},
+    logRewatch: async () => {},
+    getRewatchSync: async () => ({ on: false, plan: 'free' }),
+    setRewatchSync: async () => ({ ok: false, plan: 'free' }),
+    getReminders: async () => ({ ...DEFAULT_REMINDERS, enabled: true }),
+    setReminders: async () => true,
     openUrl: () => {},
   };
 }

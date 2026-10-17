@@ -44,13 +44,20 @@ import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/
 import { resolveScheme } from '@/features/vault/ui/logic';
 import { paletteFor, ThemeContext } from '@/features/vault/ui/theme';
 
-/** Simkl surfaces: list, grid, detail, episodes, discover, calendar, stats, account, connect, notset. */
+/** Simkl surfaces: list, grid, detail, episodes, rewatch, rating, discover, calendar, stats, review, account, connect, notset. */
 function SimklPreview({ category, bar, surface }: { category: Exclude<Category, 'videos'>; bar: React.ReactNode; surface: string }) {
   const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
   const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
   const firstOfType = FIXTURE_SIMKL.find((i) => i.type === category)?.simklId;
   const dev: SimklScreenProps['devInitialState'] = {
-    detailId: surface === 'detail' || surface === 'episodes' ? firstOfType : undefined,
+    detailId: ['detail', 'episodes', 'rating'].includes(surface)
+      ? firstOfType
+      : surface === 'rewatch'
+        ? 103
+        : undefined,
+    rewatchOpen: surface === 'rewatch',
+    ratingOpen: surface === 'rating',
+    insightsTab: surface === 'review' ? 'review' : undefined,
     episodesOpen: surface === 'episodes',
     accountOpen: surface === 'account',
     grid: surface === 'grid',

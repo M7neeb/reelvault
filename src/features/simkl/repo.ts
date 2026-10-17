@@ -4,6 +4,7 @@
  */
 
 import { getDb } from '@/db';
+import { effectiveRating } from './insights';
 import type { CommunityRatings, SimklItem, SimklStatus, SimklType, WatchedEpisode } from './logic';
 
 type Row = {
@@ -66,7 +67,10 @@ const toItem = (r: Row): SimklItem => ({
 
 export async function listSimklItems(): Promise<SimklItem[]> {
   const db = await getDb();
-  return (await db.getAllAsync<Row>('SELECT * FROM simkl_items;')).map(toItem);
+  const rows = await db.getAllAsync<Row & { exact: number | null }>(
+    `SELECT i.*, r.rating AS exact FROM simkl_items i LEFT JOIN simkl_my_ratings r ON r.simkl_id = i.simkl_id;`
+  );
+  return rows.map((r) => ({ ...toItem(r), rating: effectiveRating(r.rating, r.exact) }));
 }
 
 /**

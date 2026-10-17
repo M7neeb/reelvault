@@ -8,7 +8,7 @@
  * in a browser for design checks (`/preview`) and on the phone.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { useSimklData } from '@/features/simkl/data';
@@ -24,6 +24,10 @@ export default function HomeRoute() {
   const vault = useVaultData();
   const simkl = useSimklData();
   const [category, setCategory] = useState<Category>('videos');
+  // A tapped notification switches to its category; SimklScreen then opens the title.
+  useEffect(() => {
+    if (simkl.openRequest) setCategory(simkl.openRequest.type);
+  }, [simkl.openRequest]);
   const system = useColorScheme();
   const palette = paletteFor(resolveScheme(vault.viewOptions.theme, system));
 
@@ -46,6 +50,8 @@ export default function HomeRoute() {
           status={simkl.status}
           lastSyncAt={simkl.lastSyncAt}
           actions={simkl.actions}
+          openRequest={simkl.openRequest}
+          onOpenHandled={simkl.clearOpenRequest}
         />
       </ThemeContext.Provider>
     );

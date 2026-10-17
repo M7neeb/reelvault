@@ -30,6 +30,7 @@ import { fmtBitrate, fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './form
 import { fmtLocation, RECENTLY_DELETED_DAYS } from './logic';
 import { PromptSheet } from './prompts';
 import { SmallerSheet } from './smaller';
+import RatingPicker from './RatingPicker';
 import EditorModal from './EditorModal';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
@@ -110,6 +111,7 @@ export default function ViewerModal({
   const [dateOpen, setDateOpen] = useState(false);
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
   const [smallerOpen, setSmallerOpen] = useState(initialSmallerOpen);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'trim' | 'crop' | 'size' | null>(initialEditorTab ?? null);
   const [note, setNote] = useState('');
 
@@ -357,7 +359,7 @@ export default function ViewerModal({
                 </TouchableOpacity>
                 <View style={styles.stars}>
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                    <TouchableOpacity key={n} onPress={() => onRate(n)} hitSlop={4}>
+                    <TouchableOpacity key={n} onPress={() => onRate(n)} onLongPress={() => setPickerOpen(true)} hitSlop={4}>
                       <Text style={[styles.star, n <= rating && styles.starOn]}>{n <= rating ? '★' : '☆'}</Text>
                     </TouchableOpacity>
                   ))}
@@ -552,6 +554,14 @@ export default function ViewerModal({
                   }}
                 />
                 <MenuRow
+                  label="Rate with Decimals…"
+                  hint={rating > 0 ? `${Number.isInteger(rating) ? rating : rating.toFixed(1)}/10` : 'e.g. 9.7'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setPickerOpen(true);
+                  }}
+                />
+                <MenuRow
                   label="Status"
                   hint={statusLabel(watch)}
                   onPress={() => {
@@ -713,6 +723,20 @@ export default function ViewerModal({
               setNote(message);
             }}
             onClose={() => setEditorTab(null)}
+          />
+        )}
+
+        {pickerOpen && (
+          <RatingPicker
+            title="Rate this video"
+            value={rating > 0 ? rating : null}
+            note={() => 'Tip: hold the stars to open this.'}
+            onPick={(n) => {
+              const next = n ?? 0;
+              setRating(next);
+              void actions.onRate(item.id, next);
+            }}
+            onClose={() => setPickerOpen(false)}
           />
         )}
 

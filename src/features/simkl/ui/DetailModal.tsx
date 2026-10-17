@@ -14,13 +14,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction } from '@/features/vault/ui/confirm';
 import { OptionsSheet } from '@/features/vault/ui/prompts';
-import { SheetFrame } from '@/features/vault/ui/sheets';
+import RatingPicker from '@/features/vault/ui/RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { episodesLeft, fanartUrl, fmtVotes, parseEpisodeCode, posterUrl, simklUrl, STATUS_LABELS, statusesFor } from '../logic';
+import { activeSession, fmtRating, toSimklRating } from '../insights';
 import EpisodesModal from './EpisodesModal';
 import { IMDB_YELLOW, MAL_BLUE, SIMKL_ICON } from './parts';
-import type { CatalogTitle, SimklActions, SimklDetailInfo, SimklItem, SimklStatus } from './types';
+import { fmtDay } from './time';
+import type { CatalogTitle, Play, Session, SimklActions, SimklDetailInfo, SimklItem, SimklStatus } from './types';
 
 const HERO = 330;
 /** 24 thin bands, eased, so the backdrop melts into the page without visible steps. */
@@ -32,6 +34,8 @@ export default function DetailModal({
   title,
   actions,
   initialEpisodesOpen = false,
+  initialRewatchOpen = false,
+  initialRatingOpen = false,
   onOpen,
   onClose,
 }: {
@@ -40,6 +44,8 @@ export default function DetailModal({
   title: CatalogTitle;
   actions: SimklActions;
   initialEpisodesOpen?: boolean;
+  initialRewatchOpen?: boolean;
+  initialRatingOpen?: boolean;
   /** Open another title (from "More like this"). */
   onOpen: (t: CatalogTitle) => void;
   onClose: () => void;
@@ -51,9 +57,14 @@ export default function DetailModal({
   const [detail, setDetail] = useState<SimklDetailInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
-  const [ratingOpen, setRatingOpen] = useState(false);
+  const [ratingOpen, setRatingOpen] = useState(initialRatingOpen && !!item);
   const [statusOpen, setStatusOpen] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(initialEpisodesOpen && !!item);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [plays, setPlays] = useState<Play[]>([]);
+  const [rewatchSession, setRewatchSession] = useState<Session | null>(null);
+  const [sessionMenu, setSessionMenu] = useState<Session | null>(null);
+  const [wantRewatchOpen, setWantRewatchOpen] = useState(initialRewatchOpen);
 
   const type = title.type;
   const id = title.simklId;
@@ -65,6 +76,23 @@ export default function DetailModal({
       .then(setDetail)
       .catch((e) => setNote(`Details could not load: ${String(e?.message ?? e)}`));
   }, [actions, type, id]);
+
+  const refreshRewatches = () => {
+    if (!item) return;
+    actions.loadSessions(id).then(setSessions).catch(() => undefined);
+    actions.loadPlays(id).then(setPlays).catch(() => undefined);
+  };
+  useEffect(refreshRewatches, [actions, id, item?.lastWatchedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const current = activeSession(sessions);
+  useEffect(() => {
+    if (wantRewatchOpen && current) {
+      setWantRewatchOpen(false);
+      setRewatchSession(current);
+    }
+  }, [wantRewatchOpen, current]);
+  const moviePlays = plays.filter((x) => x.season === 0 && x.episode === 0).length;
+  const sessionDone = current ? new Set(plays.filter((x) => x.sessionId === current.id).map((x) => `${x.season}:${x.episode}`)).size : 0;
 
   async function run(label: string, job: () => Promise<void>) {
     setBusy(true);
@@ -155,7 +183,7 @@ export default function DetailModal({
             {item && (
               <TouchableOpacity style={styles.mine} onPress={() => setRatingOpen(true)} accessibilityLabel="My rating">
                 <Text style={styles.mineStar}>{item.rating ? '★' : '☆'}</Text>
-                <Text style={[styles.mineValue, !item.rating && styles.mineEmpty]}>{item.rating ?? 'Rate'}</Text>
+                <Text style={[styles.mineValue, !item.rating && styles.mineEmpty]}>{item.rating ? fmtRating(item.rating) : 'Rate'}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -172,7 +200,17 @@ export default function DetailModal({
               />
             ) : type === 'movie' ? (
               item.status === 'completed' ? (
-                <Big label="✓  Seen" subtle onPress={() => run('Watched again today', () => actions.markMovieWatched(item))} />
+                <Big
+                  label="Watched again"
+                  sub={`Seen ${1 + moviePlays} ${moviePlays ? 'times' : 'time'} so far`}
+                  disabled={busy}
+                  onPress={() =>
+                    run('Logged a rewatch', async () => {
+                      await actions.logRewatch(item, [], null);
+                      refreshRewatches();
+                    })
+                  }
+                />
               ) : (
                 <Big label="I've seen this" disabled={busy} onPress={() => run('Marked as watched', () => actions.markMovieWatched(item))} />
               )
@@ -197,6 +235,22 @@ export default function DetailModal({
                 onPress={() => setEpisodesOpen(true)}
               />
             )}
+            {item && type !== 'movie' && item.watchedEpisodes > 0 && (
+              <ActionRow
+                icon="↻"
+                label={current ? `Rewatch #${current.number}` : 'Start a rewatch'}
+                value={current ? `${sessionDone}/${item.totalEpisodes || '?'}` : sessions.length ? `${sessions.length} done` : undefined}
+                onPress={() => {
+                  if (current) setRewatchSession(current);
+                  else
+                    void run('Rewatch started', async () => {
+                      const s = await actions.startRewatch(item);
+                      refreshRewatches();
+                      setRewatchSession(s);
+                    });
+                }}
+              />
+            )}
             <ActionRow
               icon="◉"
               label={item ? STATUS_LABELS[item.status] : 'Add to a list'}
@@ -205,6 +259,25 @@ export default function DetailModal({
             />
             <ActionRow icon="↗" label="View on Simkl" onPress={() => actions.openUrl(link)} />
           </View>
+
+          {item && sessions.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>REWATCHES</Text>
+              {[...sessions].reverse().map((s) => {
+                const n = new Set(plays.filter((x) => x.sessionId === s.id).map((x) => `${x.season}:${x.episode}`)).size;
+                return (
+                  <TouchableOpacity key={s.id} style={styles.sessionRow} onPress={() => setSessionMenu(s)}>
+                    <Text style={styles.sessionTitle}>#{s.number}</Text>
+                    <Text style={styles.sessionFacts}>
+                      {n} episodes · started {fmtDay(s.startedAt)}
+                      {s.finishedAt ? ` · finished ${fmtDay(s.finishedAt)}` : ' · in progress'}
+                      {s.remoteId ? ' · on Simkl' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {!!item?.memo && (
             <View style={styles.section}>
@@ -284,33 +357,74 @@ export default function DetailModal({
           />
         )}
         {ratingOpen && item && (
-          <SheetFrame title="My rating" onClose={() => setRatingOpen(false)}>
-            <View style={styles.rateGrid}>
-              {Array.from({ length: 10 }, (_, i) => 10 - i).map((n) => (
-                <TouchableOpacity
-                  key={n}
-                  style={[styles.rateBtn, item.rating === n && styles.rateOn]}
-                  onPress={() => {
-                    setRatingOpen(false);
-                    void run(`Rated ${n}/10`, () => actions.setRating(item, n));
-                  }}>
-                  <Text style={[styles.rateText, item.rating === n && styles.rateTextOn]}>{n}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {item.rating !== null && (
-              <TouchableOpacity
-                onPress={() => {
-                  setRatingOpen(false);
-                  void run('Rating cleared', () => actions.setRating(item, null));
-                }}>
-                <Text style={styles.clear}>Clear my rating</Text>
-              </TouchableOpacity>
-            )}
-            <Text style={styles.small}>Saved on Simkl too.</Text>
-          </SheetFrame>
+          <RatingPicker
+            value={item.rating}
+            note={(n) => (Number.isInteger(n) ? 'Saved on Simkl too.' : `Simkl only takes whole numbers, so it gets ${toSimklRating(n)}; ReelVault keeps ${fmtRating(n)}.`)}
+            onPick={(n) => void run(n === null ? 'Rating cleared' : `Rated ${fmtRating(n)}`, () => actions.setRating(item, n))}
+            onClose={() => setRatingOpen(false)}
+          />
         )}
         {episodesOpen && item && <EpisodesModal item={item} actions={actions} onClose={() => setEpisodesOpen(false)} />}
+        {rewatchSession && item && (
+          <EpisodesModal
+            item={item}
+            actions={actions}
+            session={rewatchSession}
+            onFinishSession={() => {
+              const s = rewatchSession;
+              setRewatchSession(null);
+              void run(`Rewatch #${s.number} finished`, async () => {
+                await actions.endRewatch(item, s, true);
+                refreshRewatches();
+              });
+            }}
+            onClose={() => {
+              setRewatchSession(null);
+              refreshRewatches();
+            }}
+          />
+        )}
+        {sessionMenu && item && (
+          <OptionsSheet
+            title={`Rewatch #${sessionMenu.number}`}
+            options={[
+              { label: 'Open', onPress: () => setRewatchSession(sessionMenu) },
+              sessionMenu.finishedAt
+                ? {
+                    label: 'Continue this rewatch',
+                    onPress: () =>
+                      void run('Rewatch reopened', async () => {
+                        await actions.endRewatch(item, sessionMenu, false);
+                        refreshRewatches();
+                      }),
+                  }
+                : {
+                    label: 'Finish',
+                    onPress: () =>
+                      void run('Rewatch finished', async () => {
+                        await actions.endRewatch(item, sessionMenu, true);
+                        refreshRewatches();
+                      }),
+                  },
+              {
+                label: 'Delete from ReelVault',
+                danger: true,
+                onPress: () =>
+                  confirmAction(
+                    `Delete rewatch #${sessionMenu.number}?`,
+                    'Its episodes are removed from ReelVault. A copy saved on Simkl (PRO) stays there.',
+                    () =>
+                      void run('Rewatch deleted', async () => {
+                        await actions.deleteRewatch(sessionMenu);
+                        refreshRewatches();
+                      }),
+                    { label: 'Delete', destructive: true }
+                  ),
+              },
+            ]}
+            onClose={() => setSessionMenu(null)}
+          />
+        )}
       </View>
     </Modal>
   );
@@ -425,10 +539,7 @@ const makeStyles = (p: Palette) =>
     remove: { marginTop: 28, alignSelf: 'center', padding: 10 },
     removeText: { color: p.dangerText, fontSize: 15, fontWeight: '600' },
 
-    rateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between' },
-    rateBtn: { width: '18%', aspectRatio: 1, borderRadius: 12, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
-    rateOn: { backgroundColor: p.rating },
-    rateText: { color: p.text, fontSize: 22, fontWeight: '800' },
-    rateTextOn: { color: '#000' },
-    clear: { color: p.link, fontSize: 15, paddingVertical: 6 },
+    sessionRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: p.separator, gap: 2 },
+    sessionTitle: { color: p.text, fontSize: 16, fontWeight: '800' },
+    sessionFacts: { color: p.textSecondary, fontSize: 13 },
   });

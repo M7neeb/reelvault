@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export type Migration = {
   version: number;
@@ -220,6 +220,54 @@ export const MIGRATIONS: Migration[] = [
       CREATE TABLE IF NOT EXISTS simkl_cache (
         key        TEXT PRIMARY KEY,
         json       TEXT    NOT NULL,
+        fetched_at INTEGER NOT NULL
+      );
+    `,
+  },
+  {
+    version: 6,
+    sql: `
+      -- Your exact rating (9.7). Simkl only stores whole numbers, so it gets the
+      -- rounded one; this is shown while the two still agree.
+      CREATE TABLE IF NOT EXISTS simkl_my_ratings (
+        simkl_id INTEGER PRIMARY KEY,
+        rating   REAL    NOT NULL,
+        rated_at TEXT
+      );
+
+      -- Rewatches logged in ReelVault (Simkl keeps them only for PRO / VIP).
+      -- A session = one rewatch of a whole show / anime ("Rewatch #2").
+      CREATE TABLE IF NOT EXISTS simkl_sessions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        simkl_id    INTEGER NOT NULL,
+        number      INTEGER NOT NULL,          -- 2 = first rewatch
+        started_at  TEXT    NOT NULL,
+        finished_at TEXT,                      -- NULL = in progress
+        remote_id   INTEGER                    -- Simkl's rewatch_id when saved there
+      );
+      CREATE INDEX IF NOT EXISTS idx_simkl_sessions_item ON simkl_sessions(simkl_id);
+
+      -- Every extra watch: an episode again, a movie again, or an episode of a session.
+      -- Movies use season 0, episode 0.
+      CREATE TABLE IF NOT EXISTS simkl_plays (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        simkl_id   INTEGER NOT NULL,
+        season     INTEGER NOT NULL,
+        episode    INTEGER NOT NULL,
+        watched_at TEXT    NOT NULL,
+        session_id INTEGER REFERENCES simkl_sessions(id) ON DELETE CASCADE,
+        on_simkl   INTEGER NOT NULL DEFAULT 0  -- 1 = also saved as a Simkl rewatch
+      );
+      CREATE INDEX IF NOT EXISTS idx_simkl_plays_item ON simkl_plays(simkl_id);
+
+      -- Genres, network, country for stats; filled from detail pages and on demand.
+      CREATE TABLE IF NOT EXISTS simkl_meta (
+        simkl_id   INTEGER PRIMARY KEY,
+        genres     TEXT,                       -- JSON array
+        network    TEXT,
+        country    TEXT,
+        language   TEXT,
+        runtime    INTEGER,
         fetched_at INTEGER NOT NULL
       );
     `,
