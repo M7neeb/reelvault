@@ -23,6 +23,8 @@ import { plural } from './confirm';
 import { fmtThumbInfos } from './format';
 import { computeSectionedLayout, visibleTiles, type Tile } from './layout';
 import { daysLeft, groupItems } from './logic';
+import { useTabBarSpace } from './chrome';
+import Icon from './Icon';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem, ViewOptions } from './types';
 
@@ -54,6 +56,8 @@ type Props = {
   jumpTo?: { key: string; nonce: number } | null;
   onPressTile: (item: VaultItem) => void;
   onLongPressTile?: (item: VaultItem) => void;
+  /** Videos linked to a Simkl movie or episode (a small TV mark). */
+  linked?: Set<string>;
 };
 
 export default function Grid({
@@ -70,8 +74,10 @@ export default function Grid({
   jumpTo,
   onPressTile,
   onLongPressTile,
+  linked,
 }: Props) {
   const styles = useStyles(makeStyles);
+  const tabSpace = useTabBarSpace();
   const scrollRef = useRef<ScrollView>(null);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [headerH, setHeaderH] = useState(0);
@@ -135,7 +141,7 @@ export default function Grid({
     <ScrollView
       ref={scrollRef}
       style={styles.scroll}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={{ paddingBottom: Math.max(40, tabSpace + 24) }}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
         setViewport((v) => (v.w === width && v.h === height ? v : { w: width, h: height }));
@@ -166,6 +172,7 @@ export default function Grid({
                 mode={mode}
                 copyRank={dupRank.get(item.id)}
                 albumNames={albumNames}
+                linked={linked?.has(item.id) ?? false}
                 now={now}
                 styles={styles}
                 onPress={onPressTile}
@@ -188,6 +195,7 @@ function TileView({
   mode,
   copyRank,
   albumNames,
+  linked,
   now,
   styles,
   onPress,
@@ -201,6 +209,7 @@ function TileView({
   mode: GridMode;
   copyRank: number | undefined;
   albumNames: Map<number, string>;
+  linked: boolean;
   now: number;
   styles: ReturnType<typeof makeStyles>;
   onPress: (item: VaultItem) => void;
@@ -237,18 +246,29 @@ function TileView({
           {info}
         </Text>
       )}
-      {hasTagMark && (
-        <View style={styles.tagBadge}>
-          <Text style={styles.tagBadgeText}>#</Text>
+      <View style={styles.topRight} pointerEvents="none">
+        {linked && (
+          <View style={styles.mark}>
+            <Icon name="tv" size={10} color="#fff" />
+          </View>
+        )}
+        {viewOptions.showRating && item.flag !== 0 && (
+          <View style={[styles.mark, item.flag === 1 ? styles.flagPick : styles.flagReject]}>
+            <Icon name={item.flag === 1 ? 'flag' : 'close'} size={9} color="#fff" weight="bold" />
+          </View>
+        )}
+        {hasTagMark && (
+          <View style={styles.mark}>
+            <Icon name="tag" size={9} color="#fff" />
+          </View>
+        )}
+      </View>
+      {viewOptions.showRating && item.rating > 0 && (
+        <View style={styles.rateBadge} pointerEvents="none">
+          <Icon name="star" size={9} color={styles.rateText.color as string} />
+          <Text style={styles.rateText}>{item.rating}</Text>
         </View>
       )}
-      {viewOptions.showRating && item.flag !== 0 && (
-        <View
-          style={[styles.flagBadge, item.flag === 1 ? styles.flagPick : styles.flagReject, { right: hasTagMark ? 22 : 3 }]}>
-          <Text style={styles.flagText}>{item.flag === 1 ? '⚑' : '✕'}</Text>
-        </View>
-      )}
-      {viewOptions.showRating && item.rating > 0 && <Text style={styles.rateBadge}>{item.rating}/10</Text>}
       {bottomLeft && (
         <Text
           style={[styles.leftBadge, bottomLeft.original && styles.originalBadge, selectMode && styles.badgeBesideCheck]}>
@@ -257,7 +277,7 @@ function TileView({
       )}
       {selectMode && (
         <View style={[styles.check, isSelected && styles.checkOn]}>
-          {isSelected && <Text style={styles.checkMark}>✓</Text>}
+          {isSelected && <Icon name="check" size={12} color="#fff" weight="bold" />}
         </View>
       )}
     </TouchableOpacity>
@@ -267,7 +287,6 @@ function TileView({
 const makeStyles = (p: Palette) =>
   sheet({
     scroll: { flex: 1 },
-    content: { paddingBottom: 110 },
     groupHeader: { position: 'absolute', left: 0, right: 0, justifyContent: 'flex-end', paddingHorizontal: 8, paddingBottom: 6 },
     groupTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
     cell: { position: 'absolute', backgroundColor: p.tile, overflow: 'hidden' },
@@ -286,44 +305,42 @@ const makeStyles = (p: Palette) =>
     // Badges sit on top of pictures, so they stay dark in both themes.
     infoBadge: {
       position: 'absolute',
-      bottom: 3,
-      right: 3,
+      bottom: 4,
+      right: 4,
       color: '#fff',
       fontSize: 10,
       fontWeight: '700',
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      paddingHorizontal: 4,
-      paddingVertical: 1,
-      borderRadius: 4,
+      fontVariant: ['tabular-nums'],
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      paddingHorizontal: 5,
+      paddingVertical: 1.5,
+      borderRadius: 6,
       overflow: 'hidden',
     },
-    tagBadge: {
-      position: 'absolute',
-      top: 3,
-      right: 3,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      borderRadius: 4,
-      paddingHorizontal: 4,
-      paddingVertical: 1,
+    topRight: { position: 'absolute', top: 4, right: 4, flexDirection: 'row', gap: 3 },
+    mark: {
+      width: 17,
+      height: 17,
+      borderRadius: 9,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    tagBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-    flagBadge: { position: 'absolute', top: 3, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-    flagPick: { backgroundColor: '#34c759' },
+    flagPick: { backgroundColor: '#30d158' },
     flagReject: { backgroundColor: '#ff453a' },
-    flagText: { color: '#fff', fontSize: 10, fontWeight: '800' },
     rateBadge: {
       position: 'absolute',
-      top: 3,
-      left: 3,
-      color: '#000',
-      fontSize: 10,
-      fontWeight: '800',
-      backgroundColor: p.rating,
-      paddingHorizontal: 4,
-      paddingVertical: 1,
-      borderRadius: 4,
-      overflow: 'hidden',
+      top: 4,
+      left: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      paddingHorizontal: 5,
+      paddingVertical: 1.5,
+      borderRadius: 6,
     },
+    rateText: { color: p.rating, fontSize: 10, fontWeight: '800', fontVariant: ['tabular-nums'] },
     leftBadge: {
       position: 'absolute',
       bottom: 3,
@@ -354,5 +371,4 @@ const makeStyles = (p: Palette) =>
       justifyContent: 'center',
     },
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },
-    checkMark: { color: '#fff', fontSize: 12, fontWeight: '800' },
   });

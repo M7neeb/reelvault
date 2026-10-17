@@ -17,6 +17,7 @@ import {
 
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { UiTag } from './types';
+import Glyph from './Glyph';
 
 export default function SearchSheet({
   value,
@@ -51,7 +52,7 @@ export default function SearchSheet({
           <View style={styles.sheet}>
             <View style={styles.header}>
               <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-                <Text style={styles.circleIcon}>✕</Text>
+                <Glyph name="close" />
               </TouchableOpacity>
               <Text style={styles.title}>Search</Text>
               <TouchableOpacity style={styles.searchBtn} onPress={onClose}>

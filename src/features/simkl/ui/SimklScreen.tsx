@@ -1,9 +1,9 @@
 /**
- * Movies, Shows or Anime from Simkl, laid out like the Simkl app: a status
- * menu, sort tabs (Aired / Seen / A-Z / Rank...), a search box and rows with
- * the poster, next episode, episodes left, date and ratings (IMDb, Simkl,
- * yours). A grid view is one tap away. Simkl titles live here only; they are
- * never linked to your own videos.
+ * Movies, Shows or Anime from Simkl. From the top: a large title with glass
+ * buttons (Pick for me, calendar, stats, settings); Up Next cards with the
+ * show's backdrop and a one-tap "watched" (shows, anime) or your Plan to
+ * Watch shelf (movies); your lists; then the library with status chips, a
+ * sort menu, a filter box and rows (or a poster grid).
  * Presentational only (see simkl/ui/types.ts).
  */
 
@@ -13,23 +13,45 @@ import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useTabBarSpace } from '@/features/vault/ui/chrome';
+import Fade from '@/features/vault/ui/Fade';
+import Glass from '@/features/vault/ui/Glass';
+import { success, tick } from '@/features/vault/ui/haptics';
+import Icon from '@/features/vault/ui/Icon';
+import IconButton from '@/features/vault/ui/IconButton';
 import { OptionsSheet } from '@/features/vault/ui/prompts';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
-import { episodesLeft, filterItems, posterUrl, SIMKL_TYPES, sortItems, sortsFor, STATUS_LABELS, statusesFor, type SimklSort } from '../logic';
-import { AccountSheet } from './AccountSheet';
 import { fmtRating } from '../insights';
+import {
+  episodesLeft,
+  fanartUrl,
+  filterItems,
+  parseEpisodeCode,
+  posterUrl,
+  SIMKL_TYPES,
+  sortItems,
+  sortsFor,
+  STATUS_LABELS,
+  statusesFor,
+  upNext,
+  type SimklSort,
+} from '../logic';
+import { AccountSheet } from './AccountSheet';
 import { CalendarModal } from './browse';
-import InsightsModal from './InsightsModal';
 import { ConnectCard } from './ConnectCard';
 import DetailModal from './DetailModal';
 import DiscoverModal from './DiscoverModal';
+import InsightsModal from './InsightsModal';
+import { ListEditor, ListModal, ListShelf } from './ListsUI';
 import { RatingsLine } from './parts';
-import { fmtDay, fmtAgo } from './time';
-import type { CatalogTitle, SimklItem, SimklScreenProps, SimklStatus, SimklType } from './types';
+import Poster, { hueFor } from './Poster';
+import { fmtAgo, fmtDay } from './time';
+import { ImportSheet, PickModal } from './ToolsUI';
+import type { CatalogTitle, SimklItem, SimklList, SimklScreenProps, SimklStatus, SimklType } from './types';
 
 const SIDE = 16;
-const GAP = 8;
+const GAP = 10;
 const SIMKL_ICON = 'https://us.simkl.in/img_favicon/v2/favicon-192x192.png';
 
 const asTitle = (i: SimklItem): CatalogTitle => ({
@@ -43,8 +65,8 @@ const asTitle = (i: SimklItem): CatalogTitle => ({
 
 const defaultStatus = (type: SimklType): SimklStatus | 'all' => (type === 'movie' ? 'all' : 'watching');
 
-const TAB_HINT: Partial<Record<SimklSort, string>> = {
-  aired: 'Unwatched episodes first, newest aired on top',
+const SORT_HINT: Partial<Record<SimklSort, string>> = {
+  aired: 'Unwatched first, newest aired on top',
   seen: 'Most recently watched first',
   added: 'Newest additions first',
   rank: 'Simkl rank, best first',
@@ -54,7 +76,10 @@ const TAB_HINT: Partial<Record<SimklSort, string>> = {
 
 export default function SimklScreen(props: SimklScreenProps) {
   const { category, configured, connected, items, syncing, status, actions, devInitialState: dev } = props;
+  const lists = props.lists ?? [];
+  const hideSpoilers = props.prefs?.hideSpoilers ?? false;
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace();
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const { width } = useWindowDimensions();
@@ -68,33 +93,48 @@ export default function SimklScreen(props: SimklScreenProps) {
   const [sortBy, setSortBy] = useState<Record<SimklType, SimklSort>>({ movie: 'seen', show: 'aired', anime: 'aired' });
   const [query, setQuery] = useState('');
   const [grid, setGrid] = useState(dev?.grid ?? false);
-  const [statusMenu, setStatusMenu] = useState(false);
+  const [sortMenu, setSortMenu] = useState(false);
   const [open, setOpen] = useState<CatalogTitle | null>(() => {
     const it = dev?.detailId ? items.find((i) => i.simklId === dev.detailId) : undefined;
     return it ? asTitle(it) : null;
   });
   const [discover, setDiscover] = useState(dev?.discoverOpen ?? false);
   const [calendar, setCalendar] = useState(dev?.calendarOpen ?? false);
-  const [stats, setStats] = useState<null | 'overview' | 'review'>(
-    dev?.statsOpen ? 'overview' : dev?.insightsTab ?? null
-  );
+  const [stats, setStats] = useState<null | 'overview' | 'review'>(dev?.statsOpen ? 'overview' : (dev?.insightsTab ?? null));
   const [account, setAccount] = useState(dev?.accountOpen ?? false);
+  const [pick, setPick] = useState(dev?.pickOpen ?? false);
+  const [importing, setImporting] = useState(dev?.importOpen ?? false);
+  const [openList, setOpenList] = useState<SimklList | null>(() => lists.find((l) => l.id === dev?.listOpen) ?? null);
+  const [newList, setNewList] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
 
   const filter = statusBy[category];
   const sort = sortBy[category];
   const typeInfo = SIMKL_TYPES.find((t) => t.key === category)!;
   const ofType = useMemo(() => items.filter((i) => i.type === category), [items, category]);
-  const shown = useMemo(
-    () => sortItems(filterItems(items, { type: category, status: filter, query }), sort),
-    [items, category, filter, query, sort]
-  );
+  const shown = useMemo(() => sortItems(filterItems(items, { type: category, status: filter, query }), sort), [items, category, filter, query, sort]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: ofType.length };
     for (const i of ofType) c[i.status] = (c[i.status] ?? 0) + 1;
     return c;
   }, [ofType]);
+  const next = useMemo(
+    () =>
+      category === 'movie'
+        ? []
+        : upNext(ofType).sort((a, b) => (b.nextDate ?? b.lastWatchedAt ?? '').localeCompare(a.nextDate ?? a.lastWatchedAt ?? '')),
+    [ofType, category]
+  );
+  const planned = useMemo(
+    () =>
+      category === 'movie'
+        ? ofType.filter((i) => i.status === 'plantowatch').sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
+        : [],
+    [ofType, category]
+  );
   const library = useMemo(() => new Set(items.map((i) => i.simklId)), [items]);
   const openItem = open ? (items.find((i) => i.simklId === open.simklId) ?? null) : null;
+  const liveList = openList ? (lists.find((l) => l.id === openList.id) ?? null) : null;
 
   // A tapped notification: open that title once it is in the list.
   useEffect(() => {
@@ -105,22 +145,39 @@ export default function SimklScreen(props: SimklScreenProps) {
     props.onOpenHandled?.();
   }, [props.openRequest, category, items]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function watchedNext(item: SimklItem) {
+    const ep = parseEpisodeCode(item.nextToWatch);
+    if (!ep) return;
+    setBusyId(item.simklId);
+    try {
+      await actions.setEpisodes(item, [ep], true);
+      success();
+      // Simkl works out the next episode; a sync brings it back onto the card.
+      void actions.sync(true);
+    } catch {
+      // The status line says what went wrong.
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const cols = 3;
   const posterW = Math.floor((width - SIDE * 2 - GAP * (cols - 1)) / cols);
-  const posterH = Math.round(posterW * 1.47);
+  const posterH = Math.round(posterW * 1.48);
+  const cardW = Math.min(width - SIDE * 2 - 28, 420);
   const statusLabel = filter === 'all' ? 'All' : STATUS_LABELS[filter];
+  const sortLabel = sortsFor(category).find((s) => s.key === sort)?.label ?? '';
 
   const header = (
-    <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-      {props.categoryBar}
+    <View style={{ paddingTop: insets.top + 8 }}>
       <View style={styles.titleRow}>
         <Text style={styles.title}>{typeInfo.plural}</Text>
         {connected && (
           <View style={styles.buttons}>
-            <Round label="⌕" onPress={() => setDiscover(true)} hint="Search Simkl and trending" />
-            {category !== 'movie' && <Round label="◷" onPress={() => setCalendar(true)} hint="Upcoming episodes" />}
-            <Round label="Σ" onPress={() => setStats('overview')} hint="Stats and review" />
-            <Round label="⋯" onPress={() => setAccount(true)} hint="Simkl account, stats and export" />
+            <IconButton icon="dice" label="Pick something for me" onPress={() => setPick(true)} />
+            {category !== 'movie' && <IconButton icon="calendar" label="Upcoming episodes" onPress={() => setCalendar(true)} />}
+            <IconButton icon="stats" label="Stats and review" onPress={() => setStats('overview')} />
+            <IconButton icon="more" label="Simkl settings" onPress={() => setAccount(true)} />
           </View>
         )}
       </View>
@@ -128,62 +185,141 @@ export default function SimklScreen(props: SimklScreenProps) {
       {!configured && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Simkl isn't set up in this build</Text>
-          <Text style={styles.body}>
-            This build has no Simkl app id yet. Once one is added, sign in here to see your movies, shows and anime.
-          </Text>
+          <Text style={styles.body}>This build has no Simkl app id yet. Once one is added, sign in here to see your movies, shows and anime.</Text>
         </View>
       )}
-      {configured && !connected && <ConnectCard actions={actions} initialCode={dev?.connectCode} />}
+      {configured && !connected && (
+        <View style={{ paddingHorizontal: SIDE }}>
+          <ConnectCard actions={actions} initialCode={dev?.connectCode} />
+        </View>
+      )}
 
       {connected && (
         <>
-          <View style={styles.controls}>
-            <TouchableOpacity style={styles.statusPill} onPress={() => setStatusMenu(true)} accessibilityLabel="Choose a list">
-              <Text style={styles.statusPillText}>
-                {statusLabel} <Text style={styles.statusCount}>{counts[filter] ?? 0}</Text>
-              </Text>
-              <Text style={styles.caret}>▾</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.viewToggle} onPress={() => setGrid(!grid)} accessibilityLabel={grid ? 'Show as list' : 'Show as grid'}>
-              <Text style={styles.viewToggleText}>{grid ? '☰' : '▦'}</Text>
-            </TouchableOpacity>
-          </View>
+          {!!status && <Text style={styles.note}>{status}</Text>}
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-            {sortsFor(category).map((s) => {
-              const on = s.key === sort;
+          {next.length > 0 && (
+            <>
+              <SectionHead title="Up Next" detail={`${next.length}`} />
+              <FlatList
+                horizontal
+                data={next}
+                keyExtractor={(i) => String(i.simklId)}
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={cardW + 12}
+                decelerationRate="fast"
+                contentContainerStyle={styles.carousel}
+                renderItem={({ item }) => (
+                  <UpNextCard
+                    item={item}
+                    width={cardW}
+                    busy={busyId === item.simklId}
+                    hideSpoilers={hideSpoilers}
+                    onOpen={() => setOpen(asTitle(item))}
+                    onWatched={() => void watchedNext(item)}
+                  />
+                )}
+              />
+            </>
+          )}
+
+          {planned.length > 0 && (
+            <>
+              <SectionHead title="Plan to Watch" detail={`${planned.length}`} action="Pick one" onAction={() => setPick(true)} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+                {planned.slice(0, 20).map((i) => (
+                  <TouchableOpacity key={i.simklId} style={{ width: 112 }} onPress={() => setOpen(asTitle(i))} accessibilityLabel={i.title}>
+                    <Poster path={i.poster} title={i.title} width={112} height={166} radius={10}>
+                      {i.imdbRating !== null && (
+                        <View style={styles.imdbBadge}>
+                          <Text style={styles.imdbBadgeText}>{i.imdbRating.toFixed(1)}</Text>
+                        </View>
+                      )}
+                    </Poster>
+                    <Text style={styles.shelfTitle} numberOfLines={1}>
+                      {i.title}
+                    </Text>
+                    <Text style={styles.shelfSub}>{[i.year, i.runtime ? `${i.runtime} min` : null].filter(Boolean).join(' · ')}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
+          <SectionHead title="My Lists" detail={lists.length ? `${lists.length}` : undefined} />
+          <ListShelf lists={lists} onOpen={setOpenList} onNew={() => setNewList(true)} />
+
+          <SectionHead
+            title="Library"
+            detail={`${ofType.length}`}
+            action={grid ? 'List' : 'Grid'}
+            actionIcon={grid ? 'list' : 'grid'}
+            onAction={() => {
+              tick();
+              setGrid(!grid);
+            }}
+          />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            {(['all', ...statusesFor(category)] as const).map((s) => {
+              const on = s === filter;
               return (
-                <TouchableOpacity key={s.key} onPress={() => setSortBy({ ...sortBy, [category]: s.key })} style={styles.tab}>
-                  <Text style={[styles.tabText, on && styles.tabTextOn]}>{s.label.toUpperCase()}</Text>
-                  <View style={[styles.tabLine, on && styles.tabLineOn]} />
+                <TouchableOpacity
+                  key={s}
+                  style={[styles.chip, on && styles.chipOn]}
+                  onPress={() => {
+                    tick();
+                    setStatusBy({ ...statusBy, [category]: s });
+                  }}>
+                  <Text style={[styles.chipText, on && styles.chipTextOn]}>{s === 'all' ? 'All' : STATUS_LABELS[s]}</Text>
+                  <Text style={[styles.chipCount, on && styles.chipTextOn]}>{counts[s] ?? 0}</Text>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
 
-          <View style={styles.search}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder={`Search your ${typeInfo.plural.toLowerCase()}`}
-              placeholderTextColor={p.textMuted}
-              value={query}
-              onChangeText={setQuery}
-              keyboardAppearance={p.scheme}
-              clearButtonMode="while-editing"
-              autoCorrect={false}
-            />
-            <Text style={styles.searchIcon}>⌕</Text>
+          <View style={styles.searchRow}>
+            <View style={styles.search}>
+              <Icon name="search" size={16} color={p.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder={`Filter your ${typeInfo.plural.toLowerCase()}`}
+                placeholderTextColor={p.textMuted}
+                value={query}
+                onChangeText={setQuery}
+                keyboardAppearance={p.scheme}
+                clearButtonMode="while-editing"
+                autoCorrect={false}
+              />
+            </View>
+            <TouchableOpacity style={styles.sortBtn} onPress={() => setSortMenu(true)} accessibilityLabel={`Sorted by ${sortLabel}`}>
+              <Icon name="sort" size={15} color={p.text} />
+              <Text style={styles.sortText}>{sortLabel}</Text>
+            </TouchableOpacity>
           </View>
-          {!!TAB_HINT[sort] && !query && <Text style={styles.hint}>{TAB_HINT[sort]}</Text>}
-          {!!status && <Text style={styles.note}>{status}</Text>}
+          {!!SORT_HINT[sort] && !query && <Text style={styles.hint}>{SORT_HINT[sort]}</Text>}
           {shown.length === 0 && (
-            <Text style={styles.empty}>
-              {ofType.length === 0
-                ? `No ${typeInfo.plural.toLowerCase()} on your Simkl yet. Tap ⌕ to search Simkl or see what is trending.`
-                : query
-                  ? 'Nothing matches.'
-                  : `Nothing in ${statusLabel}.`}
-            </Text>
+            <View style={styles.emptyBox}>
+              <Icon name={category === 'movie' ? 'movie' : category === 'anime' ? 'anime' : 'tv'} size={34} color={p.textMuted} />
+              <Text style={styles.empty}>
+                {ofType.length === 0
+                  ? `No ${typeInfo.plural.toLowerCase()} on your Simkl yet.`
+                  : query
+                    ? 'Nothing matches.'
+                    : `Nothing in ${statusLabel}.`}
+              </Text>
+              {ofType.length === 0 && (
+                <View style={styles.emptyActions}>
+                  <TouchableOpacity style={styles.emptyBtn} onPress={() => setDiscover(true)}>
+                    <Icon name="trending" size={15} color="#fff" />
+                    <Text style={styles.emptyBtnText}>See what's trending</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.emptyBtn, styles.emptyBtnGhost]} onPress={() => setImporting(true)}>
+                    <Icon name="import" size={15} color={p.text} />
+                    <Text style={[styles.emptyBtnText, { color: p.text }]}>Import</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           )}
         </>
       )}
@@ -197,9 +333,8 @@ export default function SimklScreen(props: SimklScreenProps) {
     </TouchableOpacity>
   );
 
-  const refresh = connected ? (
-    <RefreshControl refreshing={syncing} onRefresh={() => void actions.sync(true)} tintColor={p.textSecondary} />
-  ) : undefined;
+  const refresh = connected ? <RefreshControl refreshing={syncing} onRefresh={() => void actions.sync(true)} tintColor={p.textSecondary} /> : undefined;
+  const bottom = Math.max(insets.bottom, tabSpace) + 20;
 
   return (
     <View style={styles.screen}>
@@ -213,11 +348,9 @@ export default function SimklScreen(props: SimklScreenProps) {
           ListHeaderComponent={header}
           ListFooterComponent={footer}
           columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{ paddingBottom: bottom }}
           refreshControl={refresh}
-          renderItem={({ item }) => (
-            <GridPoster item={item} width={posterW} height={posterH} onPress={() => setOpen(asTitle(item))} />
-          )}
+          renderItem={({ item }) => <GridPoster item={item} width={posterW} height={posterH} onPress={() => setOpen(asTitle(item))} />}
         />
       ) : (
         <FlatList
@@ -226,21 +359,21 @@ export default function SimklScreen(props: SimklScreenProps) {
           keyExtractor={(i) => String(i.simklId)}
           ListHeaderComponent={header}
           ListFooterComponent={footer}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          contentContainerStyle={{ paddingBottom: bottom }}
           refreshControl={refresh}
           renderItem={({ item }) => <Row item={item} sort={sort} onPress={() => setOpen(asTitle(item))} />}
         />
       )}
 
-      {statusMenu && (
+      {sortMenu && (
         <OptionsSheet
-          title={typeInfo.plural}
-          options={(['all', ...statusesFor(category)] as const).map((s) => ({
-            label: s === 'all' ? 'All' : STATUS_LABELS[s],
-            hint: String(counts[s] ?? 0),
-            onPress: () => setStatusBy({ ...statusBy, [category]: s }),
+          title="Sort by"
+          options={sortsFor(category).map((s) => ({
+            label: s.label,
+            hint: s.key === sort ? '✓' : undefined,
+            onPress: () => setSortBy({ ...sortBy, [category]: s.key }),
           }))}
-          onClose={() => setStatusMenu(false)}
+          onClose={() => setSortMenu(false)}
         />
       )}
       {open && (
@@ -248,24 +381,40 @@ export default function SimklScreen(props: SimklScreenProps) {
           item={openItem}
           title={open}
           actions={actions}
+          lists={lists}
+          hideSpoilers={hideSpoilers}
           initialEpisodesOpen={dev?.episodesOpen}
           initialRewatchOpen={dev?.rewatchOpen}
           initialRatingOpen={dev?.ratingOpen}
+          initialListsOpen={dev?.addToListOpen}
           onOpen={setOpen}
           onClose={() => setOpen(null)}
         />
       )}
-      {discover && (
-        <DiscoverModal type={category} library={library} actions={actions} onOpen={setOpen} onClose={() => setDiscover(false)} />
-      )}
+      {discover && <DiscoverModal type={category} library={library} actions={actions} onOpen={setOpen} onClose={() => setDiscover(false)} />}
       {calendar && <CalendarModal type={category} items={ofType} actions={actions} onOpen={setOpen} onClose={() => setCalendar(false)} />}
       {stats && <InsightsModal items={items} actions={actions} initialTab={stats} onClose={() => setStats(null)} />}
+      {pick && (
+        <PickModal
+          type={category}
+          items={items}
+          onOpen={(i) => {
+            setPick(false);
+            setOpen(asTitle(i));
+          }}
+          onClose={() => setPick(false)}
+        />
+      )}
+      {importing && <ImportSheet actions={actions} onClose={() => setImporting(false)} />}
+      {liveList && <ListModal list={liveList} actions={actions} onOpenTitle={setOpen} onClose={() => setOpenList(null)} />}
+      {newList && <ListEditor list={null} actions={actions} onClose={() => setNewList(false)} />}
       {account && (
         <AccountSheet
           lastSyncAt={props.lastSyncAt}
           syncing={syncing}
           count={items.length}
           actions={actions}
+          prefs={props.prefs ?? { hideSpoilers: false }}
           onStats={() => {
             setAccount(false);
             setStats('overview');
@@ -274,6 +423,10 @@ export default function SimklScreen(props: SimklScreenProps) {
             setAccount(false);
             setStats('review');
           }}
+          onImport={() => {
+            setAccount(false);
+            setImporting(true);
+          }}
           onClose={() => setAccount(false)}
         />
       )}
@@ -281,16 +434,97 @@ export default function SimklScreen(props: SimklScreenProps) {
   );
 }
 
-function Round({ label, onPress, hint }: { label: string; onPress: () => void; hint: string }) {
+function SectionHead({
+  title,
+  detail,
+  action,
+  actionIcon,
+  onAction,
+}: {
+  title: string;
+  detail?: string;
+  action?: string;
+  actionIcon?: 'grid' | 'list';
+  onAction?: () => void;
+}) {
   const styles = useStyles(makeStyles);
+  const p = usePalette();
   return (
-    <TouchableOpacity style={styles.round} onPress={onPress} accessibilityLabel={hint}>
-      <Text style={styles.roundText}>{label}</Text>
+    <View style={styles.sectionHead}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {!!detail && <Text style={styles.sectionDetail}>{detail}</Text>}
+      {!!action && (
+        <TouchableOpacity style={styles.sectionAction} onPress={onAction} hitSlop={8}>
+          {actionIcon && <Icon name={actionIcon} size={14} color={p.link} />}
+          <Text style={styles.sectionActionText}>{action}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+/** A wide card: the show's backdrop, the next episode, and a one-tap "watched". */
+function UpNextCard({
+  item,
+  width,
+  busy,
+  hideSpoilers,
+  onOpen,
+  onWatched,
+}: {
+  item: SimklItem;
+  width: number;
+  busy: boolean;
+  hideSpoilers: boolean;
+  onOpen: () => void;
+  onWatched: () => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const fanart = fanartUrl(item.fanart ?? null);
+  const art = fanart ?? (item.poster ? posterUrl(item.poster, '_m') : null);
+  const left = episodesLeft(item);
+  const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
+  const when = item.nextDate ? `Aired ${fmtDay(item.nextDate)}` : item.lastWatchedAt ? `Watched ${fmtAgo(item.lastWatchedAt)}` : null;
+  return (
+    <TouchableOpacity style={[styles.upCard, { width }]} onPress={onOpen} activeOpacity={0.9} accessibilityLabel={`${item.title}, ${item.nextToWatch}`}>
+      {art ? (
+        <Image source={{ uri: art }} style={StyleFill} contentFit="cover" transition={200} blurRadius={fanart ? 0 : 24} recyclingKey={art} />
+      ) : (
+        <View style={[StyleFill, { backgroundColor: `hsl(${hueFor(item.title)}, 38%, 24%)` }]} />
+      )}
+      <Fade color="0,0,0" from={0} to={0.88} style={[StyleFill, { top: '25%' }]} />
+      {!fanart && (
+        <View style={styles.upPoster}>
+          <Poster path={item.poster} title={item.title} width={64} height={95} radius={8} />
+        </View>
+      )}
+      <View style={styles.upBody}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={styles.upTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.upEp} numberOfLines={1}>
+            <Text style={styles.upCode}>{item.nextToWatch}</Text>
+            {!hideSpoilers && item.nextTitle ? `  ${item.nextTitle}` : ''}
+          </Text>
+          <Text style={styles.upMeta} numberOfLines={1}>
+            {[left > 0 ? `${left} left` : null, when].filter(Boolean).join(' · ')}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onWatched} disabled={busy} accessibilityLabel={`Mark ${item.nextToWatch} watched`} hitSlop={8}>
+          <Glass interactive clear fallback="rgba(255,255,255,0.22)" style={[styles.upCheck, busy && { opacity: 0.5 }]}>
+            <Icon name="check" size={22} color="#fff" weight="bold" />
+          </Glass>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.upTrack}>
+        <View style={[styles.upFill, { width: `${Math.round(progress * 100)}%` }]} />
+      </View>
     </TouchableOpacity>
   );
 }
 
-/** One title in the list: poster with progress, next episode, episodes left, date, ratings. */
+/** One title in the list: poster, next episode, progress, date, ratings. */
 function Row({ item, sort, onPress }: { item: SimklItem; sort: SimklSort; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const isMovie = item.type === 'movie';
@@ -308,29 +542,28 @@ function Row({ item, sort, onPress }: { item: SimklItem; sort: SimklSort; onPres
             : null;
   return (
     <TouchableOpacity style={styles.row} onPress={onPress} accessibilityLabel={item.title}>
-      <View style={styles.rowPoster}>
-        <Image source={{ uri: posterUrl(item.poster, '_c') }} style={styles.rowPosterImg} contentFit="cover" transition={120} />
-        {!isMovie && item.totalEpisodes > 0 && (
-          <View style={styles.rowTrack}>
-            <View style={[styles.rowFill, { width: `${Math.round(progress * 100)}%` }]} />
-          </View>
-        )}
-      </View>
+      <Poster path={item.poster} title={item.title} width={66} height={98} radius={9} />
       <View style={styles.rowText}>
         <Text style={styles.rowTitle} numberOfLines={2}>
           {item.title}
         </Text>
         {isMovie ? (
           <Text style={styles.rowMeta}>
-            {[item.year, item.runtime ? `${item.runtime} min` : null, item.rank ? `#${item.rank}` : null].filter(Boolean).join('  ·  ')}
+            {[item.year, item.runtime ? `${item.runtime} min` : null, STATUS_LABELS[item.status]].filter(Boolean).join('  ·  ')}
           </Text>
         ) : (
           <View style={styles.rowLine}>
             {item.nextToWatch ? <Text style={styles.rowNext}>{item.nextToWatch}</Text> : <Text style={styles.rowDone}>Caught up</Text>}
-            {left > 0 && <Text style={styles.rowLeft}>{left} ep left</Text>}
+            {left > 0 && <Text style={styles.rowLeft}>{left} left</Text>}
+            {!!date && <Text style={styles.rowDate}>{date}</Text>}
           </View>
         )}
-        {!!date && <Text style={styles.rowDate}>{date}</Text>}
+        {!isMovie && item.totalEpisodes > 0 && (
+          <View style={styles.rowTrack}>
+            <View style={[styles.rowFill, { width: `${Math.round(progress * 100)}%` }]} />
+          </View>
+        )}
+        {isMovie && !!date && <Text style={styles.rowDate}>{date}</Text>}
         <RatingsLine imdb={item.imdbRating} mal={item.type === 'anime' ? item.malRating : null} simkl={item.simklRating} mine={item.rating} />
       </View>
     </TouchableOpacity>
@@ -342,8 +575,7 @@ function GridPoster({ item, width, height, onPress }: { item: SimklItem; width: 
   const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
   return (
     <TouchableOpacity style={{ width }} onPress={onPress} accessibilityLabel={item.title}>
-      <View style={[styles.gridPoster, { width, height }]}>
-        <Image source={{ uri: posterUrl(item.poster) }} style={{ width, height }} contentFit="cover" transition={150} />
+      <Poster path={item.poster} title={item.title} width={width} height={height} radius={10}>
         {item.rating !== null && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>★ {fmtRating(item.rating)}</Text>
@@ -355,11 +587,11 @@ function GridPoster({ item, width, height, onPress }: { item: SimklItem; width: 
           </View>
         )}
         {item.type !== 'movie' && item.totalEpisodes > 0 && (
-          <View style={styles.rowTrack}>
-            <View style={[styles.rowFill, { width: `${Math.round(progress * 100)}%` }]} />
+          <View style={styles.gridTrack}>
+            <View style={[styles.gridFill, { width: `${Math.round(progress * 100)}%` }]} />
           </View>
         )}
-      </View>
+      </Poster>
       <Text style={styles.gridTitle} numberOfLines={1}>
         {item.title}
       </Text>
@@ -370,80 +602,84 @@ function GridPoster({ item, width, height, onPress }: { item: SimklItem; width: 
   );
 }
 
+const StyleFill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 };
+
 const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
-    header: { paddingHorizontal: SIDE, gap: 10, paddingBottom: 4 },
-    titleRow: { flexDirection: 'row', alignItems: 'center' },
-    title: { flex: 1, color: p.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.5 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SIDE, paddingBottom: 4 },
+    title: { flex: 1, color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },
     buttons: { flexDirection: 'row', gap: 8 },
-    round: { width: 38, height: 38, borderRadius: 19, backgroundColor: p.circle, alignItems: 'center', justifyContent: 'center' },
-    roundText: { color: p.icon, fontSize: 19, fontWeight: '700' },
-    card: { backgroundColor: p.panel, borderRadius: 14, padding: 16, gap: 8 },
+    card: { backgroundColor: p.elevated, borderRadius: 16, padding: 16, gap: 8, marginHorizontal: SIDE },
     cardTitle: { color: p.text, fontSize: 17, fontWeight: '700' },
     body: { color: p.textSoft, fontSize: 14 },
+    note: { color: p.link, fontSize: 13, fontWeight: '600', paddingHorizontal: SIDE, paddingTop: 4 },
 
-    controls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    statusPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      backgroundColor: p.card,
-      borderRadius: 999,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-    },
-    statusPillText: { color: p.text, fontSize: 15, fontWeight: '700' },
-    statusCount: { color: p.textSecondary, fontWeight: '600' },
-    caret: { color: p.textSecondary, fontSize: 12 },
-    viewToggle: { marginLeft: 'auto', width: 36, height: 36, borderRadius: 10, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
-    viewToggleText: { color: p.textSoft, fontSize: 17 },
+    sectionHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, paddingHorizontal: SIDE, paddingTop: 22, paddingBottom: 10 },
+    sectionTitle: { color: p.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.4 },
+    sectionDetail: { color: p.textSecondary, fontSize: 15, fontWeight: '600' },
+    sectionAction: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 5 },
+    sectionActionText: { color: p.link, fontSize: 15, fontWeight: '600' },
 
-    tabs: { gap: 20, paddingTop: 2 },
-    tab: { alignItems: 'center', paddingTop: 4 },
-    tabText: { color: p.textSecondary, fontSize: 14, fontWeight: '700', letterSpacing: 0.6 },
-    tabTextOn: { color: p.text },
-    tabLine: { height: 3, borderRadius: 2, marginTop: 6, alignSelf: 'stretch', backgroundColor: 'transparent' },
-    tabLineOn: { backgroundColor: p.rating },
+    carousel: { gap: 12, paddingHorizontal: SIDE },
+    upCard: { height: 200, borderRadius: 20, overflow: 'hidden', backgroundColor: p.elevated, justifyContent: 'flex-end' },
+    upPoster: { position: 'absolute', top: 14, left: 14, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+    upBody: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, paddingHorizontal: 16, paddingBottom: 16 },
+    upTitle: { color: '#fff', fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+    upEp: { color: 'rgba(255,255,255,0.88)', fontSize: 14, fontWeight: '600' },
+    upCode: { color: '#fff', fontWeight: '800', fontVariant: ['tabular-nums'] },
+    upMeta: { color: 'rgba(255,255,255,0.66)', fontSize: 12, fontWeight: '600' },
+    upCheck: { width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
+    upTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 4, backgroundColor: 'rgba(255,255,255,0.18)' },
+    upFill: { height: 4, backgroundColor: p.accent },
 
-    search: { flexDirection: 'row', alignItems: 'center', backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 14 },
-    searchInput: { flex: 1, color: p.text, fontSize: 16, paddingVertical: 11 },
-    searchIcon: { color: p.textSecondary, fontSize: 18 },
-    hint: { color: p.textSecondary, fontSize: 13 },
-    note: { color: p.link, fontSize: 13, fontWeight: '600' },
-    empty: { color: p.textSecondary, fontSize: 14, paddingVertical: 24, textAlign: 'center' },
+    shelf: { gap: 12, paddingHorizontal: SIDE },
+    shelfTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
+    shelfSub: { color: p.textSecondary, fontSize: 12 },
 
-    row: {
-      flexDirection: 'row',
-      gap: 14,
-      paddingHorizontal: SIDE,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: p.separator,
-    },
-    rowPoster: { width: 68, height: 100, borderRadius: 6, overflow: 'hidden', backgroundColor: p.tile },
-    rowPosterImg: { width: 68, height: 100 },
-    rowTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 4, backgroundColor: 'rgba(0,0,0,0.55)' },
-    rowFill: { height: 4, backgroundColor: p.rating },
-    rowText: { flex: 1, gap: 4, justifyContent: 'center' },
-    rowTitle: { color: p.text, fontSize: 17, fontWeight: '700' },
-    rowLine: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
-    rowNext: { color: p.link, fontSize: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
-    rowDone: { color: p.textSecondary, fontSize: 14, fontWeight: '600' },
-    rowLeft: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
+    chips: { gap: 8, paddingHorizontal: SIDE, paddingBottom: 12 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+    chipOn: { backgroundColor: p.text },
+    chipText: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
+    chipCount: { color: p.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    chipTextOn: { color: p.bg },
+
+    searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: SIDE },
+    search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12 },
+    searchInput: { flex: 1, color: p.text, fontSize: 16, paddingVertical: 10 },
+    sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 },
+    sortText: { color: p.text, fontSize: 14, fontWeight: '600' },
+    hint: { color: p.textSecondary, fontSize: 12, paddingHorizontal: SIDE, paddingTop: 8, paddingBottom: 2 },
+    emptyBox: { alignItems: 'center', gap: 10, paddingVertical: 34, paddingHorizontal: 30 },
+    empty: { color: p.textSecondary, fontSize: 15, textAlign: 'center' },
+    emptyActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+    emptyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+    emptyBtnGhost: { backgroundColor: p.elevated },
+    emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
+    row: { flexDirection: 'row', gap: 14, paddingHorizontal: SIDE, paddingVertical: 10 },
+    rowText: { flex: 1, gap: 4, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: p.separator, paddingBottom: 10 },
+    rowTitle: { color: p.text, fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+    rowLine: { flexDirection: 'row', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' },
+    rowNext: { color: p.link, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    rowDone: { color: p.success, fontSize: 14, fontWeight: '700' },
+    rowLeft: { color: p.textSoft, fontSize: 14, fontWeight: '600' },
     rowMeta: { color: p.textSoft, fontSize: 14, fontWeight: '600' },
-    rowDate: { color: p.textSecondary, fontSize: 13 },
+    rowDate: { color: p.textSecondary, fontSize: 12 },
+    rowTrack: { height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginVertical: 2 },
+    rowFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
 
-    gridRow: { gap: GAP, paddingHorizontal: SIDE, marginTop: 12 },
-    gridPoster: { borderRadius: 8, overflow: 'hidden', backgroundColor: p.tile },
-    badge: { position: 'absolute', top: 5, left: 5, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 },
+    gridRow: { gap: GAP, paddingHorizontal: SIDE, marginTop: 14 },
+    badge: { position: 'absolute', top: 6, left: 6, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2 },
     badgeText: { color: p.rating, fontSize: 11, fontWeight: '800' },
-    imdbBadge: { position: 'absolute', top: 5, right: 5, backgroundColor: '#F5C518', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
+    imdbBadge: { position: 'absolute', top: 6, right: 6, backgroundColor: '#F5C518', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1 },
     imdbBadgeText: { color: '#000', fontSize: 11, fontWeight: '900' },
-    gridTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 5 },
+    gridTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 4, backgroundColor: 'rgba(0,0,0,0.55)' },
+    gridFill: { height: 4, backgroundColor: p.accent },
+    gridTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
     gridSub: { color: p.textSecondary, fontSize: 12 },
 
-    footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 20 },
+    footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 22 },
     footerIcon: { width: 16, height: 16, borderRadius: 3 },
     footerText: { color: p.textSecondary, fontSize: 12 },
   });

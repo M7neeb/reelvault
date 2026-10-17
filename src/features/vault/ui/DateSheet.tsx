@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { sheet, usePalette, useStyles, type Palette } from './theme';
+import Glyph from './Glyph';
 
 type Mode = 'set' | 'shift';
 
@@ -91,7 +92,7 @@ export default function DateSheet({
           <View style={styles.sheet}>
             <View style={styles.header}>
               <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-                <Text style={styles.circleIcon}>✕</Text>
+                <Glyph name="close" />
               </TouchableOpacity>
               <Text style={styles.title}>Adjust Date & Time</Text>
               <TouchableOpacity style={[styles.primary, !ok && styles.disabled]} disabled={!ok} onPress={apply}>

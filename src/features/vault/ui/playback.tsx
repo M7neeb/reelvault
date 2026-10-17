@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fmtDuration, fmtSize } from './format';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
+import Glyph from './Glyph';
 
 /** Plays the list from `startIndex`, moving on when each video ends. */
 export function SlideshowModal({
@@ -86,7 +87,7 @@ export function SlideshowModal({
         )}
         <View style={[styles.slideTop, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity style={styles.round} onPress={onClose} accessibilityLabel="Close slideshow">
-            <Text style={styles.roundText}>✕</Text>
+            <Glyph name="close" color="#fff" />
           </TouchableOpacity>
           <View style={styles.slideTitleWrap}>
             <Text style={styles.slideTitle} numberOfLines={1}>
@@ -104,7 +105,7 @@ export function SlideshowModal({
             disabled={index === 0}
             onPress={() => setIndex((i) => Math.max(0, i - 1))}
             accessibilityLabel="Previous video">
-            <Text style={styles.roundText}>‹</Text>
+            <Glyph name="back" size={17} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.roundBig} onPress={togglePause} accessibilityLabel="Play or pause">
             <Text style={styles.roundText}>{paused ? '▶' : '❚❚'}</Text>

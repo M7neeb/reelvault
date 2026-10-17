@@ -11,6 +11,7 @@ import { countByDay, dayKey, groupItems, libraryOverview, monthGrid, monthName }
 import { Section, SheetFrame } from './sheets';
 import { sheet, useStyles, type Palette } from './theme';
 import type { GroupBy, VaultItem } from './types';
+import Glyph from './Glyph';
 
 const WEEK = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
@@ -49,7 +50,7 @@ export function CalendarSheet({
     <SheetFrame title="Calendar" onClose={onClose}>
       <View style={styles.monthRow}>
         <TouchableOpacity style={styles.arrow} onPress={() => move(-1)} accessibilityLabel="Previous month">
-          <Text style={styles.arrowText}>‹</Text>
+          <Glyph name="back" size={16} />
         </TouchableOpacity>
         <View style={styles.monthTitleWrap}>
           <Text style={styles.monthTitle}>
@@ -60,7 +61,7 @@ export function CalendarSheet({
           </Text>
         </View>
         <TouchableOpacity style={styles.arrow} onPress={() => move(1)} accessibilityLabel="Next month">
-          <Text style={styles.arrowText}>›</Text>
+          <Glyph name="forward" size={16} />
         </TouchableOpacity>
       </View>
 

@@ -17,15 +17,20 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import type { VideoLink } from '@/features/simkl/ui/types';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CalendarSheet, OverviewSheet, TimelineSheet } from './browse';
+import { useTabBarSpace } from './chrome';
+import Fade from './Fade';
+import Glass from './Glass';
+import Icon from './Icon';
+import IconButton from './IconButton';
 import { confirmAction, notify, plural } from './confirm';
 import DateSheet from './DateSheet';
 import { filterLabel, isPrivateView, isSpecial, type Filter } from './filters';
 import Grid, { type GridMode } from './Grid';
-import { nextSize } from './layout';
 import {
   dayKey,
   describeRule,
@@ -43,7 +48,7 @@ import SearchSheet from './SearchSheet';
 import { PasscodeSheet, SettingsSheet, type PasscodeMode } from './security';
 import { BulkEditSheet, newSmartFilterDraft, SmartFilterSheet, ViewOptionsSheet } from './sheets';
 import Sidebar from './Sidebar';
-import { paletteFor, sheet, ThemeContext, useStyles, type Palette } from './theme';
+import { paletteFor, rgbOf, sheet, ThemeContext, usePalette, useStyles, type Palette } from './theme';
 import {
   SORTS,
   type CompressQuality,
@@ -63,15 +68,6 @@ import {
 import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
-
-/** Glyph on the round thumbnail-size button, per size. */
-const SIZE_GLYPH: Record<ViewOptions['size'], string> = {
-  small: '▪',
-  medium: '▩',
-  large: '▦',
-  xlarge: '▤',
-  fit: '▬',
-};
 
 /** Picks the light or dark colours, then renders the screen inside them. */
 export default function VaultScreen(props: VaultScreenProps) {
@@ -116,11 +112,24 @@ function VaultScreenBody({
   status,
   actions,
   enableVideo = true,
-  categoryBar,
+  simkl,
   devInitialState: dev,
 }: VaultScreenProps) {
   const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace();
   const styles = useStyles(makeStyles);
+  const p = usePalette();
+
+  // Videos linked to a Simkl movie or episode.
+  const [links, setLinks] = useState<Map<string, VideoLink>>(new Map());
+  const reloadLinks = () => {
+    simkl
+      ?.links()
+      .then(setLinks)
+      .catch(() => undefined);
+  };
+  useEffect(reloadLinks, [simkl]); // eslint-disable-line react-hooks/exhaustive-deps
+  const linkedIds = useMemo(() => new Set(links.keys()), [links]);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VaultItem[] | null>(null);
@@ -746,7 +755,6 @@ function VaultScreenBody({
 
   const listHeader = (
     <View style={[styles.listHeader, { paddingTop: insets.top + 56 }]}>
-      {categoryBar && <View style={styles.categoryBar}>{categoryBar}</View>}
       <View style={styles.subRow}>
         <Text style={styles.subText}>
           {plural(shown.length, 'video')}
@@ -845,37 +853,32 @@ function VaultScreenBody({
         jumpTo={jumpTo}
         onPressTile={onPressTile}
         onLongPressTile={mode === 'normal' ? onLongPressTile : undefined}
+        linked={linkedIds}
       />
 
-      <View style={[styles.floatingHeader, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
-        <TouchableOpacity
-          style={styles.circleBtn}
-          accessibilityLabel="Thumbnail size"
-          onPress={() => setViewOptions({ ...viewOptions, size: nextSize(viewOptions.size) })}
-          onLongPress={() => setViewOptionsOpen(true)}>
-          <Text style={styles.circleIcon}>{SIZE_GLYPH[viewOptions.size]}</Text>
+      <Fade color={rgbOf(p.bg)} from={0} to={0.92} reverse style={[styles.headerFade, { height: insets.top + 64 }]} />
+      <View style={[styles.floatingHeader, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+        <IconButton icon="sidebar" label="Library" onPress={() => setSidebarOpen(true)} />
+        <TouchableOpacity style={styles.headerTitleWrap} onPress={() => setSidebarOpen(true)} accessibilityLabel="Choose what to show">
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          <Icon name="down" size={11} color={p.textSecondary} weight="bold" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {title}
-        </Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity
-            style={styles.circleBtn}
-            accessibilityLabel="View options"
-            onPress={() => setViewOptionsOpen(true)}>
-            <Text style={styles.circleIcon}>•••</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.circleBtn}
-            accessibilityLabel={selectMode ? 'Cancel selection' : 'Select'}
-            onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}>
-            <Text style={styles.circleIcon}>{selectMode ? '✕' : '✓'}</Text>
-          </TouchableOpacity>
+          <IconButton icon="search" label="Search" onPress={() => setSearchOpen(true)} />
+          <IconButton icon="options" label="View options" onPress={() => setViewOptionsOpen(true)} />
+          <IconButton
+            icon={selectMode ? 'close' : 'select'}
+            label={selectMode ? 'Cancel selection' : 'Select'}
+            tint={selectMode ? p.accent : undefined}
+            onPress={() => (selectMode ? exitSelect() : setSelectMode(true))}
+          />
         </View>
       </View>
 
-      {selectMode ? (
-        <View style={styles.actionBar}>
+      {selectMode && (
+        <Glass style={[styles.actionBar, { bottom: tabSpace > 0 ? tabSpace + 8 : insets.bottom + 12 }]}>
           <Text style={styles.actionCount}>{selected.length} selected</Text>
           {mode === 'trash' ? (
             <View style={styles.actionGroup}>
@@ -895,7 +898,7 @@ function VaultScreenBody({
           ) : (
             <View style={styles.actionGroup}>
               <TouchableOpacity style={styles.actionBtnGhost} onPress={selectionOptions} accessibilityLabel="More">
-                <Text style={styles.actionGhostText}>•••</Text>
+                <Icon name="more" size={18} color={p.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionBtnBlue, !selected.length && styles.actionDisabled]}
@@ -911,16 +914,7 @@ function VaultScreenBody({
               </TouchableOpacity>
             </View>
           )}
-        </View>
-      ) : (
-        <>
-          <TouchableOpacity style={styles.floatingLeft} onPress={() => setSidebarOpen(true)} accessibilityLabel="Library">
-            <Text style={styles.circleIcon}>•••</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatingSearch} onPress={() => setSearchOpen(true)} accessibilityLabel="Search">
-            <Text style={styles.circleIcon}>🔍</Text>
-          </TouchableOpacity>
-        </>
+        </Glass>
       )}
 
       {searchOpen && (
@@ -1162,6 +1156,9 @@ function VaultScreenBody({
             setPlaying(null);
             setFilter({ kind: 'nearby', id: item.id });
           }}
+          simkl={simkl}
+          link={links.get(playing.id) ?? null}
+          onLinkChanged={reloadLinks}
           onClose={() => setPlaying(null)}
         />
       )}
@@ -1267,32 +1264,23 @@ function HeaderPill({
 
 const makeStyles = (p: Palette) =>
   sheet({
-    categoryBar: { paddingHorizontal: 10 },
     screen: { flex: 1, backgroundColor: p.bg, overflow: 'hidden' },
 
+    headerFade: { position: 'absolute', top: 0, left: 0, right: 0 },
     floatingHeader: {
       position: 'absolute',
       top: 0,
       left: 0,
       right: 0,
       paddingBottom: 8,
-      paddingHorizontal: 14,
+      paddingHorizontal: 12,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: p.headerBg,
     },
-    headerTitle: { flex: 1, color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center', paddingHorizontal: 8 },
+    headerTitleWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 6 },
+    headerTitle: { flexShrink: 1, color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
     headerRight: { flexDirection: 'row', gap: 8 },
-    circleBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: p.circle,
-    },
-    circleIcon: { color: p.icon, fontSize: 15, fontWeight: '700' },
 
     listHeader: { paddingBottom: 8, gap: 6 },
     subRow: {
@@ -1302,58 +1290,36 @@ const makeStyles = (p: Palette) =>
       paddingHorizontal: 4,
     },
     subText: { color: p.textSecondary, fontSize: 13 },
-    pill: { backgroundColor: p.accent, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
-    dangerPill: { backgroundColor: p.danger, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+    pill: { backgroundColor: p.accent, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 999 },
+    dangerPill: { backgroundColor: p.danger, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 999 },
     pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
     note: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 4 },
     sortRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingHorizontal: 4, paddingTop: 2 },
-    chip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, backgroundColor: p.card },
+    chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: p.elevated },
     chipText: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
     empty: { color: p.textMuted, fontStyle: 'italic', textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
 
-    floatingSearch: {
-      position: 'absolute',
-      right: 18,
-      bottom: 28,
-      width: 52,
-      height: 52,
-      borderRadius: 26,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: p.floating,
-    },
-    floatingLeft: {
-      position: 'absolute',
-      left: 18,
-      bottom: 28,
-      width: 52,
-      height: 52,
-      borderRadius: 26,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: p.floating,
-    },
     actionBar: {
       position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      paddingBottom: 30,
-      paddingTop: 12,
-      paddingHorizontal: 18,
+      left: 14,
+      right: 14,
+      paddingVertical: 8,
+      paddingLeft: 18,
+      paddingRight: 8,
+      borderRadius: 30,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: p.panel,
-      borderTopWidth: 1,
-      borderTopColor: p.separator,
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 6 },
     },
     actionCount: { color: p.text, fontWeight: '600' },
     actionGroup: { flexDirection: 'row', gap: 8 },
     actionBtn: { backgroundColor: p.danger, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999 },
     actionBtnBlue: { backgroundColor: p.accent, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999 },
-    actionBtnGhost: { backgroundColor: p.card, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
-    actionGhostText: { color: p.text, fontWeight: '800' },
+    actionBtnGhost: { backgroundColor: p.card, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 999 },
     actionDisabled: { opacity: 0.4 },
     actionBtnText: { color: '#fff', fontWeight: '700' },
   });

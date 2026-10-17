@@ -18,6 +18,7 @@ import { detailedStats, fmtChange, fmtDuration, fmtRating, periodOf, review, shi
 import { SIMKL_TYPES, watchHeatmap } from '../logic';
 import { BarChart, RankedBars } from './charts';
 import type { Meta, SimklActions, SimklItem, WatchEvent } from './types';
+import Glyph from '@/features/vault/ui/Glyph';
 
 type Tab = 'overview' | 'review';
 const TABS: { key: Tab; label: string }[] = [
@@ -86,7 +87,7 @@ export default function InsightsModal({
       <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-            <Text style={styles.circleIcon}>✕</Text>
+            <Glyph name="close" />
           </TouchableOpacity>
           <Text style={styles.title}>Stats</Text>
         </View>
@@ -203,7 +204,7 @@ export default function InsightsModal({
             />
             <View style={styles.periodRow}>
               <TouchableOpacity style={styles.arrow} onPress={() => setPeriod(shiftPeriod(period, -1))} accessibilityLabel="Previous">
-                <Text style={styles.arrowText}>‹</Text>
+                <Glyph name="back" size={16} />
               </TouchableOpacity>
               <Text style={styles.periodLabel}>{period.label}</Text>
               <TouchableOpacity
@@ -211,7 +212,7 @@ export default function InsightsModal({
                 disabled={isCurrent}
                 onPress={() => setPeriod(shiftPeriod(period, 1))}
                 accessibilityLabel="Next">
-                <Text style={styles.arrowText}>›</Text>
+                <Glyph name="forward" size={16} />
               </TouchableOpacity>
             </View>
 

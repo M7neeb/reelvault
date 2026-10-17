@@ -36,10 +36,18 @@ import {
   startRewatch,
 } from './actions';
 import { allHistory, allPlays, metaMap, playsFor, sessionsFor } from './history';
+import { prefetchArt, scrobble } from './actions';
+import { allLinks, allLists, createList, deleteList, listEntries, setInList, setLink, markLinkLogged, updateList, type SimklList } from './collections';
+import { buildIcs, calendarEntries } from './ics';
+import { pickImportFile, runImport } from './importer';
+import { describeImport } from './imports';
+import { getSetting, setSetting } from '@/features/vault/library';
 import { buildEvents } from './insights';
 import { onReminderTap, reminderSettings, rescheduleReminders, saveReminderSettings } from './notify';
 import { forgetSyncState, lastSyncAt as readLastSync, syncSimkl } from './sync';
-import type { SimklActions } from './ui/types';
+import type { SimklActions, SimklBridge, SimklPrefs } from './ui/types';
+
+const SPOILER_KEY = 'simkl.hideSpoilers';
 
 const message = (e: unknown) => (e instanceof SimklError || e instanceof Error ? e.message : String(e));
 
@@ -51,12 +59,21 @@ export function useSimklData() {
   const [status, setStatus_] = useState('');
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [openRequest, setOpenRequest] = useState<{ simklId: number; type: SimklType } | null>(null);
+  const [lists, setLists] = useState<SimklList[]>([]);
+  const [prefs, setPrefs] = useState<SimklPrefs>({ hideSpoilers: false });
   const cancelled = useRef(false);
   const busy = useRef(false);
 
   const reload = useCallback(async () => {
     setItems(await listSimklItems());
     setLastSync(await readLastSync());
+    setLists(await allLists());
+  }, []);
+
+  useEffect(() => {
+    getSetting(SPOILER_KEY)
+      .then((v) => setPrefs({ hideSpoilers: v === '1' }))
+      .catch(() => undefined);
   }, []);
 
   const sync = useCallback(
@@ -70,6 +87,10 @@ export function useSimklData() {
           await reload();
           await rescheduleReminders().catch((e) => console.log(`[NOTIFY] ${String(e)}`));
         }
+        // Wide pictures for the Up Next cards, in the background.
+        prefetchArt()
+          .then((n) => (n ? reload() : undefined))
+          .catch(() => undefined);
         setStatus_(result.kind === 'synced' ? `Synced · ${result.changed} updated` : result.kind === 'unchanged' ? 'Up to date' : '');
       } catch (e) {
         console.log(`[SIMKL] sync failed: ${message(e)}`);
@@ -187,11 +208,66 @@ export function useSimklData() {
         file.write(libraryCsv(await listSimklItems()));
         await Share.share({ url: file.uri });
       },
+      createList: async (name, icon) => {
+        const id = await createList(name, icon);
+        await reload();
+        return id;
+      },
+      updateList: write(updateList),
+      deleteList: write(deleteList),
+      listEntries,
+      setInList: write(setInList),
+      importFile: async (onProgress) => {
+        const file = await pickImportFile();
+        if (!file) return null;
+        const result = await runImport(file, onProgress);
+        if (result) {
+          setStatus_(describeImport(result));
+          await sync(true);
+        }
+        return result ?? 'unknown';
+      },
+      exportCalendar: async () => {
+        const list = await listSimklItems();
+        const rows = (await Promise.all((['show', 'anime', 'movie'] as const).map((t) => loadCalendar(t).catch(() => [])))).flat();
+        const entries = calendarEntries(rows, list, Date.now());
+        if (!entries.length) return 0;
+        const file = new File(Paths.cache, 'ReelVault upcoming.ics');
+        if (file.exists) file.delete();
+        file.create();
+        file.write(buildIcs(entries));
+        await Share.share({ url: file.uri });
+        return entries.length;
+      },
+      setPrefs: async (next) => {
+        setPrefs(next);
+        await setSetting(SPOILER_KEY, next.hideSpoilers ? '1' : '0');
+      },
       openUrl: (url) => {
         Linking.openURL(url).catch((e) => console.log(`[SIMKL] could not open ${url}: ${String(e)}`));
       },
     }),
     [sync, write, reload]
+  );
+
+  /** What the Videos tab needs to link a video to a title and log it when you finish it. */
+  const bridge: SimklBridge = useMemo(
+    () => ({
+      connected,
+      search: searchSimkl,
+      loadEpisodes,
+      links: allLinks,
+      setLink,
+      scrobble: async (videoId, link, action, progress) => {
+        const r = await scrobble(link, action, progress);
+        if (r === 'watched') {
+          await markLinkLogged(videoId);
+          void sync(true);
+        }
+        return r;
+      },
+    }),
+    [connected, sync]
   );
 
   return {
@@ -202,6 +278,9 @@ export function useSimklData() {
     status,
     lastSyncAt: lastSync,
     actions,
+    lists,
+    prefs,
+    bridge,
     openRequest,
     clearOpenRequest: () => setOpenRequest(null),
   };

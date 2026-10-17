@@ -6,12 +6,14 @@
 
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import Icon from '@/features/vault/ui/Icon';
+import IconButton from '@/features/vault/ui/IconButton';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
-import { posterUrl, SIMKL_TYPES } from '../logic';
+import { SIMKL_TYPES } from '../logic';
+import Poster from './Poster';
 import { IMDB_YELLOW } from './parts';
 import type { CatalogTitle, SimklActions, SimklType, Timeframe } from './types';
 
@@ -75,9 +77,7 @@ export default function DiscoverModal({
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-            <Text style={styles.circleIcon}>✕</Text>
-          </TouchableOpacity>
+          <IconButton icon="close" label="Close" onPress={onClose} />
           <TextInput
             style={styles.search}
             placeholder={`Search ${plural.toLowerCase()} on Simkl`}
@@ -116,8 +116,7 @@ export default function DiscoverModal({
             ListEmptyComponent={<Text style={styles.empty}>{error || 'Nothing found.'}</Text>}
             renderItem={({ item }) => (
               <TouchableOpacity style={{ width: w }} onPress={() => onOpen(item)}>
-                <View style={[styles.poster, { width: w, height: h }]}>
-                  <Image source={{ uri: posterUrl(item.poster) }} style={{ width: w, height: h }} contentFit="cover" />
+                <Poster path={item.poster} title={item.title} width={w} height={h} radius={10} size="_ca">
                   {item.imdbRating != null && (
                     <View style={styles.imdb}>
                       <Text style={styles.imdbText}>{item.imdbRating.toFixed(1)}</Text>
@@ -125,10 +124,10 @@ export default function DiscoverModal({
                   )}
                   {library.has(item.simklId) && (
                     <View style={styles.inLibrary}>
-                      <Text style={styles.inLibraryText}>✓</Text>
+                      <Icon name="check" size={11} color="#fff" weight="bold" />
                     </View>
                   )}
-                </View>
+                </Poster>
                 <Text style={styles.title} numberOfLines={1}>
                   {item.title}
                 </Text>
@@ -148,12 +147,12 @@ const makeStyles = (p: Palette) =>
     header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingBottom: 10 },
     circle: { width: 34, height: 34, borderRadius: 17, backgroundColor: p.circle, alignItems: 'center', justifyContent: 'center' },
     circleIcon: { color: p.icon, fontSize: 15, fontWeight: '600' },
-    search: { flex: 1, backgroundColor: p.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, color: p.text, fontSize: 15 },
+    search: { flex: 1, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, color: p.text, fontSize: 15 },
     tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 12 },
-    tab: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
-    tabOn: { backgroundColor: p.accent },
+    tab: { backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
+    tabOn: { backgroundColor: p.text },
     tabText: { color: p.textSoft, fontWeight: '600' },
-    tabTextOn: { color: '#fff' },
+    tabTextOn: { color: p.bg },
     heading: { color: p.text, fontSize: 17, fontWeight: '700', paddingHorizontal: 12, paddingVertical: 10 },
     spinner: { marginTop: 40 },
     row: { gap: 8, paddingHorizontal: 12, marginBottom: 12 },

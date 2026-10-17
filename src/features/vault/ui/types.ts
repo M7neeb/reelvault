@@ -376,8 +376,8 @@ export type VaultActions = {
 };
 
 export type VaultScreenProps = {
-  /** The Videos · Movies · Shows · Anime switcher, drawn above the grid. */
-  categoryBar?: import('react').ReactNode;
+  /** Simkl, for linking videos to a movie or episode and scrobbling them. */
+  simkl?: import('@/features/simkl/ui/types').SimklBridge;
   /** All videos, already sorted by `viewOptions.sort`. Filtering happens inside the UI. */
   items: VaultItem[];
   /** Every tag in the library, pinned first - powers the sidebar and the search cloud. */

@@ -63,7 +63,14 @@ export function watchCounts(watchedKeys: Set<string>, plays: Play[]): Map<string
 
 /* ------------------------------------------------------------------- events */
 
-export type Meta = { genres: string[]; network: string | null; country: string | null; language: string | null; runtime: number | null };
+export type Meta = {
+  genres: string[];
+  network: string | null;
+  country: string | null;
+  language: string | null;
+  runtime: number | null;
+  fanart?: string | null;
+};
 
 export type WatchEvent = {
   simklId: number;

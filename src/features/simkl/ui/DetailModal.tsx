@@ -1,41 +1,55 @@
 /**
- * One movie, show or anime, styled after the Simkl app: a backdrop with the
- * years, language and title over it; a ratings row (Simkl + rank, IMDb or MAL,
- * yours); the main action ("Watched S02E04" / "I've seen this"); rows for the
- * trailer, the episodes, the list it is in and its Simkl page; then the
- * overview and "More like this".
+ * One movie, show or anime. A full-bleed backdrop with the poster and title
+ * over it; rating tiles (Simkl + rank, IMDb or MAL, yours); the main action
+ * ("Watched S02E04" / "I've seen this"); four quick buttons (list, your
+ * lists, trailer, rewatch); episode progress; the overview and facts; your
+ * rewatches; "More like this".
  * Presentational only (see simkl/ui/types.ts).
  */
 
 import { useEffect, useState } from 'react';
-import { Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction } from '@/features/vault/ui/confirm';
+import Fade from '@/features/vault/ui/Fade';
+import { success } from '@/features/vault/ui/haptics';
+import Icon from '@/features/vault/ui/Icon';
+import IconButton from '@/features/vault/ui/IconButton';
+import type { IconName } from '@/features/vault/ui/icons';
 import { OptionsSheet } from '@/features/vault/ui/prompts';
 import RatingPicker from '@/features/vault/ui/RatingPicker';
-import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
+import { rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { episodesLeft, fanartUrl, fmtVotes, parseEpisodeCode, posterUrl, simklUrl, STATUS_LABELS, statusesFor } from '../logic';
-import { activeSession, fmtRating, toSimklRating } from '../insights';
+import { activeSession, fmtDuration, fmtRating, toSimklRating } from '../insights';
 import EpisodesModal from './EpisodesModal';
+import { AddToListSheet } from './ListsUI';
 import { IMDB_YELLOW, MAL_BLUE, SIMKL_ICON } from './parts';
+import Poster, { hueFor } from './Poster';
 import { fmtDay } from './time';
-import type { CatalogTitle, Play, Session, SimklActions, SimklDetailInfo, SimklItem, SimklStatus } from './types';
+import type { CatalogTitle, Play, Session, SimklActions, SimklDetailInfo, SimklItem, SimklList, SimklStatus } from './types';
 
-const HERO = 330;
-/** 24 thin bands, eased, so the backdrop melts into the page without visible steps. */
-const FADE_STEP = 6;
-const FADE = Array.from({ length: 24 }, (_, i) => Math.pow((i + 1) / 24, 2.2));
+const HERO = 400;
+const STATUS_ICON: Record<SimklStatus, IconName> = {
+  watching: 'play',
+  plantowatch: 'clock',
+  hold: 'pause',
+  completed: 'checkCircle',
+  dropped: 'close',
+};
 
 export default function DetailModal({
   item,
   title,
   actions,
+  lists = [],
+  hideSpoilers = false,
   initialEpisodesOpen = false,
   initialRewatchOpen = false,
   initialRatingOpen = false,
+  initialListsOpen = false,
   onOpen,
   onClose,
 }: {
@@ -43,9 +57,12 @@ export default function DetailModal({
   item: SimklItem | null;
   title: CatalogTitle;
   actions: SimklActions;
+  lists?: SimklList[];
+  hideSpoilers?: boolean;
   initialEpisodesOpen?: boolean;
   initialRewatchOpen?: boolean;
   initialRatingOpen?: boolean;
+  initialListsOpen?: boolean;
   /** Open another title (from "More like this"). */
   onOpen: (t: CatalogTitle) => void;
   onClose: () => void;
@@ -53,18 +70,21 @@ export default function DetailModal({
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const { width } = useWindowDimensions();
 
   const [detail, setDetail] = useState<SimklDetailInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [ratingOpen, setRatingOpen] = useState(initialRatingOpen && !!item);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [listsOpen, setListsOpen] = useState(initialListsOpen);
   const [episodesOpen, setEpisodesOpen] = useState(initialEpisodesOpen && !!item);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [plays, setPlays] = useState<Play[]>([]);
   const [rewatchSession, setRewatchSession] = useState<Session | null>(null);
   const [sessionMenu, setSessionMenu] = useState<Session | null>(null);
   const [wantRewatchOpen, setWantRewatchOpen] = useState(initialRewatchOpen);
+  const [moreText, setMoreText] = useState(false);
 
   const type = title.type;
   const id = title.simklId;
@@ -99,6 +119,7 @@ export default function DetailModal({
     setNote('');
     try {
       await job();
+      success();
       setNote(label);
     } catch (e: any) {
       setNote(`That did not work: ${e?.message ?? String(e)}`);
@@ -107,11 +128,13 @@ export default function DetailModal({
     }
   }
 
-  const fanart = fanartUrl(detail?.fanart ?? null);
+  const fanart = fanartUrl(detail?.fanart ?? item?.fanart ?? null);
+  const poster = detail?.poster ?? title.poster;
   // No backdrop on Simkl: the poster, blurred, so the title still sits on colour.
-  const backdrop = fanart ?? posterUrl(detail?.poster ?? title.poster, '_m');
-  const years = detail?.years ? detail.years.replace('-', ' – ') : (detail?.year ?? title.year);
-  const facts = [years, detail?.language].filter(Boolean).join('  •  ');
+  const backdrop = fanart ?? (poster ? posterUrl(poster, '_m') : null);
+  const years = detail?.years ? detail.years.replace('-', '–') : (detail?.year ?? title.year);
+  const runtime = detail?.runtime ?? item?.runtime ?? null;
+  const facts = [years, runtime ? fmtDuration(runtime) : null, detail?.certification].filter(Boolean).join('  ·  ');
   const link = simklUrl(type, id, title.slug);
   const next = item ? parseEpisodeCode(item.nextToWatch) : null;
   const simklRating = detail?.simklRating ?? item?.simklRating ?? title.simklRating ?? null;
@@ -119,74 +142,93 @@ export default function DetailModal({
   const malRating = detail?.malRating ?? item?.malRating ?? null;
   const rank = detail?.rank ?? item?.rank ?? title.rank ?? null;
   const left = item ? episodesLeft(item) : 0;
+  const total = item?.totalEpisodes || detail?.totalEpisodes || 0;
+  const inLists = lists.filter((l) => l.ids.includes(id));
+  const posterW = 112;
+  const posterH = Math.round(posterW * 1.48);
+  const fade = rgbOf(p.bg);
+
+  const infoFacts: [string, string][] = [
+    ['Status', detail?.status ? detail.status[0].toUpperCase() + detail.status.slice(1) : ''],
+    ['Network', detail?.network ?? ''],
+    ['Runtime', runtime ? `${runtime} min${type === 'movie' ? '' : ' / episode'}` : ''],
+    ['Episodes', type !== 'movie' && total ? String(total) : ''],
+    ['First aired', detail?.firstAired ? fmtDay(detail.firstAired) : ''],
+    ['Country', detail?.country ?? ''],
+    ['Language', detail?.language ?? ''],
+    ['Rated', detail?.certification ?? ''],
+  ].filter(([, v]) => !!v) as [string, string][];
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 30 }}>
-          {/* Backdrop with the title over it */}
+        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 36 }} showsVerticalScrollIndicator={false}>
+          {/* Backdrop, poster and title */}
           <View style={[styles.hero, { height: HERO + insets.top }]}>
-            <Image source={{ uri: backdrop }} style={styles.heroImage} contentFit="cover" transition={200} blurRadius={fanart ? 0 : 30} />
-            <View style={styles.heroShade} />
-            {/* A soft fade into the page (no gradient module in this build). */}
-            {FADE.map((o, i) => (
-              <View key={i} style={[styles.fade, { bottom: (FADE.length - 1 - i) * FADE_STEP, opacity: o }]} />
-            ))}
-            <View style={[styles.heroBar, { top: insets.top + 6 }]}>
-              <TouchableOpacity style={styles.heroBtn} onPress={onClose} accessibilityLabel="Back">
-                <Text style={styles.heroBtnText}>‹</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.heroBtn} onPress={() => actions.openUrl(link)} accessibilityLabel="Open on Simkl">
-                <Text style={styles.heroBtnSmall}>↗</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.heroText}>
-              {!!facts && <Text style={styles.facts}>{facts}</Text>}
-              <Text style={styles.title}>{title.title}</Text>
+            {backdrop ? (
+              <Image source={{ uri: backdrop }} style={StyleFill} contentFit="cover" transition={250} blurRadius={fanart ? 0 : 28} />
+            ) : (
+              <View style={[StyleFill, { backgroundColor: `hsl(${hueFor(title.title)}, 36%, 22%)` }]} />
+            )}
+            <Fade color="0,0,0" from={0} to={0.45} reverse style={[StyleFill, { bottom: '60%' }]} />
+            <Fade color={fade} from={0} to={1} style={[StyleFill, { top: '30%' }]} />
+            <View style={styles.heroBody}>
+              <Poster path={poster} title={title.title} width={posterW} height={posterH} radius={12} size="_m" style={styles.posterShadow} />
+              <View style={styles.heroText}>
+                {!!facts && <Text style={styles.facts}>{facts}</Text>}
+                <Text style={styles.title} numberOfLines={3}>
+                  {title.title}
+                </Text>
+                {!!detail?.genres.length && (
+                  <Text style={styles.genres} numberOfLines={1}>
+                    {detail.genres.slice(0, 3).join(' · ')}
+                  </Text>
+                )}
+              </View>
             </View>
           </View>
 
           {/* Ratings */}
-          <View style={styles.ratings}>
-            <TouchableOpacity style={styles.rating} onPress={() => actions.openUrl(link)} accessibilityLabel="Simkl rating">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ratings}>
+            <TouchableOpacity style={styles.tile} onPress={() => actions.openUrl(link)} accessibilityLabel="Simkl rating">
               <Image source={{ uri: SIMKL_ICON }} style={styles.simklMark} />
               <View>
-                <Text style={styles.ratingValue}>
-                  {simklRating !== null ? simklRating.toFixed(1) : '–'}
-                  {rank ? <Text style={styles.ratingRank}>{`  #${rank}`}</Text> : null}
-                </Text>
-                {!!detail?.simklVotes && <Text style={styles.ratingVotes}>{fmtVotes(detail.simklVotes)} votes</Text>}
+                <Text style={styles.tileValue}>{simklRating !== null ? simklRating.toFixed(1) : '–'}</Text>
+                <Text style={styles.tileSub}>{rank ? `#${rank}` : detail?.simklVotes ? fmtVotes(detail.simklVotes) : 'Simkl'}</Text>
               </View>
             </TouchableOpacity>
             {(imdbRating !== null || type !== 'anime') && (
-              <View style={styles.rating}>
+              <View style={styles.tile}>
                 <View style={[styles.brand, { backgroundColor: IMDB_YELLOW }]}>
                   <Text style={styles.brandDark}>IMDb</Text>
                 </View>
                 <View>
-                  <Text style={styles.ratingValue}>{imdbRating !== null ? imdbRating.toFixed(1) : '–'}</Text>
-                  {!!detail?.imdbVotes && <Text style={styles.ratingVotes}>{fmtVotes(detail.imdbVotes)} votes</Text>}
+                  <Text style={styles.tileValue}>{imdbRating !== null ? imdbRating.toFixed(1) : '–'}</Text>
+                  <Text style={styles.tileSub}>{detail?.imdbVotes ? `${fmtVotes(detail.imdbVotes)} votes` : 'IMDb'}</Text>
                 </View>
               </View>
             )}
             {type === 'anime' && malRating !== null && (
-              <View style={styles.rating}>
+              <View style={styles.tile}>
                 <View style={[styles.brand, { backgroundColor: MAL_BLUE }]}>
                   <Text style={styles.brandLight}>MAL</Text>
                 </View>
                 <View>
-                  <Text style={styles.ratingValue}>{malRating.toFixed(1)}</Text>
-                  {!!detail?.malVotes && <Text style={styles.ratingVotes}>{fmtVotes(detail.malVotes)} votes</Text>}
+                  <Text style={styles.tileValue}>{malRating.toFixed(1)}</Text>
+                  <Text style={styles.tileSub}>{detail?.malVotes ? `${fmtVotes(detail.malVotes)} votes` : 'MyAnimeList'}</Text>
                 </View>
               </View>
             )}
             {item && (
-              <TouchableOpacity style={styles.mine} onPress={() => setRatingOpen(true)} accessibilityLabel="My rating">
-                <Text style={styles.mineStar}>{item.rating ? '★' : '☆'}</Text>
-                <Text style={[styles.mineValue, !item.rating && styles.mineEmpty]}>{item.rating ? fmtRating(item.rating) : 'Rate'}</Text>
+              <TouchableOpacity style={[styles.tile, styles.mineTile]} onPress={() => setRatingOpen(true)} accessibilityLabel="My rating">
+                <Icon name={item.rating ? 'star' : 'starOff'} size={22} color={p.rating} />
+                <View>
+                  <Text style={[styles.tileValue, { color: p.rating }]}>{item.rating ? fmtRating(item.rating) : 'Rate'}</Text>
+                  <Text style={styles.tileSub}>{item.rating ? 'Yours' : 'Tap to rate'}</Text>
+                </View>
               </TouchableOpacity>
             )}
-          </View>
+          </ScrollView>
 
           {!!note && <Text style={styles.note}>{note}</Text>}
 
@@ -194,6 +236,7 @@ export default function DetailModal({
           <View style={styles.primaryWrap}>
             {!item ? (
               <Big
+                icon="plus"
                 label="Add to Plan to Watch"
                 disabled={busy}
                 onPress={() => run('Added to Plan to Watch', () => actions.addToLibrary(title, 'plantowatch'))}
@@ -201,6 +244,7 @@ export default function DetailModal({
             ) : type === 'movie' ? (
               item.status === 'completed' ? (
                 <Big
+                  icon="rewatch"
                   label="Watched again"
                   sub={`Seen ${1 + moviePlays} ${moviePlays ? 'times' : 'time'} so far`}
                   disabled={busy}
@@ -212,34 +256,39 @@ export default function DetailModal({
                   }
                 />
               ) : (
-                <Big label="I've seen this" disabled={busy} onPress={() => run('Marked as watched', () => actions.markMovieWatched(item))} />
+                <Big icon="check" label="I've seen this" disabled={busy} onPress={() => run('Marked as watched', () => actions.markMovieWatched(item))} />
               )
             ) : next ? (
               <Big
+                icon="check"
                 label={`Watched ${item.nextToWatch}`}
-                sub={item.nextTitle ?? undefined}
+                sub={hideSpoilers ? undefined : (item.nextTitle ?? undefined)}
                 disabled={busy}
                 onPress={() => run(`${item.nextToWatch} watched`, () => actions.setEpisodes(item, [next], true))}
               />
             ) : null}
           </View>
 
-          {/* Action rows */}
-          <View style={styles.rows}>
-            {!!detail?.trailer && <ActionRow icon="▶" label="Watch trailer" onPress={() => actions.openUrl(detail.trailer!)} />}
-            {item && type !== 'movie' && (
-              <ActionRow
-                icon="✓"
-                label="Mark specific episodes"
-                value={`${item.watchedEpisodes}/${item.totalEpisodes || '?'}${left ? ` · ${left} left` : ''}`}
-                onPress={() => setEpisodesOpen(true)}
-              />
-            )}
-            {item && type !== 'movie' && item.watchedEpisodes > 0 && (
-              <ActionRow
-                icon="↻"
-                label={current ? `Rewatch #${current.number}` : 'Start a rewatch'}
-                value={current ? `${sessionDone}/${item.totalEpisodes || '?'}` : sessions.length ? `${sessions.length} done` : undefined}
+          {/* Quick buttons */}
+          <View style={styles.quick}>
+            <Quick
+              icon={item ? STATUS_ICON[item.status] : 'listAdd'}
+              label={item ? STATUS_LABELS[item.status] : 'Add to…'}
+              on={!!item}
+              onPress={() => setStatusOpen(true)}
+            />
+            <Quick
+              icon="lists"
+              label={inLists.length ? `${inLists.length} ${inLists.length === 1 ? 'list' : 'lists'}` : 'My lists'}
+              on={inLists.length > 0}
+              onPress={() => setListsOpen(true)}
+            />
+            <Quick icon="play" label="Trailer" disabled={!detail?.trailer} onPress={() => detail?.trailer && actions.openUrl(detail.trailer)} />
+            {item && type !== 'movie' && item.watchedEpisodes > 0 ? (
+              <Quick
+                icon="rewatch"
+                label={current ? `Rewatch #${current.number}` : 'Rewatch'}
+                on={!!current}
                 onPress={() => {
                   if (current) setRewatchSession(current);
                   else
@@ -250,69 +299,107 @@ export default function DetailModal({
                     });
                 }}
               />
+            ) : (
+              <Quick icon="share" label="Simkl" onPress={() => actions.openUrl(link)} />
             )}
-            <ActionRow
-              icon="◉"
-              label={item ? STATUS_LABELS[item.status] : 'Add to a list'}
-              value={item ? 'Change' : undefined}
-              onPress={() => setStatusOpen(true)}
-            />
-            <ActionRow icon="↗" label="View on Simkl" onPress={() => actions.openUrl(link)} />
           </View>
 
-          {item && sessions.length > 0 && (
+          {/* Episodes */}
+          {item && type !== 'movie' && (
+            <TouchableOpacity style={styles.card} onPress={() => setEpisodesOpen(true)} accessibilityLabel="Episodes">
+              <View style={styles.cardHead}>
+                <Text style={styles.cardTitle}>Episodes</Text>
+                <Text style={styles.cardValue}>
+                  {item.watchedEpisodes} of {total || '?'}
+                </Text>
+                <Icon name="forward" size={14} color={p.textMuted} />
+              </View>
+              <View style={styles.track}>
+                <View style={[styles.trackFill, { width: `${total ? Math.min(100, (item.watchedEpisodes / total) * 100) : 0}%` }]} />
+              </View>
+              <Text style={styles.cardSub}>
+                {left > 0
+                  ? `${left} left${runtime ? ` · about ${fmtDuration(left * runtime)}` : ''}`
+                  : item.notAiredEpisodes > 0
+                    ? `Caught up · ${item.notAiredEpisodes} still to air`
+                    : 'All watched'}
+                {current ? ` · Rewatch #${current.number}: ${sessionDone} done` : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Overview */}
+          {!!detail?.overview && (
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>REWATCHES</Text>
-              {[...sessions].reverse().map((s) => {
-                const n = new Set(plays.filter((x) => x.sessionId === s.id).map((x) => `${x.season}:${x.episode}`)).size;
-                return (
-                  <TouchableOpacity key={s.id} style={styles.sessionRow} onPress={() => setSessionMenu(s)}>
-                    <Text style={styles.sessionTitle}>#{s.number}</Text>
-                    <Text style={styles.sessionFacts}>
-                      {n} episodes · started {fmtDay(s.startedAt)}
-                      {s.finishedAt ? ` · finished ${fmtDay(s.finishedAt)}` : ' · in progress'}
-                      {s.remoteId ? ' · on Simkl' : ''}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+              <Text style={styles.sectionLabel}>Overview</Text>
+              <Text style={styles.text} numberOfLines={moreText ? undefined : 4} onPress={() => setMoreText(!moreText)}>
+                {detail.overview}
+              </Text>
+              {detail.overview.length > 220 && (
+                <Text style={styles.more} onPress={() => setMoreText(!moreText)}>
+                  {moreText ? 'Less' : 'More'}
+                </Text>
+              )}
             </View>
           )}
 
           {!!item?.memo && (
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>MY NOTE</Text>
+              <Text style={styles.sectionLabel}>My note</Text>
               <Text style={styles.text}>{item.memo}</Text>
             </View>
           )}
 
-          {(detail?.overview || detail?.network || detail?.genres.length) && (
+          {infoFacts.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>OVERVIEW</Text>
-              {!!detail?.network && <Text style={styles.network}>{detail.network}</Text>}
-              {!!detail?.overview && <Text style={styles.text}>{detail.overview}</Text>}
-              {!!detail?.genres.length && <Text style={styles.genres}>{detail.genres.join(', ')}</Text>}
-              <Text style={styles.small}>
-                {[
-                  detail?.status ? detail.status[0].toUpperCase() + detail.status.slice(1) : null,
-                  detail?.runtime ? `${detail.runtime} min` : null,
-                  detail?.certification,
-                  detail?.country,
-                  detail?.totalEpisodes && type !== 'movie' ? `${detail.totalEpisodes} episodes` : null,
-                ]
-                  .filter(Boolean)
-                  .join('  ·  ')}
-              </Text>
+              <Text style={styles.sectionLabel}>Info</Text>
+              <View style={styles.factsGrid}>
+                {infoFacts.map(([k, v]) => (
+                  <View key={k} style={styles.fact}>
+                    <Text style={styles.factKey}>{k}</Text>
+                    <Text style={styles.factValue} numberOfLines={2}>
+                      {v}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {item && sessions.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Rewatches</Text>
+              <View style={styles.group}>
+                {[...sessions].reverse().map((s, i) => {
+                  const n = new Set(plays.filter((x) => x.sessionId === s.id).map((x) => `${x.season}:${x.episode}`)).size;
+                  return (
+                    <TouchableOpacity key={s.id} style={[styles.groupRow, i > 0 && styles.groupSep]} onPress={() => setSessionMenu(s)}>
+                      <View style={[styles.badge, !s.finishedAt && { backgroundColor: p.accent }]}>
+                        <Text style={styles.badgeText}>#{s.number}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.groupTitle}>{s.finishedAt ? 'Finished' : 'In progress'}</Text>
+                        <Text style={styles.groupSub}>
+                          {n} episodes · {fmtDay(s.startedAt)}
+                          {s.finishedAt ? ` – ${fmtDay(s.finishedAt)}` : ''}
+                          {s.remoteId ? ' · on Simkl' : ''}
+                        </Text>
+                      </View>
+                      <Icon name="more" size={16} color={p.textMuted} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           )}
 
           {!!detail?.related.length && (
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>MORE LIKE THIS</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.related}>
+              <Text style={styles.sectionLabel}>More like this</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.related} style={styles.bleed}>
                 {detail.related.map((r) => (
                   <TouchableOpacity key={r.simklId} style={styles.relatedItem} onPress={() => onOpen(r)}>
-                    <Image source={{ uri: posterUrl(r.poster, '_c') }} style={styles.relatedPoster} contentFit="cover" />
+                    <Poster path={r.poster} title={r.title} width={108} height={160} radius={10} />
                     <Text style={styles.relatedTitle} numberOfLines={2}>
                       {r.title}
                     </Text>
@@ -322,25 +409,41 @@ export default function DetailModal({
             </View>
           )}
 
-          {item && (
-            <TouchableOpacity
-              style={styles.remove}
-              onPress={() =>
-                confirmAction(
-                  `Remove ${item.title} from Simkl?`,
-                  'It leaves every list on Simkl, together with its watch history and rating.',
-                  () =>
-                    void run('Removed', async () => {
-                      await actions.remove(item);
-                      onClose();
-                    }),
-                  { label: 'Remove', destructive: true }
-                )
-              }>
-              <Text style={styles.removeText}>Remove from Simkl</Text>
+          <View style={styles.footerLinks}>
+            <TouchableOpacity style={styles.linkBtn} onPress={() => actions.openUrl(link)}>
+              <Icon name="open" size={14} color={p.link} />
+              <Text style={styles.linkText}>View on Simkl</Text>
             </TouchableOpacity>
-          )}
+            {item && (
+              <TouchableOpacity
+                style={styles.linkBtn}
+                onPress={() =>
+                  confirmAction(
+                    `Remove ${item.title} from Simkl?`,
+                    'It leaves every list on Simkl, together with its watch history and rating.',
+                    () =>
+                      void run('Removed', async () => {
+                        await actions.remove(item);
+                        onClose();
+                      }),
+                    { label: 'Remove', destructive: true }
+                  )
+                }>
+                <Icon name="trash" size={14} color={p.dangerText} />
+                <Text style={[styles.linkText, { color: p.dangerText }]}>Remove from Simkl</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </ScrollView>
+
+        {/* Floating controls over the backdrop */}
+        <View style={[styles.topBar, { top: insets.top + 6, width }]} pointerEvents="box-none">
+          <IconButton icon="back" label="Back" clear onPress={onClose} />
+          <View style={styles.topRight}>
+            <IconButton icon="lists" label="Add to my lists" clear onPress={() => setListsOpen(true)} />
+            <IconButton icon="open" label="Open on Simkl" clear onPress={() => actions.openUrl(link)} />
+          </View>
+        </View>
 
         {statusOpen && (
           <OptionsSheet
@@ -356,6 +459,7 @@ export default function DetailModal({
             onClose={() => setStatusOpen(false)}
           />
         )}
+        {listsOpen && <AddToListSheet title={{ ...title, poster }} lists={lists} actions={actions} onClose={() => setListsOpen(false)} />}
         {ratingOpen && item && (
           <RatingPicker
             value={item.rating}
@@ -364,11 +468,12 @@ export default function DetailModal({
             onClose={() => setRatingOpen(false)}
           />
         )}
-        {episodesOpen && item && <EpisodesModal item={item} actions={actions} onClose={() => setEpisodesOpen(false)} />}
+        {episodesOpen && item && <EpisodesModal item={item} actions={actions} hideSpoilers={hideSpoilers} onClose={() => setEpisodesOpen(false)} />}
         {rewatchSession && item && (
           <EpisodesModal
             item={item}
             actions={actions}
+            hideSpoilers={hideSpoilers}
             session={rewatchSession}
             onFinishSession={() => {
               const s = rewatchSession;
@@ -429,117 +534,122 @@ export default function DetailModal({
     </Modal>
   );
 
-  function Big({ label, sub, disabled, subtle, onPress }: { label: string; sub?: string; disabled?: boolean; subtle?: boolean; onPress: () => void }) {
+  function Big({ icon, label, sub, disabled, onPress }: { icon: IconName; label: string; sub?: string; disabled?: boolean; onPress: () => void }) {
     return (
-      <TouchableOpacity
-        style={[styles.big, subtle && styles.bigSubtle, disabled && styles.disabled]}
-        disabled={disabled}
-        onPress={onPress}>
-        <Text style={[styles.bigText, subtle && styles.bigTextSubtle]}>{label}</Text>
-        {!!sub && (
-          <Text style={styles.bigSub} numberOfLines={1}>
-            {sub}
-          </Text>
-        )}
+      <TouchableOpacity style={[styles.big, disabled && styles.disabled]} disabled={disabled} onPress={onPress} activeOpacity={0.8}>
+        <Icon name={icon} size={20} color="#fff" weight="bold" />
+        <View style={{ flexShrink: 1 }}>
+          <Text style={styles.bigText}>{label}</Text>
+          {!!sub && (
+            <Text style={styles.bigSub} numberOfLines={1}>
+              {sub}
+            </Text>
+          )}
+        </View>
       </TouchableOpacity>
     );
   }
 
-  function ActionRow({ icon, label, value, onPress }: { icon: string; label: string; value?: string; onPress: () => void }) {
+  function Quick({ icon, label, on, disabled, onPress }: { icon: IconName; label: string; on?: boolean; disabled?: boolean; onPress: () => void }) {
     return (
-      <TouchableOpacity style={styles.row} onPress={onPress}>
-        <Text style={styles.rowIcon}>{icon}</Text>
-        <Text style={styles.rowLabel}>{label}</Text>
-        {!!value && <Text style={styles.rowValue}>{value}</Text>}
-        <Text style={[styles.rowChevron, { color: p.textMuted }]}>›</Text>
+      <TouchableOpacity style={[styles.quickBtn, disabled && styles.disabled]} disabled={disabled} onPress={onPress} accessibilityLabel={label}>
+        <View style={[styles.quickIcon, on && { backgroundColor: p.accentSoft }]}>
+          <Icon name={icon} size={20} color={on ? p.accent : p.text} />
+        </View>
+        <Text style={[styles.quickLabel, on && { color: p.accent }]} numberOfLines={1}>
+          {label}
+        </Text>
       </TouchableOpacity>
     );
   }
 }
 
+const StyleFill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 };
+
 const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
-    hero: { width: '100%', justifyContent: 'flex-end', backgroundColor: p.tile },
-    heroImage: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-    heroShade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)' },
-    fade: { position: 'absolute', left: 0, right: 0, height: FADE_STEP, backgroundColor: p.bg },
-    heroBar: { position: 'absolute', left: 14, right: 14, flexDirection: 'row', justifyContent: 'space-between' },
-    heroBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+    hero: { width: '100%', justifyContent: 'flex-end', backgroundColor: p.elevated, overflow: 'hidden' },
+    heroBody: { flexDirection: 'row', alignItems: 'flex-end', gap: 16, paddingHorizontal: 18, paddingBottom: 8 },
+    posterShadow: { shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+    heroText: { flex: 1, gap: 4, paddingBottom: 4 },
+    facts: { color: p.textSoft, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    title: { color: p.text, fontSize: 27, lineHeight: 31, fontWeight: '800', letterSpacing: -0.6 },
+    genres: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
+    topBar: { position: 'absolute', left: 0, paddingHorizontal: 14, flexDirection: 'row', justifyContent: 'space-between' },
+    topRight: { flexDirection: 'row', gap: 10 },
+
+    ratings: { gap: 10, paddingHorizontal: 18, paddingTop: 14 },
+    tile: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: p.elevated,
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      minWidth: 108,
+    },
+    mineTile: { borderWidth: 1, borderColor: 'rgba(245,166,35,0.35)' },
+    simklMark: { width: 28, height: 28, borderRadius: 7 },
+    brand: { borderRadius: 5, paddingHorizontal: 5, paddingVertical: 4 },
+    brandDark: { color: '#000', fontWeight: '900', fontSize: 12 },
+    brandLight: { color: '#fff', fontWeight: '900', fontSize: 12 },
+    tileValue: { color: p.text, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    tileSub: { color: p.textSecondary, fontSize: 11, fontWeight: '600' },
+
+    note: { color: p.link, fontSize: 13, fontWeight: '600', paddingHorizontal: 18, paddingTop: 12 },
+    primaryWrap: { paddingHorizontal: 18, paddingTop: 16 },
+    big: {
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    heroBtnText: { color: '#fff', fontSize: 28, fontWeight: '500', marginTop: -4 },
-    heroBtnSmall: { color: '#fff', fontSize: 18, fontWeight: '700' },
-    heroText: { paddingHorizontal: 18, paddingBottom: 10, gap: 4 },
-    facts: { color: p.textSoft, fontSize: 15, fontWeight: '600' },
-    title: { color: p.text, fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
-
-    ratings: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 18,
-      paddingHorizontal: 18,
+      gap: 10,
+      backgroundColor: p.accent,
+      borderRadius: 16,
       paddingVertical: 14,
-      borderBottomWidth: 1,
-      borderBottomColor: p.separator,
+      paddingHorizontal: 16,
     },
-    rating: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    simklMark: { width: 34, height: 34, borderRadius: 7 },
-    brand: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 6 },
-    brandDark: { color: '#000', fontWeight: '900', fontSize: 13 },
-    brandLight: { color: '#fff', fontWeight: '900', fontSize: 13 },
-    ratingValue: { color: p.text, fontSize: 19, fontWeight: '800', fontVariant: ['tabular-nums'] },
-    ratingRank: { color: p.textSecondary, fontSize: 14, fontWeight: '700' },
-    ratingVotes: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
-    mine: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 6 },
-    mineStar: { color: p.rating, fontSize: 28 },
-    mineValue: { color: p.rating, fontSize: 30, fontWeight: '900' },
-    mineEmpty: { fontSize: 16, fontWeight: '700' },
-
-    note: { color: p.link, fontSize: 13, fontWeight: '600', paddingHorizontal: 18, paddingTop: 10 },
-    primaryWrap: { paddingHorizontal: 18, paddingTop: 14 },
-    big: { backgroundColor: p.accent, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
-    bigSubtle: { backgroundColor: p.card },
     bigText: { color: '#fff', fontSize: 17, fontWeight: '800' },
-    bigTextSubtle: { color: p.text },
-    bigSub: { color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 2, paddingHorizontal: 12 },
-    disabled: { opacity: 0.5 },
+    bigSub: { color: 'rgba(255,255,255,0.82)', fontSize: 13, marginTop: 1 },
+    disabled: { opacity: 0.45 },
 
-    rows: { marginTop: 14, borderTopWidth: 1, borderTopColor: p.separator },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 16,
-      paddingHorizontal: 18,
-      paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: p.separator,
-    },
-    rowIcon: { color: p.text, fontSize: 18, width: 24, textAlign: 'center' },
-    rowLabel: { flex: 1, color: p.text, fontSize: 17 },
-    rowValue: { color: p.textSecondary, fontSize: 14 },
-    rowChevron: { fontSize: 26, marginTop: -2 },
+    quick: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 16 },
+    quickBtn: { flex: 1, alignItems: 'center', gap: 6 },
+    quickIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
+    quickLabel: { color: p.textSoft, fontSize: 12, fontWeight: '600', maxWidth: 84 },
 
-    section: { paddingHorizontal: 18, paddingTop: 22, gap: 8 },
-    sectionLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 0.8 },
-    network: { color: p.link, fontSize: 18, fontWeight: '600' },
-    text: { color: p.textSoft, fontSize: 16, lineHeight: 23 },
-    genres: { color: p.text, fontSize: 15 },
-    small: { color: p.textSecondary, fontSize: 13 },
-    related: { gap: 12, paddingVertical: 4 },
-    relatedItem: { width: 100 },
-    relatedPoster: { width: 100, height: 147, borderRadius: 8, backgroundColor: p.tile },
-    relatedTitle: { color: p.text, fontSize: 13, marginTop: 5 },
+    card: { marginHorizontal: 18, marginTop: 20, backgroundColor: p.elevated, borderRadius: 16, padding: 14, gap: 10 },
+    cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    cardTitle: { flex: 1, color: p.text, fontSize: 17, fontWeight: '700' },
+    cardValue: { color: p.textSecondary, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    cardSub: { color: p.textSecondary, fontSize: 13 },
+    track: { height: 6, borderRadius: 3, backgroundColor: p.card, overflow: 'hidden' },
+    trackFill: { height: 6, borderRadius: 3, backgroundColor: p.accent },
 
-    remove: { marginTop: 28, alignSelf: 'center', padding: 10 },
-    removeText: { color: p.dangerText, fontSize: 15, fontWeight: '600' },
+    section: { paddingHorizontal: 18, paddingTop: 26, gap: 10 },
+    sectionLabel: { color: p.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+    text: { color: p.textSoft, fontSize: 15, lineHeight: 22 },
+    more: { color: p.link, fontSize: 15, fontWeight: '600', marginTop: -4 },
+    factsGrid: { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: p.elevated, borderRadius: 16, paddingVertical: 6 },
+    fact: { width: '50%', paddingHorizontal: 14, paddingVertical: 8, gap: 2 },
+    factKey: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
+    factValue: { color: p.text, fontSize: 15, fontWeight: '600' },
 
-    sessionRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: p.separator, gap: 2 },
-    sessionTitle: { color: p.text, fontSize: 16, fontWeight: '800' },
-    sessionFacts: { color: p.textSecondary, fontSize: 13 },
+    group: { backgroundColor: p.elevated, borderRadius: 16, overflow: 'hidden' },
+    groupRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
+    groupSep: { borderTopWidth: 1, borderTopColor: p.separator },
+    groupTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
+    groupSub: { color: p.textSecondary, fontSize: 12, marginTop: 1 },
+    badge: { minWidth: 40, height: 28, borderRadius: 14, paddingHorizontal: 8, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    badgeText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+
+    bleed: { marginHorizontal: -18 },
+    related: { gap: 12, paddingHorizontal: 18 },
+    relatedItem: { width: 108 },
+    relatedTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
+
+    footerLinks: { flexDirection: 'row', justifyContent: 'center', gap: 22, marginTop: 30 },
+    linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8 },
+    linkText: { color: p.link, fontSize: 14, fontWeight: '600' },
   });

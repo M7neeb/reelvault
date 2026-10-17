@@ -5,12 +5,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
-import { Image } from 'expo-image';
-
+import Icon from '@/features/vault/ui/Icon';
 import { SheetFrame, Section } from '@/features/vault/ui/sheets';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
-import { countdown, myCalendar, posterUrl, SIMKL_TYPES } from '../logic';
+import { countdown, myCalendar, SIMKL_TYPES } from '../logic';
+import Poster from './Poster';
 import type { CatalogTitle, SimklActions, SimklItem, SimklType } from './types';
 
 const dayLabel = (iso: string) => {
@@ -40,6 +40,7 @@ export function CalendarModal({
   const p = usePalette();
   const [rows, setRows] = useState<CatalogTitle[] | null>(null);
   const [error, setError] = useState('');
+  const [exported, setExported] = useState('');
 
   useEffect(() => {
     actions
@@ -79,7 +80,7 @@ export function CalendarModal({
           <Section key={day} label={day}>
             {list.map((r) => (
               <TouchableOpacity key={`${r.simklId}-${r.episodeLabel}`} style={styles.row} onPress={() => onOpen(r)}>
-                <Image source={{ uri: posterUrl(r.poster, '_cm') }} style={styles.thumb} contentFit="cover" />
+                <Poster path={r.poster} title={r.title} width={46} height={68} radius={7} size="_cm" />
                 <View style={styles.rowText}>
                   <Text style={styles.title} numberOfLines={1}>
                     {r.title}
@@ -89,12 +90,28 @@ export function CalendarModal({
                     {r.date ? `  ${new Date(r.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : ''}
                   </Text>
                 </View>
-                {!!countdown(r.date ?? null, Date.now()) && <Text style={styles.countdown}>{countdown(r.date ?? null, Date.now())}</Text>}
+                {!!countdown(r.date ?? null, Date.now()) && (
+                  <View style={styles.pill}>
+                    <Text style={styles.countdown}>{countdown(r.date ?? null, Date.now())}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             ))}
           </Section>
         ))
       )}
+      <TouchableOpacity
+        style={styles.export}
+        onPress={() =>
+          actions
+            .exportCalendar()
+            .then((n) => setExported(n ? `${n} dates ready - tap Add All` : 'Nothing to add'))
+            .catch((e) => setExported(String(e?.message ?? e)))
+        }>
+        <Icon name="calendar" size={16} color={p.accent} />
+        <Text style={styles.exportText}>Add to the Calendar app</Text>
+      </TouchableOpacity>
+      {!!exported && <Text style={styles.hint}>{exported}</Text>}
       <Text style={styles.hint}>Air dates from the Simkl calendar.</Text>
     </SheetFrame>
   );
@@ -105,9 +122,11 @@ const makeStyles = (p: Palette) =>
     body: { color: p.textSoft, fontSize: 14 },
     hint: { color: p.textSecondary, fontSize: 12 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
-    thumb: { width: 42, height: 62, borderRadius: 5, backgroundColor: p.tile },
     rowText: { flex: 1 },
     title: { color: p.text, fontSize: 15, fontWeight: '600' },
     sub: { color: p.textSecondary, fontSize: 13 },
-    countdown: { color: p.rating, fontSize: 13, fontWeight: '700' },
+    pill: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+    countdown: { color: p.rating, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    export: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.card, borderRadius: 12, paddingVertical: 12 },
+    exportText: { color: p.accent, fontSize: 15, fontWeight: '700' },
   });

@@ -144,6 +144,7 @@ export async function metaMap(): Promise<Map<number, Meta>> {
     country: string | null;
     language: string | null;
     runtime: number | null;
+    fanart: string | null;
   }>('SELECT * FROM simkl_meta;');
   const out = new Map<number, Meta>();
   for (const r of rows) {
@@ -161,7 +162,7 @@ export async function metaMap(): Promise<Map<number, Meta>> {
 export async function saveMeta(id: number, m: Meta): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    'INSERT OR REPLACE INTO simkl_meta (simkl_id, genres, network, country, language, runtime, fetched_at) VALUES (?,?,?,?,?,?,?);',
-    [id, JSON.stringify(m.genres), m.network, m.country, m.language, m.runtime, Date.now()]
+    'INSERT OR REPLACE INTO simkl_meta (simkl_id, genres, network, country, language, runtime, fanart, fetched_at) VALUES (?,?,?,?,?,?,?,?);',
+    [id, JSON.stringify(m.genres), m.network, m.country, m.language, m.runtime, m.fanart ?? null, Date.now()]
   );
 }

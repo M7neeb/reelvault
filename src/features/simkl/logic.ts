@@ -63,6 +63,8 @@ export type SimklItem = {
   malRating: number | null;
   /** Simkl catalog rank (1 = best). */
   rank: number | null;
+  /** The wide picture, once the title's detail page has been loaded. */
+  fanart?: string | null;
 };
 
 export type WatchedEpisode = { season: number; episode: number; watchedAt: string | null };
