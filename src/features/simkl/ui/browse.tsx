@@ -1,5 +1,5 @@
 /**
- * Calendar (what airs next for titles in your library) and Stats.
+ * Calendar: what airs next for titles in your library, with countdowns.
  * Presentational only (see simkl/ui/types.ts).
  */
 
@@ -10,7 +10,7 @@ import { Image } from 'expo-image';
 import { SheetFrame, Section } from '@/features/vault/ui/sheets';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
-import { countdown, myCalendar, posterUrl, SIMKL_TYPES, STATUS_LABELS, statsFor, watchHeatmap, type SimklStatus } from '../logic';
+import { countdown, myCalendar, posterUrl, SIMKL_TYPES } from '../logic';
 import type { CatalogTitle, SimklActions, SimklItem, SimklType } from './types';
 
 const dayLabel = (iso: string) => {
@@ -100,93 +100,6 @@ export function CalendarModal({
   );
 }
 
-const fmtMinutes = (m: number) => {
-  const days = Math.floor(m / 1440);
-  const hours = Math.floor((m % 1440) / 60);
-  return days ? `${days} d ${hours} h` : `${hours} h ${m % 60} min`;
-};
-
-export function StatsModal({ items, actions, onClose }: { items: SimklItem[]; actions: SimklActions; onClose: () => void }) {
-  const styles = useStyles(makeStyles);
-  const p = usePalette();
-  const all = useMemo(() => statsFor(items), [items]);
-  const [times, setTimes] = useState<(string | null)[] | null>(null);
-  useEffect(() => {
-    actions
-      .watchTimes()
-      .then(setTimes)
-      .catch(() => setTimes([]));
-  }, [actions]);
-  const heat = useMemo(() => (times ? watchHeatmap(times, Date.now(), 18) : null), [times]);
-  const shade = (n: number) => {
-    if (!heat || n === 0) return p.card;
-    const level = Math.min(4, Math.ceil((n / Math.max(1, heat.max)) * 4));
-    return ['', 'rgba(245,166,35,0.3)', 'rgba(245,166,35,0.5)', 'rgba(245,166,35,0.75)', p.rating][level];
-  };
-  return (
-    <SheetFrame title="Simkl Stats" onClose={onClose}>
-      <View style={styles.tiles}>
-        <Tile label="titles" value={String(all.total)} />
-        <Tile label="episodes watched" value={String(all.episodesWatched)} />
-        <Tile label="time watched" value={fmtMinutes(all.minutesWatched)} />
-        <Tile label="average rating" value={all.averageRating === null ? '–' : `${all.averageRating}/10`} />
-      </View>
-      <Section label="Last 18 weeks">
-        {heat ? (
-          <>
-            <View style={styles.heat}>
-              {heat.columns.map((col, i) => (
-                <View key={i} style={styles.heatCol}>
-                  {col.map((d) => (
-                    <View key={d.day} style={[styles.heatCell, { backgroundColor: d.future ? 'transparent' : shade(d.count) }]} />
-                  ))}
-                </View>
-              ))}
-            </View>
-            <Text style={styles.hint}>
-              Episodes and movies you marked, per day · streak {heat.current} {heat.current === 1 ? 'day' : 'days'} · longest{' '}
-              {heat.longest}
-            </Text>
-          </>
-        ) : (
-          <ActivityIndicator color={p.textSecondary} />
-        )}
-      </Section>
-      {SIMKL_TYPES.map((t) => {
-        const s = statsFor(items.filter((i) => i.type === t.key));
-        return (
-          <Section key={t.key} label={`${t.plural} · ${s.total}`}>
-            {(Object.keys(s.byStatus) as SimklStatus[])
-              .filter((k) => s.byStatus[k] > 0)
-              .map((k) => (
-                <View key={k} style={styles.statRow}>
-                  <Text style={styles.body}>{STATUS_LABELS[k]}</Text>
-                  <Text style={styles.statValue}>{s.byStatus[k]}</Text>
-                </View>
-              ))}
-            {s.total > 0 && (
-              <Text style={styles.hint}>
-                {fmtMinutes(s.minutesWatched)} watched{s.averageRating !== null ? ` · average ${s.averageRating}/10` : ''}
-              </Text>
-            )}
-          </Section>
-        );
-      })}
-      <Text style={styles.hint}>Counted from your library on this phone; time uses each title's runtime.</Text>
-    </SheetFrame>
-  );
-}
-
-function Tile({ label, value }: { label: string; value: string }) {
-  const styles = useStyles(makeStyles);
-  return (
-    <View style={styles.tile}>
-      <Text style={styles.tileValue}>{value}</Text>
-      <Text style={styles.tileLabel}>{label}</Text>
-    </View>
-  );
-}
-
 const makeStyles = (p: Palette) =>
   sheet({
     body: { color: p.textSoft, fontSize: 14 },
@@ -196,14 +109,5 @@ const makeStyles = (p: Palette) =>
     rowText: { flex: 1 },
     title: { color: p.text, fontSize: 15, fontWeight: '600' },
     sub: { color: p.textSecondary, fontSize: 13 },
-    tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    tile: { backgroundColor: p.card, borderRadius: 12, padding: 12, width: '47%' },
-    tileValue: { color: p.text, fontSize: 20, fontWeight: '800' },
-    tileLabel: { color: p.textSecondary, fontSize: 12 },
-    statRow: { flexDirection: 'row', justifyContent: 'space-between' },
-    statValue: { color: p.text, fontWeight: '700' },
     countdown: { color: p.rating, fontSize: 13, fontWeight: '700' },
-    heat: { flexDirection: 'row', gap: 3 },
-    heatCol: { gap: 3 },
-    heatCell: { width: 14, height: 14, borderRadius: 3 },
   });

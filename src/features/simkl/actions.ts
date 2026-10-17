@@ -16,7 +16,21 @@ import {
   type SimklStatus,
   type SimklType,
 } from './logic';
-import { cacheGet, cachePut, deleteSimklItems, markEpisodesLocal, patchSimklItem, upsertSimklItems } from './repo';
+import { cacheGet, cachePut, deleteSimklItems, listSimklItems, markEpisodesLocal, patchSimklItem, upsertSimklItems } from './repo';
+import {
+  addPlays,
+  createSession,
+  deleteSession,
+  finishSession,
+  metaMap,
+  removeLatestPlays,
+  saveMeta,
+  sessionsFor,
+  setExactRating,
+  setSessionRemote,
+} from './history';
+import { nextSessionNumber, normaliseExact, toSimklRating, type Session } from './insights';
+import { getSetting, setSetting } from '@/features/vault/library';
 
 const HOUR = 3600 * 1000;
 
@@ -32,8 +46,13 @@ export async function setStatus(item: Pick<SimklItem, 'simklId' | 'type'>, statu
   await patchSimklItem(item.simklId, { status });
 }
 
-/** null clears the rating. */
-export async function setRating(item: Pick<SimklItem, 'simklId' | 'type'>, rating: number | null): Promise<void> {
+/**
+ * null clears the rating. Exact ratings (9.7) are kept here; Simkl only takes
+ * whole numbers, so it gets the rounded one.
+ */
+export async function setRating(item: Pick<SimklItem, 'simklId' | 'type'>, value: number | null): Promise<void> {
+  const exact = value === null ? null : normaliseExact(value);
+  const rating = exact === null ? null : toSimklRating(exact);
   if (rating === null) {
     await simklRequest('/sync/ratings/remove', {
       method: 'POST',
@@ -47,6 +66,7 @@ export async function setRating(item: Pick<SimklItem, 'simklId' | 'type'>, ratin
       body: { [bucket(item.type)]: [{ rating, ids: { simkl: item.simklId } }] },
     });
   }
+  await setExactRating(item.simklId, exact);
   await patchSimklItem(item.simklId, { rating, ratedAt: rating === null ? null : new Date().toISOString() });
 }
 
@@ -148,6 +168,124 @@ export async function removeFromLibrary(item: Pick<SimklItem, 'simklId' | 'type'
   await deleteSimklItems([item.simklId]);
 }
 
+/* ---------------------------------------------------------------- rewatches */
+
+const PLAN_KEY = 'simkl.plan';
+const REWATCH_SYNC_KEY = 'simkl.rewatchesOnSimkl';
+
+export type SimklPlan = 'free' | 'pro' | 'vip' | 'unknown';
+
+/** The account plan, read from /users/settings once and cached (Simkl's advice). */
+export async function cachedPlan(): Promise<SimklPlan> {
+  const v = await getSetting(PLAN_KEY);
+  return v === 'free' || v === 'pro' || v === 'vip' ? v : 'unknown';
+}
+
+export async function refreshPlan(): Promise<SimklPlan> {
+  const s = await simklRequest<any>('/users/settings', { auth: true });
+  const type = s?.account?.type;
+  const plan: SimklPlan = type === 'free' || type === 'pro' || type === 'vip' ? type : 'unknown';
+  await setSetting(PLAN_KEY, plan);
+  return plan;
+}
+
+/** "Also save rewatches on Simkl" - off by default, PRO / VIP only (Simkl's rules). */
+export async function rewatchesOnSimkl(): Promise<boolean> {
+  return (await getSetting(REWATCH_SYNC_KEY)) === '1' && ['pro', 'vip'].includes(await cachedPlan());
+}
+
+export async function setRewatchesOnSimkl(on: boolean): Promise<{ ok: boolean; plan: SimklPlan }> {
+  if (!on) {
+    await setSetting(REWATCH_SYNC_KEY, '0');
+    return { ok: true, plan: await cachedPlan() };
+  }
+  const plan = await refreshPlan().catch(() => cachedPlan());
+  if (plan !== 'pro' && plan !== 'vip') return { ok: false, plan };
+  await setSetting(REWATCH_SYNC_KEY, '1');
+  return { ok: true, plan };
+}
+
+/** Finds `rewatch_id` / `rewatch_status` anywhere in a history response. */
+function rewatchResult(json: any): { id: number | null; status: string | null } {
+  let id: number | null = null;
+  let status: string | null = null;
+  const walk = (v: any) => {
+    if (!v || typeof v !== 'object') return;
+    if (typeof v.rewatch_id === 'number' && id === null) id = v.rewatch_id;
+    if (typeof v.rewatch_status === 'string' && status === null) status = v.rewatch_status;
+    for (const k of Object.keys(v)) walk(v[k]);
+  };
+  walk(json);
+  return { id, status };
+}
+
+/** The Simkl half of a rewatch: only with the switch on, pinned to the session's rewatch_id. */
+async function sendRewatch(item: Pick<SimklItem, 'simklId' | 'type'>, body: any, session: Session | null): Promise<boolean> {
+  if (!(await rewatchesOnSimkl())) return false;
+  try {
+    const key = bucket(item.type);
+    if (session?.remoteId && body[key]?.[0]) body[key][0].rewatch_id = session.remoteId;
+    const res = await simklRequest('/sync/history', { method: 'POST', auth: true, query: { allow_rewatch: 'yes' }, body });
+    const r = rewatchResult(res);
+    if (session && r.id && !session.remoteId) await setSessionRemote(session.id, r.id);
+    // rewatch_id alone is not success (Simkl's docs): the status says if it was kept.
+    return r.status === 'active' || r.status === 'completed';
+  } catch (e) {
+    console.log(`[SIMKL] rewatch not saved on Simkl: ${String(e)}`);
+    return false;
+  }
+}
+
+/** Start rewatching a whole show / anime: "Rewatch #2". */
+export async function startRewatch(item: SimklItem): Promise<Session> {
+  const sessions = await sessionsFor(item.simklId);
+  const open = sessions.find((s) => s.finishedAt === null);
+  if (open) await finishSession(open.id, true);
+  const number = nextSessionNumber(sessions);
+  const id = await createSession(item.simklId, number);
+  const session = (await sessionsFor(item.simklId)).find((s) => s.id === id)!;
+  await sendRewatch(item, { [bucket(item.type)]: [{ ids: { simkl: item.simklId }, is_rewatch: true, rewatch_status: 'active' }] }, session);
+  return (await sessionsFor(item.simklId)).find((s) => s.id === id)!;
+}
+
+export async function endRewatch(item: SimklItem, session: Session, finished: boolean): Promise<void> {
+  await finishSession(session.id, finished);
+  if (session.remoteId) {
+    await sendRewatch(
+      item,
+      { [bucket(item.type)]: [{ ids: { simkl: item.simklId }, rewatch_status: finished ? 'closed' : 'active' }] },
+      session
+    );
+  }
+}
+
+/** Delete a rewatch from ReelVault (Simkl keeps its own copy, if it had one). */
+export const deleteRewatch = (session: Session) => deleteSession(session.id);
+
+/**
+ * Watched again: episodes inside a session, or one-off rewatches of single
+ * episodes / a movie (season 0, episode 0) outside one.
+ */
+export async function logRewatch(
+  item: SimklItem,
+  episodes: { season: number; episode: number }[],
+  session: Session | null,
+  watched = true
+): Promise<void> {
+  if (!watched) {
+    await removeLatestPlays(item.simklId, episodes, session?.id ?? null);
+    return;
+  }
+  const now = new Date().toISOString();
+  const body =
+    item.type === 'movie'
+      ? { movies: [{ ids: { simkl: item.simklId }, watched_at: now }] }
+      : episodeBody(item, episodes, now);
+  const onSimkl = await sendRewatch(item, body, session);
+  await addPlays(item.simklId, item.type === 'movie' ? [{ season: 0, episode: 0 }] : episodes, session?.id ?? null, onSimkl);
+  await patchSimklItem(item.simklId, { lastWatchedAt: now });
+}
+
 /* ------------------------------------------------------------------ catalog */
 
 async function cached<T>(key: string, maxAgeMs: number, load: () => Promise<T>): Promise<T> {
@@ -191,6 +329,13 @@ const detailPath = (type: SimklType) => (type === 'movie' ? 'movies' : type === 
 export function loadDetail(type: SimklType, id: number): Promise<SimklDetail> {
   return cached(`detail2:${type}:${id}`, 24 * HOUR, async () => {
     const d = await simklRequest<any>(`/${detailPath(type)}/${id}`);
+    await saveMeta(id, {
+      genres: Array.isArray(d?.genres) ? d.genres : [],
+      network: typeof d?.network === 'string' ? d.network : null,
+      country: typeof d?.country === 'string' ? d.country.toUpperCase() : null,
+      language: typeof d?.original_language === 'string' ? d.original_language.toUpperCase() : null,
+      runtime: typeof d?.runtime === 'number' ? d.runtime : null,
+    }).catch(() => undefined);
     return {
       overview: d?.overview ?? null,
       genres: Array.isArray(d?.genres) ? d.genres : [],
@@ -254,4 +399,25 @@ export function loadCalendar(type: SimklType): Promise<CatalogTitle[]> {
   return cached(`calendar:${file}`, 6 * HOUR, async () =>
     parseCatalog(await simklRequest(`https://data.simkl.in/calendar/v2/${file}.json`, { absolute: true }), type)
   );
+}
+
+/**
+ * Stats need genres and networks, which only detail pages have. Fetch the
+ * missing ones one after another (detail pages are cached by Simkl's CDN), only
+ * when you ask for it on the Stats screen.
+ */
+export async function fillMissingMeta(onProgress: (done: number, total: number) => void, limit = 400): Promise<number> {
+  const have = await metaMap();
+  const missing = (await listSimklItems()).filter((i) => !have.has(i.simklId)).slice(0, limit);
+  let done = 0;
+  for (const i of missing) {
+    try {
+      await loadDetail(i.type, i.simklId);
+    } catch (e) {
+      console.log(`[SIMKL] detail ${i.simklId} failed: ${String(e)}`);
+    }
+    done++;
+    onProgress(done, missing.length);
+  }
+  return done;
 }

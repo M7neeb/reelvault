@@ -39,6 +39,15 @@ jobs:
       - name: Generate the Xcode project
         run: npx expo prebuild --platform ios --clean
 
+      # Only local notifications are used. A free Apple ID cannot sign the push
+      # entitlement that expo-notifications adds, so take it out again.
+      - name: Remove push entitlement
+        run: |
+          for f in ios/*/*.entitlements; do
+            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" 2>/dev/null || true
+            echo "$f:"; cat "$f"
+          done
+
       - name: Build (no signing)
         run: |
           set -o pipefail

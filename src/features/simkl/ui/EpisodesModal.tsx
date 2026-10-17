@@ -1,6 +1,9 @@
 /**
  * "Mark specific episodes": every season with checkmarks, mark a season,
- * unmark a season. Presentational only (see simkl/ui/types.ts).
+ * unmark a season. Two modes:
+ * - history: your Simkl watch history; hold an episode to log watching it again;
+ * - rewatch: one rewatch session ("Rewatch #2"), with its own checkmarks.
+ * Presentational only (see simkl/ui/types.ts).
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -10,17 +13,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { confirmAction } from '@/features/vault/ui/confirm';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
+import { watchCounts } from '../insights';
 import { episodeCode, groupBySeason, parseEpisodeCode, watchedKey } from '../logic';
 import { fmtDay } from './time';
-import type { CatalogEpisode, SimklActions, SimklItem } from './types';
+import type { CatalogEpisode, Play, Session, SimklActions, SimklItem } from './types';
 
 export default function EpisodesModal({
   item,
   actions,
+  session = null,
+  onFinishSession,
   onClose,
 }: {
   item: SimklItem;
   actions: SimklActions;
+  /** Set = rewatch mode for this session. */
+  session?: Session | null;
+  onFinishSession?: () => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -30,6 +39,8 @@ export default function EpisodesModal({
   const [watched, setWatched] = useState<Set<string>>(new Set());
   const [openSeason, setOpenSeason] = useState<number | null>(null);
   const [note, setNote] = useState('');
+  const [plays, setPlays] = useState<Play[]>([]);
+  const rewatch = session !== null;
 
   useEffect(() => {
     actions
@@ -43,7 +54,34 @@ export default function EpisodesModal({
       .loadWatched(item.simklId)
       .then((rows) => setWatched(new Set(rows.map((r) => watchedKey(r.season, r.episode)))))
       .catch(() => undefined);
+    actions
+      .loadPlays(item.simklId)
+      .then(setPlays)
+      .catch(() => undefined);
   }, [actions, item.simklId, item.type]);
+
+  const counts = useMemo(() => watchCounts(watched, plays), [watched, plays]);
+  const inSession = useMemo(
+    () => new Set(plays.filter((p) => session && p.sessionId === session.id).map((p) => watchedKey(p.season, p.episode))),
+    [plays, session]
+  );
+  const checked = rewatch ? inSession : watched;
+
+  /** Rewatch mode: tick / untick inside the session. History mode: hold = watched again. */
+  function rewatchToggle(eps: { season: number; episode: number }[], on: boolean, inThisSession: Session | null) {
+    const stamp = new Date().toISOString();
+    const before = plays;
+    setPlays(
+      on
+        ? [...plays, ...eps.map((e, n) => ({ id: -Date.now() - n, simklId: item.simklId, season: e.season, episode: e.episode, watchedAt: stamp, sessionId: inThisSession?.id ?? null }))]
+        : plays.filter((p) => !(p.sessionId === (inThisSession?.id ?? null) && eps.some((e) => e.season === p.season && e.episode === p.episode)))
+    );
+    setNote(on && !inThisSession ? `Logged ${eps.length === 1 ? 'a rewatch' : `${eps.length} rewatches`}` : '');
+    actions.logRewatch(item, eps, inThisSession, on).catch((e) => {
+      setPlays(before);
+      setNote(`Not saved: ${e?.message ?? String(e)}`);
+    });
+  }
 
   const seasons = useMemo(() => groupBySeason(episodes ?? []), [episodes]);
   const next = parseEpisodeCode(item.nextToWatch);
@@ -51,6 +89,12 @@ export default function EpisodesModal({
 
   function toggle(eps: { season: number; episode: number }[], on: boolean) {
     if (!eps.length) return;
+    if (rewatch) {
+      // Only the ones that change, so "Mark all aired" does not log doubles.
+      const change = eps.filter((e) => inSession.has(watchedKey(e.season, e.episode)) !== on);
+      if (change.length) rewatchToggle(change, on, session);
+      return;
+    }
     const before = watched;
     const after = new Set(watched);
     for (const e of eps) {
@@ -78,11 +122,17 @@ export default function EpisodesModal({
               {item.title}
             </Text>
             <Text style={styles.sub}>
-              {watched.size} of {item.totalEpisodes || episodes?.length || '?'} watched
+              {rewatch ? `Rewatch #${session!.number} · ${inSession.size} of ${item.totalEpisodes || episodes?.length || '?'}` : `${watched.size} of ${item.totalEpisodes || episodes?.length || '?'} watched`}
             </Text>
           </View>
+          {rewatch && onFinishSession && (
+            <TouchableOpacity style={styles.finish} onPress={onFinishSession}>
+              <Text style={styles.finishText}>Finish</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {!!note && <Text style={styles.note}>{note}</Text>}
+        {!rewatch && <Text style={styles.tip}>Hold an episode you watched to log watching it again.</Text>}
         <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
           {episodes === null ? (
             <ActivityIndicator color={p.textSecondary} />
@@ -91,7 +141,7 @@ export default function EpisodesModal({
           ) : (
             seasons.map((s) => {
               const aired = s.episodes.filter((e) => e.aired);
-              const done = s.episodes.filter((e) => watched.has(watchedKey(e.season, e.episode))).length;
+              const done = s.episodes.filter((e) => checked.has(watchedKey(e.season, e.episode))).length;
               const isOpen = shownSeason === s.season;
               return (
                 <View key={s.season} style={styles.season}>
@@ -126,14 +176,18 @@ export default function EpisodesModal({
                         )}
                       </View>
                       {s.episodes.map((e) => {
-                        const on = watched.has(watchedKey(e.season, e.episode));
-                        const isNext = next?.season === e.season && next?.episode === e.episode;
+                        const on = checked.has(watchedKey(e.season, e.episode));
+                        const isNext = !rewatch && next?.season === e.season && next?.episode === e.episode;
+                        const times = counts.get(watchedKey(e.season, e.episode)) ?? 0;
                         return (
                           <TouchableOpacity
                             key={`${e.season}-${e.episode}`}
                             style={[styles.episode, isNext && styles.episodeNext]}
                             disabled={!e.aired && !on}
-                            onPress={() => toggle([e], !on)}>
+                            onPress={() => toggle([e], !on)}
+                            onLongPress={() => {
+                              if (!rewatch && watched.has(watchedKey(e.season, e.episode))) rewatchToggle([e], true, null);
+                            }}>
                             <View style={[styles.check, on && styles.checkOn]}>{on && <Text style={styles.checkMark}>✓</Text>}</View>
                             <View style={styles.episodeText}>
                               <Text style={[styles.episodeTitle, !e.aired && styles.unaired]} numberOfLines={1}>
@@ -148,6 +202,11 @@ export default function EpisodesModal({
                                 </Text>
                               )}
                             </View>
+                            {times > 1 && (
+                              <View style={styles.times}>
+                                <Text style={styles.timesText}>×{times}</Text>
+                              </View>
+                            )}
                           </TouchableOpacity>
                         );
                       })}
@@ -172,7 +231,12 @@ const makeStyles = (p: Palette) =>
     headerText: { flex: 1 },
     title: { color: p.text, fontSize: 19, fontWeight: '800' },
     sub: { color: p.textSecondary, fontSize: 13 },
-    note: { color: p.dangerText, fontSize: 13, paddingHorizontal: 16 },
+    note: { color: p.link, fontSize: 13, fontWeight: '600', paddingHorizontal: 16 },
+    tip: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 16 },
+    finish: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+    finishText: { color: '#fff', fontWeight: '800' },
+    times: { backgroundColor: p.card, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+    timesText: { color: p.rating, fontSize: 12, fontWeight: '800' },
     body: { padding: 14, gap: 10 },
     empty: { color: p.textSecondary, textAlign: 'center', marginTop: 30 },
     season: { backgroundColor: p.panel, borderRadius: 14, paddingHorizontal: 14, paddingBottom: 6 },

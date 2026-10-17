@@ -7,7 +7,7 @@
  * Presentational only (see simkl/ui/types.ts).
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
@@ -18,7 +18,9 @@ import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/
 
 import { episodesLeft, filterItems, posterUrl, SIMKL_TYPES, sortItems, sortsFor, STATUS_LABELS, statusesFor, type SimklSort } from '../logic';
 import { AccountSheet } from './AccountSheet';
-import { CalendarModal, StatsModal } from './browse';
+import { fmtRating } from '../insights';
+import { CalendarModal } from './browse';
+import InsightsModal from './InsightsModal';
 import { ConnectCard } from './ConnectCard';
 import DetailModal from './DetailModal';
 import DiscoverModal from './DiscoverModal';
@@ -73,7 +75,9 @@ export default function SimklScreen(props: SimklScreenProps) {
   });
   const [discover, setDiscover] = useState(dev?.discoverOpen ?? false);
   const [calendar, setCalendar] = useState(dev?.calendarOpen ?? false);
-  const [stats, setStats] = useState(dev?.statsOpen ?? false);
+  const [stats, setStats] = useState<null | 'overview' | 'review'>(
+    dev?.statsOpen ? 'overview' : dev?.insightsTab ?? null
+  );
   const [account, setAccount] = useState(dev?.accountOpen ?? false);
 
   const filter = statusBy[category];
@@ -92,6 +96,15 @@ export default function SimklScreen(props: SimklScreenProps) {
   const library = useMemo(() => new Set(items.map((i) => i.simklId)), [items]);
   const openItem = open ? (items.find((i) => i.simklId === open.simklId) ?? null) : null;
 
+  // A tapped notification: open that title once it is in the list.
+  useEffect(() => {
+    const req = props.openRequest;
+    if (!req || req.type !== category) return;
+    const it = items.find((i) => i.simklId === req.simklId);
+    if (it) setOpen(asTitle(it));
+    props.onOpenHandled?.();
+  }, [props.openRequest, category, items]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const cols = 3;
   const posterW = Math.floor((width - SIDE * 2 - GAP * (cols - 1)) / cols);
   const posterH = Math.round(posterW * 1.47);
@@ -106,6 +119,7 @@ export default function SimklScreen(props: SimklScreenProps) {
           <View style={styles.buttons}>
             <Round label="⌕" onPress={() => setDiscover(true)} hint="Search Simkl and trending" />
             {category !== 'movie' && <Round label="◷" onPress={() => setCalendar(true)} hint="Upcoming episodes" />}
+            <Round label="Σ" onPress={() => setStats('overview')} hint="Stats and review" />
             <Round label="⋯" onPress={() => setAccount(true)} hint="Simkl account, stats and export" />
           </View>
         )}
@@ -235,6 +249,8 @@ export default function SimklScreen(props: SimklScreenProps) {
           title={open}
           actions={actions}
           initialEpisodesOpen={dev?.episodesOpen}
+          initialRewatchOpen={dev?.rewatchOpen}
+          initialRatingOpen={dev?.ratingOpen}
           onOpen={setOpen}
           onClose={() => setOpen(null)}
         />
@@ -243,7 +259,7 @@ export default function SimklScreen(props: SimklScreenProps) {
         <DiscoverModal type={category} library={library} actions={actions} onOpen={setOpen} onClose={() => setDiscover(false)} />
       )}
       {calendar && <CalendarModal type={category} items={ofType} actions={actions} onOpen={setOpen} onClose={() => setCalendar(false)} />}
-      {stats && <StatsModal items={items} actions={actions} onClose={() => setStats(false)} />}
+      {stats && <InsightsModal items={items} actions={actions} initialTab={stats} onClose={() => setStats(null)} />}
       {account && (
         <AccountSheet
           lastSyncAt={props.lastSyncAt}
@@ -252,7 +268,11 @@ export default function SimklScreen(props: SimklScreenProps) {
           actions={actions}
           onStats={() => {
             setAccount(false);
-            setStats(true);
+            setStats('overview');
+          }}
+          onReview={() => {
+            setAccount(false);
+            setStats('review');
           }}
           onClose={() => setAccount(false)}
         />
@@ -326,7 +346,7 @@ function GridPoster({ item, width, height, onPress }: { item: SimklItem; width: 
         <Image source={{ uri: posterUrl(item.poster) }} style={{ width, height }} contentFit="cover" transition={150} />
         {item.rating !== null && (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>★ {item.rating}</Text>
+            <Text style={styles.badgeText}>★ {fmtRating(item.rating)}</Text>
           </View>
         )}
         {item.imdbRating !== null && (

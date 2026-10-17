@@ -8,6 +8,8 @@ import { Image } from 'expo-image';
 
 import { sheet, useStyles, type Palette } from '@/features/vault/ui/theme';
 
+import { fmtRating } from '../insights';
+
 export const SIMKL_ICON = 'https://us.simkl.in/img_favicon/v2/favicon-192x192.png';
 export const IMDB_YELLOW = '#F5C518';
 export const MAL_BLUE = '#2E51A2';
@@ -53,7 +55,7 @@ export function RatingsLine({
       {mine !== null && (
         <View style={styles.pair}>
           <Text style={styles.star}>★</Text>
-          <Text style={styles.mine}>{mine}</Text>
+          <Text style={styles.mine}>{fmtRating(mine)}</Text>
         </View>
       )}
     </View>

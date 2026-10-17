@@ -4,7 +4,9 @@
  * browser preview (`/preview?cat=shows`) and on the phone.
  */
 
-import type { Timeframe } from '../actions';
+import type { SimklPlan, Timeframe } from '../actions';
+import type { Meta, Play, Session, WatchEvent } from '../insights';
+import type { ReminderSettings } from '../reminders';
 import type {
   CatalogEpisode,
   CatalogTitle,
@@ -14,7 +16,21 @@ import type {
   WatchedEpisode,
 } from '../logic';
 
-export type { CatalogEpisode, CatalogTitle, SimklItem, SimklStatus, SimklType, Timeframe, WatchedEpisode };
+export type {
+  CatalogEpisode,
+  CatalogTitle,
+  Meta,
+  Play,
+  ReminderSettings,
+  Session,
+  SimklItem,
+  SimklPlan,
+  SimklStatus,
+  SimklType,
+  Timeframe,
+  WatchedEpisode,
+  WatchEvent,
+};
 
 export type Category = 'videos' | 'movie' | 'show' | 'anime';
 
@@ -68,6 +84,23 @@ export type SimklActions = {
   calendar: (type: SimklType) => Promise<CatalogTitle[]>;
   /** Every recorded watch time, for the Stats heatmap. */
   watchTimes: () => Promise<(string | null)[]>;
+  /** Every watch with its runtime, plus genres / networks, for Stats and the review. */
+  loadInsights: () => Promise<{ events: WatchEvent[]; meta: Map<number, Meta> }>;
+  /** Fetch genres / networks for titles that have none yet (one after another). */
+  fillMeta: (onProgress: (done: number, total: number) => void) => Promise<number>;
+  /** Rewatches, logged in ReelVault (and on Simkl too for PRO / VIP when switched on). */
+  loadSessions: (id: number) => Promise<Session[]>;
+  loadPlays: (id: number) => Promise<Play[]>;
+  startRewatch: (item: SimklItem) => Promise<Session>;
+  endRewatch: (item: SimklItem, session: Session, finished: boolean) => Promise<void>;
+  deleteRewatch: (session: Session) => Promise<void>;
+  /** watched=false undoes the latest one. Movies ignore `episodes`. */
+  logRewatch: (item: SimklItem, episodes: { season: number; episode: number }[], session: Session | null, watched?: boolean) => Promise<void>;
+  getRewatchSync: () => Promise<{ on: boolean; plan: SimklPlan }>;
+  setRewatchSync: (on: boolean) => Promise<{ ok: boolean; plan: SimklPlan }>;
+  /** Notifications for new episodes and releases. setReminders resolves false when iOS permission was refused. */
+  getReminders: () => Promise<ReminderSettings>;
+  setReminders: (s: ReminderSettings) => Promise<boolean>;
   /** The library as a CSV file, through the share sheet. */
   exportCsv: () => Promise<void>;
   openUrl: (url: string) => void;
@@ -85,6 +118,9 @@ export type SimklScreenProps = {
   status: string;
   lastSyncAt: number | null;
   actions: SimklActions;
+  /** A tapped notification: open this title. */
+  openRequest?: { simklId: number; type: SimklType } | null;
+  onOpenHandled?: () => void;
   /** Preview only. */
   devInitialState?: {
     detailId?: number;
@@ -93,6 +129,9 @@ export type SimklScreenProps = {
     calendarOpen?: boolean;
     statsOpen?: boolean;
     accountOpen?: boolean;
+    insightsTab?: 'overview' | 'review';
+    rewatchOpen?: boolean;
+    ratingOpen?: boolean;
     grid?: boolean;
     connectCode?: ConnectCode;
   };
