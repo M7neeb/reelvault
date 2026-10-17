@@ -32,8 +32,9 @@
  * need protecting, and those live in expo-secure-store, never in git.
  */
 
-/** Public. Safe to commit. Empty until the app is registered. */
-export const SIMKL_CLIENT_ID = process.env.EXPO_PUBLIC_SIMKL_CLIENT_ID ?? '';
+/** Public. Safe to commit. A build-time EXPO_PUBLIC_SIMKL_CLIENT_ID overrides it. */
+export const SIMKL_CLIENT_ID =
+  process.env.EXPO_PUBLIC_SIMKL_CLIENT_ID || '7744eae2e1ba22d5e593c3db62542a2ada39ddb7a269854d2e01bba6af1fe2ca';
 
 /**
  * Ask for write scope up front.
@@ -46,7 +47,7 @@ export const SIMKL_CLIENT_ID = process.env.EXPO_PUBLIC_SIMKL_CLIENT_ID ?? '';
 export const SIMKL_SCOPE = 'media:read media:write';
 
 /** Simkl asks for an identifying User-Agent on auth requests. */
-export const SIMKL_USER_AGENT = 'ReelVault/0.1 (personal app)';
+export const SIMKL_USER_AGENT = 'reelvault/1.1 (personal app)';
 
 /** The API host is `api.simkl.com` even though the docs live on `api.simkl.org`. */
 export const SIMKL_API = 'https://api.simkl.com';
