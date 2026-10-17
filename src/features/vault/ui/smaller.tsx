@@ -7,9 +7,9 @@
 import { useRef, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 
-import { QUALITIES, type CompressQuality } from '../smaller';
+import { EMPTY_PLAN, estimateBytes, fmtFormatLine, FRAME_RATES, RESOLUTIONS, type EditPlan } from '../edit';
 import { confirmAction } from './confirm';
-import { fmtSize } from './format';
+import { fmtBitrate, fmtSize } from './format';
 import { Chip, Section, SheetFrame, Wrap } from './sheets';
 import { sheet, useStyles, type Palette } from './theme';
 import type { UiSmallerResult, VaultItem } from './types';
@@ -29,19 +29,41 @@ export function SmallerSheet({
   items: VaultItem[];
   /** False until the app build has the encoder (1.1). */
   available: boolean;
-  onMakeSmaller: (item: VaultItem, quality: CompressQuality, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
+  onMakeSmaller: (item: VaultItem, plan: EditPlan, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
   onCancel: () => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
-  const [quality, setQuality] = useState<CompressQuality>('1080p');
+  const [maxShortSide, setMaxShortSide] = useState<number | null>(1080);
+  const [fps, setFps] = useState<number | null>(null);
+  const plan: EditPlan = { ...EMPTY_PLAN, maxShortSide, fps, lossless: false };
   const [run, setRun] = useState<Run | null>(null);
   const [tally, setTally] = useState<Tally | null>(null);
   const stopped = useRef(false);
 
   const total = items.reduce((s, v) => s + v.sizeBytes, 0);
   const label = items.length === 1 ? (items[0].title ?? items[0].filename) : `${items.length} videos`;
-  const hint = QUALITIES.find((q) => q.key === quality)?.hint ?? '';
+  const one = items.length === 1 ? items[0] : null;
+  const sources = items.map((v) => ({
+    width: v.width,
+    height: v.height,
+    fps: v.meta?.fps ?? null,
+    durationMs: v.durationMs,
+    sizeBytes: v.sizeBytes,
+  }));
+  const shortSides = sources.map((v) => (v.width && v.height ? Math.min(v.width, v.height) : 0)).filter(Boolean);
+  const maxShort = shortSides.length ? Math.max(...shortSides) : null;
+  const rates = sources.map((v) => v.fps ?? 0).filter(Boolean);
+  const maxFps = rates.length ? Math.max(...rates) : null;
+  const estimates = sources.map((src) => estimateBytes(plan, src));
+  const estimate = estimates.every((e) => e !== null) ? estimates.reduce<number>((s, e) => s + (e ?? 0), 0) : null;
+  const now = one
+    ? [fmtFormatLine(one.width, one.height, one.meta?.fps ?? null), one.meta?.codec, fmtBitrate(one.sizeBytes, one.durationMs)]
+        .filter(Boolean)
+        .join(' · ')
+    : `${shortSides.length ? `${Math.min(...shortSides)}p – ${maxShort}p` : 'sizes unknown'}${
+        rates.length ? ` · ${Math.round(Math.min(...rates))}–${Math.round(maxFps ?? 0)} fps` : ''
+      }`;
 
   async function start() {
     stopped.current = false;
@@ -50,7 +72,7 @@ export function SmallerSheet({
     for (const [index, item] of items.entries()) {
       if (stopped.current) break;
       setRun({ index, total: items.length, fraction: 0, name: item.title ?? item.filename });
-      const result = await onMakeSmaller(item, quality, (fraction) =>
+      const result = await onMakeSmaller(item, plan, (fraction) =>
         setRun((r) => (r ? { ...r, fraction } : r))
       );
       if (result.kind === 'done') t = { ...t, done: t.done + 1, saved: t.saved + (result.before - result.after) };
@@ -102,17 +124,40 @@ export function SmallerSheet({
       )}
 
       {!run && !tally && (
-        <Section label="Quality">
-          <Wrap>
-            {QUALITIES.map((q) => (
-              <Chip key={q.key} label={q.label} on={quality === q.key} onPress={() => setQuality(q.key)} />
-            ))}
-          </Wrap>
-          <Text style={styles.hint}>{hint}</Text>
-          <Text style={styles.hint}>
-            Keep the app open while it works. A 1 GB video takes about a minute on an iPhone 15.
-          </Text>
-        </Section>
+        <>
+          <Section label="Now">
+            <Text style={styles.body}>{now}</Text>
+          </Section>
+          <Section label="Resolution (short side)">
+            <Wrap>
+              {RESOLUTIONS.map((r) => (
+                <Chip
+                  key={r.label}
+                  label={r.label}
+                  on={maxShortSide === r.key}
+                  onPress={() => setMaxShortSide(r.key)}
+                />
+              ))}
+            </Wrap>
+            {maxShort !== null && maxShortSide !== null && maxShortSide >= maxShort && (
+              <Text style={styles.hint}>Already at or below that - only re-encoded as HEVC.</Text>
+            )}
+          </Section>
+          <Section label="Frame rate">
+            <Wrap>
+              {FRAME_RATES.map((r) => (
+                <Chip key={r.label} label={r.key ? `${r.label} fps` : r.label} on={fps === r.key} onPress={() => setFps(r.key)} />
+              ))}
+            </Wrap>
+            <Text style={styles.hint}>Frame rate and size only ever go down, never up.</Text>
+          </Section>
+          <Section label="Result">
+            <Text style={styles.result}>{estimate !== null ? `about ${fmtSize(estimate)}` : 'size unknown'}</Text>
+            <Text style={styles.hint}>
+              A guess - the real size depends on how much moves in the video. Keep the app open while it works.
+            </Text>
+          </Section>
+        </>
       )}
 
       {run && (

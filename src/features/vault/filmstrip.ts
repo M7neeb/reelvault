@@ -7,19 +7,22 @@ const FRAME_COUNT = 8;
 
 /**
  * Build (or reuse) a row of evenly-spaced stills for the scrubber under the player.
- * Cached in thumbs/<id>/f0.jpg … so it is generated once per video, not per open.
+ * Cached in thumbs/<id>/<size>-f0.jpg … so it is generated once per video, not per
+ * open. The file size is in the name so an edited (trimmed, re-encoded) video gets
+ * fresh frames instead of cached old ones.
  */
 export async function ensureFilmstrip(video: {
   id: string;
   uri: string;
   durationMs: number | null;
+  size: number;
 }): Promise<string[]> {
   const dir = filmstripDir(video.id);
   const frames: string[] = [];
   let allCached = true;
 
   for (let i = 0; i < FRAME_COUNT; i++) {
-    const file = new File(dir, `f${i}.jpg`);
+    const file = new File(dir, `${video.size}-f${i}.jpg`);
     if (file.exists) frames.push(file.uri);
     else {
       allCached = false;
@@ -33,7 +36,7 @@ export async function ensureFilmstrip(video: {
   const duration = video.durationMs ?? 0;
   const out: string[] = [];
   for (let i = 0; i < FRAME_COUNT; i++) {
-    const destination = new File(dir, `f${i}.jpg`);
+    const destination = new File(dir, `${video.size}-f${i}.jpg`);
     if (!destination.exists) {
       const time = duration > 0 ? Math.floor((duration * (i + 0.5)) / FRAME_COUNT) : i * 1000;
       try {

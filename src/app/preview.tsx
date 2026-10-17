@@ -74,6 +74,9 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   importmenu: { importMenuOpen: true },
   smaller: { smallerOpen: true, selectedIds: FIXTURE_ITEMS.slice(0, 3).map((v) => v.id) },
   'smaller-one': { viewerId: first, smallerOpen: true },
+  trim: { viewerId: first, editorTab: 'trim' },
+  crop: { viewerId: first, editorTab: 'crop' },
+  resize: { viewerId: first, editorTab: 'size' },
   passcode: { passcodeOpen: true },
   slideshow: { slideshowOpen: true },
   compare: { compareOpen: true },
@@ -174,6 +177,13 @@ export default function PreviewRoute() {
           onProgress(i / 10);
         }
         return { kind: 'done', before: item.sizeBytes, after: Math.round(item.sizeBytes * 0.55) };
+      },
+      onEditVideo: async (item, _plan, _mode, onProgress) => {
+        for (let i = 1; i <= 10; i++) {
+          await new Promise((r) => setTimeout(r, 120));
+          onProgress(i / 10);
+        }
+        return { kind: 'done', before: item.sizeBytes, after: Math.round(item.sizeBytes * 0.4) };
       },
       onCancelMakeSmaller: () => {},
       getImportQuality: async () => null,

@@ -30,6 +30,7 @@ import { fmtBitrate, fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './form
 import { fmtLocation, RECENTLY_DELETED_DAYS } from './logic';
 import { PromptSheet } from './prompts';
 import { SmallerSheet } from './smaller';
+import EditorModal from './EditorModal';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
   STATUSES,
@@ -58,6 +59,7 @@ export default function ViewerModal({
   initialInfoOpen = false,
   initialMenuOpen = false,
   initialSmallerOpen = false,
+  initialEditorTab,
   onSlideshow,
   onNearby,
   onClose,
@@ -71,6 +73,8 @@ export default function ViewerModal({
   initialInfoOpen?: boolean;
   initialMenuOpen?: boolean;
   initialSmallerOpen?: boolean;
+  /** Preview only: open the editor on this tab. */
+  initialEditorTab?: 'trim' | 'crop' | 'size';
   /** Play the current list as a slideshow, starting here. */
   onSlideshow: (item: VaultItem) => void;
   /** Show the videos filmed near this one. */
@@ -106,6 +110,7 @@ export default function ViewerModal({
   const [dateOpen, setDateOpen] = useState(false);
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
   const [smallerOpen, setSmallerOpen] = useState(initialSmallerOpen);
+  const [editorTab, setEditorTab] = useState<'trim' | 'crop' | 'size' | null>(initialEditorTab ?? null);
   const [note, setNote] = useState('');
 
   const framesRef = useRef<ThumbSource[]>([]);
@@ -633,6 +638,15 @@ export default function ViewerModal({
                   />
                 )}
                 <MenuRow
+                  label="Trim, Crop & Resize…"
+                  hint=""
+                  onPress={() => {
+                    setMenuOpen(false);
+                    if (player.playing) player.pause();
+                    setEditorTab('trim');
+                  }}
+                />
+                <MenuRow
                   label="Make Smaller…"
                   hint={fmtSize(item.sizeBytes)}
                   onPress={() => {
@@ -685,6 +699,20 @@ export default function ViewerModal({
             initial={item.createdAt}
             onApply={(change) => actions.onAdjustDates([item.id], change)}
             onClose={() => setDateOpen(false)}
+          />
+        )}
+
+        {editorTab && (
+          <EditorModal
+            item={item}
+            actions={actions}
+            enableVideo={enableVideo}
+            initialTab={editorTab}
+            onDone={(message) => {
+              setEditorTab(null);
+              setNote(message);
+            }}
+            onClose={() => setEditorTab(null)}
           />
         )}
 

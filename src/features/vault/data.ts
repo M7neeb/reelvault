@@ -76,7 +76,8 @@ import {
 } from '@/features/vault/security';
 import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share';
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
-import { cancelMakeSmaller, canMakeSmaller, makeSmaller } from '@/features/vault/compress';
+import { cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
+import { planForQuality } from '@/features/vault/edit';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -332,7 +333,7 @@ export function useVaultData(): VaultData {
           // Each video is made smaller before the next one comes in, so the space is freed as it goes.
           afterEach: quality
             ? async (video, index, total) => {
-                const result = await makeSmaller(video, quality, (f) =>
+                const result = await makeSmaller(video, planForQuality(quality), (f) =>
                   setStatus(`Making ${index + 1} of ${total} smaller… ${Math.round(f * 100)}%`)
                 );
                 if (result.kind === 'done') saved += result.before - result.after;
@@ -565,10 +566,17 @@ export function useVaultData(): VaultData {
         await refresh();
       },
       canMakeSmaller,
-      onMakeSmaller: async (item, quality, onProgress) => {
+      onMakeSmaller: async (item, plan, onProgress) => {
         const v = byId(item.id);
         if (!v) return { kind: 'failed', reason: 'not found' };
-        const result = await makeSmaller(v, quality, onProgress);
+        const result = await makeSmaller(v, plan, onProgress);
+        if (result.kind === 'done') await refresh();
+        return result;
+      },
+      onEditVideo: async (item, plan, mode, onProgress) => {
+        const v = byId(item.id);
+        if (!v) return { kind: 'failed', reason: 'not found' };
+        const result = await editVideo(v, plan, { mode }, onProgress);
         if (result.kind === 'done') await refresh();
         return result;
       },
