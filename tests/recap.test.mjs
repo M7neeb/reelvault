@@ -153,3 +153,14 @@ test('badges know the video that earned them; new and secret ones', () => {
   assert.equal(get('time-traveller').unlocked, false);
   assert.equal(get('time-traveller').videoId, null, 'a badge not earned yet has no video');
 });
+
+test('story facts: your era is the filming year you watched most', () => {
+  const videos = [video('a', { createdAt: at(2023, 4, 1) }), video('b', { createdAt: at(2023, 6, 1) }), video('c', { createdAt: at(2026, 1, 1) })];
+  const plays = [play('a', at(2026, 9, 12)), play('b', at(2026, 9, 13)), play('c', at(2026, 9, 14), 5 * MIN)];
+  const f = storyFacts({ start: at(2026, 9, 1, 0), end: at(2026, 10, 1, 0), label: 'October' }, videos, plays, NOW);
+  assert.equal(f.era.year, 2023);
+  assert.equal(f.era.years, 2);
+  assert.ok(Math.abs(f.era.share - 0.8) < 0.001);
+  const one = storyFacts({ start: at(2026, 9, 1, 0), end: at(2026, 10, 1, 0), label: 'October' }, videos, [plays[0]], NOW);
+  assert.equal(one.era, null);
+});

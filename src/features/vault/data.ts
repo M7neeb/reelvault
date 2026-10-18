@@ -249,6 +249,8 @@ function parsePrefs(json: string | null): VaultPrefs {
       showcase: Array.isArray(r?.showcase) ? r.showcase.filter((x: unknown) => typeof x === 'string').slice(0, 3) : [],
       weeklyGoalMin:
         typeof r?.weeklyGoalMin === 'number' && r.weeklyGoalMin >= 10 && r.weeklyGoalMin <= 6000 ? Math.round(r.weeklyGoalMin) : DEFAULT_VAULT_PREFS.weeklyGoalMin,
+      memoryFavs: Array.isArray(r?.memoryFavs) ? r.memoryFavs.filter((x: unknown) => typeof x === 'string').slice(0, 500) : [],
+      memoryHidden: Array.isArray(r?.memoryHidden) ? r.memoryHidden.filter((x: unknown) => typeof x === 'string').slice(0, 500) : [],
     };
   } catch {
     return DEFAULT_VAULT_PREFS;

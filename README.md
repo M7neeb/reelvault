@@ -18,8 +18,9 @@ search. Everything stays on the device — no account, no server, no telemetry.
 - **Storage readout** — what the app holds vs what's free on the device
 - **Overview mode** — rate and track your videos like shows: status, ratings, series with per-episode ratings, and the info of removed videos kept
 - **Viewer gestures** — swipe between videos, drag down to close, double-tap to jump 10 s, drag the bar to scrub
-- **Dashboard** — weekly goal ring, things the app noticed, watch time against the period before, On this day memories, favourites to rediscover, habits, taste and ratings
-- **Wrapped** — your year, months, weeks or any range as a story that plays your own videos with sound: a top-5 countdown, comfort video, biggest day, throwback, hidden gem, taste, habits and a persona
+- **Memories** — your videos made into little films: on this day, trips away from home, big days, the best of each month and season, themes from your tags, favourites, forgotten gems and whole years, played as clips with sound in a Gentle, Upbeat or Epic mood
+- **Dashboard** — weekly goal ring, a memory for you, things the app noticed, watch time against the period before, On this day memories, favourites to rediscover, habits, taste and ratings
+- **Wrapped** — your year, months, weeks or any range as a story that plays your own videos with sound: a guess-your-#1 quiz, a top-5 countdown and list, your video era, comfort video, biggest day, throwback, hidden gem, taste, habits and a persona
 - **Badges** — levels and XP, a showcase, personal records with the videos behind them, your journey, ladders, one-off and secret achievements and monthly challenges
 - **Storage** — how full the phone is, ways to free space, how the library grew, and size by quality, keyword, format and year
 

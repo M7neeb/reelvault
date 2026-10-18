@@ -1321,6 +1321,7 @@ function VaultScreenBody({
         <VideoInsightsModal
           initialTab={insights}
           initialWrapped={openWrapped}
+          initialMemory={dev?.memoryOpen}
           items={inPrivate ? privateItems : publicItems}
           deleted={visibleTrash}
           albums={albums.length}

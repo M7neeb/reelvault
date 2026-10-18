@@ -1,8 +1,9 @@
 /**
- * My Videos, in four tabs:
+ * My Videos, in five tabs:
  * - Dashboard: weekly goal, things the app noticed, watch time for a period
  *   against the time before, memories, favourites to rediscover, habits,
  *   taste, ratings and how complete the library is (DashboardUI);
+ * - Memories: your videos made into little films (MemoriesUI);
  * - Wrapped: your year, months, weeks or any range, as a story that plays
  *   your videos (WrappedUI);
  * - Badges: level, showcase, records, journey, ladders, one-offs and monthly
@@ -22,6 +23,7 @@ import type { SimklBridge } from '@/features/simkl/ui/types';
 
 import { achievements, summarize, type AchInput } from '../achievements';
 import { buildOverview } from '../overview';
+import { memories as buildMemories, type Memory } from '../memories';
 import { growth, journey, levelFor, personalRecords, spaceIdeas, storyFacts } from '../recap';
 import { fmtBytes, fmtMs, recentWeeks, storageStats, wrapped as buildWrapped, type Range, type RatingLabels, type VaultPlay } from '../stats';
 import Badges from './BadgesUI';
@@ -33,17 +35,19 @@ import IconButton from './IconButton';
 import type { IconName } from './icons';
 import { Bars, Card, gradient, Ring, StatTile } from './insightParts';
 import { DUR, enterUp, PressableScale, SPRING } from './motion';
+import { MemoriesTab, MemoryPlayer } from './MemoriesUI';
 import { toOvVideo } from './overviewParts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
 import { previous, WrappedPicker, WrappedStory, type StoryInput } from './WrappedUI';
 
-export type InsightsTab = 'dashboard' | 'wrapped' | 'badges' | 'storage';
+export type InsightsTab = 'dashboard' | 'memories' | 'wrapped' | 'badges' | 'storage';
 
 type SimklNumbers = Awaited<ReturnType<SimklBridge['insights']>>;
 
 const TABS: { key: InsightsTab; label: string; icon: IconName; color: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', color: '#0A84FF' },
+  { key: 'memories', label: 'Memories', icon: 'memories', color: '#FF375F' },
   { key: 'wrapped', label: 'Wrapped', icon: 'sparkle', color: '#BF5AF2' },
   { key: 'badges', label: 'Badges', icon: 'trophy', color: '#FF9F0A' },
   { key: 'storage', label: 'Storage', icon: 'storage', color: '#30D158' },
@@ -70,7 +74,9 @@ function TabStrip({ value, onChange }: { value: InsightsTab; onChange: (t: Insig
             <View style={[styles.tabIcon, { backgroundColor: on ? t.color : `${t.color}22` }]}>
               <Icon name={t.icon} size={14} color={on ? '#fff' : t.color} />
             </View>
-            <Text style={[styles.tabText, on && { color: p.text }]}>{t.label}</Text>
+            <Text style={[styles.tabText, on && { color: p.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {t.label}
+            </Text>
           </TouchableOpacity>
         );
       })}
@@ -93,6 +99,7 @@ export default function VideoInsightsModal({
   simkl,
   ratingLabels,
   initialWrapped,
+  initialMemory,
   onOpenVideo,
   onMakeSmaller,
   onFilter,
@@ -115,6 +122,8 @@ export default function VideoInsightsModal({
   ratingLabels: RatingLabels;
   /** Open straight into last week's Wrapped (from the Monday notification). */
   initialWrapped?: boolean;
+  /** Play the first memory straight away (the browser preview). */
+  initialMemory?: boolean;
   onOpenVideo: (id: string) => void;
   onMakeSmaller: (ids: string[]) => void;
   /** Close and show these videos in the library (Recently Deleted, duplicates…). */
@@ -129,6 +138,7 @@ export default function VideoInsightsModal({
   const [bookmarks, setBookmarks] = useState(0);
   const [sk, setSk] = useState<SimklNumbers | null>(null);
   const [story, setStory] = useState<StoryInput | null>(null);
+  const [memory, setMemory] = useState<Memory | null>(null);
 
   useEffect(() => {
     actions.loadPlays().then(setPlays).catch(() => setPlays([]));
@@ -185,6 +195,17 @@ export default function VideoInsightsModal({
       ),
     [items, plays, badgeList]
   );
+
+  const memoryList = useMemo(() => (plays ? buildMemories(items.map((v) => ({ ...v, location: v.meta?.location ?? null })), plays, Date.now()) : []), [items, plays]);
+  // The browser preview can open a memory straight away (`/preview?view=memory`).
+  useEffect(() => {
+    if (initialMemory && memoryList.length && !memory) setMemory(memoryList[0]);
+  }, [initialMemory, memoryList]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleIn = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  const favMemory = (id: string) => {
+    tick();
+    void actions.setPrefs({ ...prefs, memoryFavs: toggleIn(prefs.memoryFavs, id) });
+  };
 
   /** Everything the story needs for a range. */
   const openStory = (r: Range, scope: 'everything' | 'videos') => {
@@ -249,8 +270,23 @@ export default function VideoInsightsModal({
                   labels={ratingLabels}
                   thumbs={thumbs}
                   goalMin={prefs.weeklyGoalMin}
+                  memory={memoryList.find((m) => !prefs.memoryHidden.includes(m.id)) ?? null}
+                  onMemory={setMemory}
+                  onAllMemories={() => setTab('memories')}
                   onGoal={(min) => void actions.setPrefs({ ...prefs, weeklyGoalMin: min })}
                   onOpen={onOpenVideo}
+                />
+              )}
+              {tab === 'memories' && (
+                <MemoriesTab
+                  list={memoryList}
+                  items={byId}
+                  thumbs={thumbs}
+                  favs={prefs.memoryFavs}
+                  hidden={prefs.memoryHidden}
+                  onPlay={setMemory}
+                  onFav={favMemory}
+                  onUnhideAll={() => void actions.setPrefs({ ...prefs, memoryHidden: [] })}
                 />
               )}
               {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} thumbs={thumbs} onOpen={openStory} />}
@@ -285,6 +321,23 @@ export default function VideoInsightsModal({
           </ScrollView>
         )}
       </View>
+      {memory && (
+        <MemoryPlayer
+          memory={memory}
+          items={byId}
+          thumbs={thumbs}
+          enableVideo={enableVideo}
+          fav={prefs.memoryFavs.includes(memory.id)}
+          loadBookmarks={(id) => actions.loadBookmarks(id).then((list) => list.map((b) => b.atMs))}
+          onFav={() => favMemory(memory.id)}
+          onHide={() => void actions.setPrefs({ ...prefs, memoryHidden: [...prefs.memoryHidden, memory.id] })}
+          onOpenVideo={(id) => {
+            setMemory(null);
+            onOpenVideo(id);
+          }}
+          onClose={() => setMemory(null)}
+        />
+      )}
       {story && (
         <WrappedStory
           input={story}
@@ -476,7 +529,7 @@ const makeStyles = (p: Palette) =>
     tabPill: { position: 'absolute', top: 4, bottom: 4, left: 4, borderRadius: 14, backgroundColor: p.card },
     tab: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 8 },
     tabIcon: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-    tabText: { color: p.textSecondary, fontSize: 12, fontWeight: '800' },
+    tabText: { color: p.textSecondary, fontSize: 11, fontWeight: '800' },
     body: { paddingHorizontal: 16, paddingTop: 6 },
     muted: { color: p.textSecondary, fontSize: 12, lineHeight: 16 },
     foot: { color: p.textMuted, fontSize: 12, textAlign: 'center', paddingHorizontal: 20, lineHeight: 17 },

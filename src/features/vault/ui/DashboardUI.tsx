@@ -1,6 +1,6 @@
 /**
- * The Videos dashboard. At the top: your weekly goal ring and what the app
- * noticed. Then pick a period (7 days, 30 days, 12 months, all time) and read
+ * The Videos dashboard. At the top: your weekly goal ring, a memory made
+ * from your videos, and what the app noticed. Then pick a period (7 days, 30 days, 12 months, all time) and read
  * how much you watched against the time before, every day or month as a
  * chart, the key numbers, memories filmed on this day, favourites to
  * rediscover, what you watched most, when you watch, your activity calendar,
@@ -25,7 +25,10 @@ import Heatmap from './Heatmap';
 import Icon from './Icon';
 import { Bars, Card, ChangePill, gradient, iconOr, PhotoCard, Ring, SectionTitle, ShareBar, StatTile } from './insightParts';
 import { tick } from './haptics';
+import type { Memory } from '../memories';
+import { TONES } from './MemoriesUI';
 import { enterUp, PressableScale } from './motion';
+import { Aurora, CountUp, hexA, KenBurns, Pulse } from './storyKit';
 import { Segment } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
@@ -48,6 +51,9 @@ export default function Dashboard({
   thumbs,
   goalMin,
   onGoal,
+  memory = null,
+  onMemory,
+  onAllMemories,
   onOpen,
 }: {
   items: VaultItem[];
@@ -57,6 +63,10 @@ export default function Dashboard({
   /** Weekly watch-time goal, in minutes. */
   goalMin: number;
   onGoal: (min: number) => void;
+  /** The memory to feature, and what tapping it or "See all" does. */
+  memory?: Memory | null;
+  onMemory?: (m: Memory) => void;
+  onAllMemories?: () => void;
   onOpen: (id: string) => void;
 }) {
   const styles = useStyles(makeStyles);
@@ -112,12 +122,13 @@ export default function Dashboard({
     <>
       {/* ── this week's goal ─────────────────────────────────────── */}
       <Animated.View entering={enterUp(0)} style={[styles.goal, gradient('linear-gradient(135deg, #0A84FF 0%, #3A2BB8 55%, #1A0F4A 100%)')]}>
+        <Aurora colors={['#0A84FF', '#1A0F4A']} accent="#BF5AF2" width={width - 32} height={150} />
         <Ring size={112} stroke={11} progress={week.ms / goalMs} color={week.ms >= goalMs ? '#30D158' : '#FFFFFF'} track="rgba(255,255,255,0.2)">
           <Text style={styles.goalPct}>{Math.min(999, Math.round((week.ms / goalMs) * 100))}%</Text>
         </Ring>
         <View style={{ flex: 1, gap: 3 }}>
           <Text style={styles.goalKicker}>THIS WEEK</Text>
-          <Text style={styles.goalValue}>{week.ms ? fmtMs(week.ms) : '0 min'}</Text>
+          <CountUp to={week.ms} format={(n) => (n >= 60000 ? fmtMs(n) : `${Math.round(n / 60000)} min`)} style={styles.goalValue} />
           <Text style={styles.goalSub}>
             {week.ms >= goalMs ? 'Goal reached. Nice!' : `${fmtMs(toGo)} to go · about ${fmtMs(toGo / Math.max(1, week.daysLeft))} a day`}
           </Text>
@@ -144,6 +155,37 @@ export default function Dashboard({
           </View>
         </View>
       </Animated.View>
+
+      {/* ── a memory for you ─────────────────────────────────────── */}
+      {memory && onMemory && (
+        <Animated.View entering={enterUp(1)}>
+          <PressableScale onPress={() => onMemory(memory)} scaleTo={0.97} style={[styles.memory, { backgroundColor: TONES[memory.tone % TONES.length][1] }]} accessibilityLabel={`Play memory: ${memory.title}`}>
+            <KenBurns source={thumbs.get(memory.coverId)} ms={16000} seed={3} />
+            <View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, gradient(`linear-gradient(90deg, ${hexA(TONES[memory.tone % TONES.length][1], 0.95)} 0%, ${hexA(TONES[memory.tone % TONES.length][1], 0.55)} 55%, ${hexA(TONES[memory.tone % TONES.length][1], 0.1)} 100%)`)]} />
+            <View style={{ flex: 1, gap: 3, padding: 16, justifyContent: 'flex-end' }}>
+              <Text style={[styles.memoryKicker, { color: TONES[memory.tone % TONES.length][0] }]}>A MEMORY FOR YOU · {memory.kicker}</Text>
+              <Text style={styles.memoryTitle} numberOfLines={2}>
+                {memory.title}
+              </Text>
+              <Text style={styles.memorySub} numberOfLines={1}>
+                {memory.subtitle}
+              </Text>
+            </View>
+            <View style={styles.memorySide}>
+              <Pulse>
+                <View style={styles.memoryPlay}>
+                  <Icon name="play" size={18} color="#000" />
+                </View>
+              </Pulse>
+              {onAllMemories && (
+                <TouchableOpacity onPress={onAllMemories} hitSlop={8}>
+                  <Text style={styles.memoryAll}>See all</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </PressableScale>
+        </Animated.View>
+      )}
 
       {/* ── things we noticed ────────────────────────────────────── */}
       {notes.length > 0 && (
@@ -176,7 +218,7 @@ export default function Dashboard({
       {/* ── watch time ───────────────────────────────────────────── */}
       <Card index={1}>
         <Text style={styles.kicker}>WATCH TIME · {d.label.toUpperCase()}</Text>
-        <Text style={styles.hero}>{d.watchedMs ? fmtMs(d.watchedMs) : '0 min'}</Text>
+        <CountUp key={period} to={d.watchedMs} format={(n) => (n >= 60000 ? fmtMs(n) : '0 min')} style={styles.hero} ms={800} />
         <View style={styles.heroRow}>
           {change ? <ChangePill text={change} up={d.change === null ? true : d.change > 0} /> : null}
           {period !== 'all' && d.prevMs !== null && (
@@ -460,7 +502,14 @@ const makeStyles = (p: Palette) =>
   sheet({
     kicker: { color: p.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 0.8 },
     bleed: { marginHorizontal: -16 },
-    goal: { flexDirection: 'row', alignItems: 'center', gap: 18, borderRadius: 26, padding: 18 },
+    memory: { height: 168, borderRadius: 24, overflow: 'hidden', flexDirection: 'row' },
+    memoryKicker: { fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    memoryTitle: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.6, lineHeight: 27 },
+    memorySub: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '700' },
+    memorySide: { justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+    memoryPlay: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', paddingLeft: 3 },
+    memoryAll: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    goal: { flexDirection: 'row', alignItems: 'center', gap: 18, borderRadius: 26, padding: 18, overflow: 'hidden' },
     goalPct: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
     goalKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
     goalValue: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8 },

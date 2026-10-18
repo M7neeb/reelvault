@@ -80,6 +80,11 @@ export const ICONS = {
   question: { sf: 'questionmark', ion: 'help' },
   target: { sf: 'target', ion: 'locate' },
   photo: { sf: 'photo.on.rectangle', ion: 'images-outline' },
+  heartOff: { sf: 'heart', ion: 'heart-outline' },
+  eyeOff: { sf: 'eye.slash', ion: 'eye-off-outline' },
+  memories: { sf: 'play.rectangle.on.rectangle', ion: 'albums-outline' },
+  mapPin: { sf: 'mappin.and.ellipse', ion: 'location-outline' },
+  wand: { sf: 'sparkles', ion: 'sparkles' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

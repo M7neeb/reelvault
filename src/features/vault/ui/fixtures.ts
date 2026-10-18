@@ -57,7 +57,8 @@ const RATINGS = [9, 0, 7, 10, 5, 0, 8, 6, 0, 4, 9, 0];
 const FLAGS: UiFlag[] = [1, 0, 0, 1, 0, -1, 0, 0, -1, 0, 1, 0];
 const IN_TRAY = [false, true, false, false, false, false, true, false, false, false, false, false];
 /** Filming dates: a few days apart, several per day, across two months. */
-const FILMED_DAYS_AGO = [3, 3, 4, 6, 6, 6, 10, 14, 21, 25, 33, 40];
+// The last three were filmed a year and two years ago, for On this day and a trip in Memories.
+const FILMED_DAYS_AGO = [3, 3, 4, 6, 6, 6, 10, 14, 21, 365, 366, 731];
 
 const TAG_SETS: string[][] = [
   ['holiday'],
@@ -129,7 +130,7 @@ const META: (UiMeta | null)[] = [
   null,
   { codec: 'H.264', fps: 30 },
   { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 12', location: { lat: 52.52, lon: 13.405 } },
-  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 15' },
+  { codec: 'HEVC', fps: 30, make: 'Apple', model: 'iPhone 15', location: { lat: 52.51, lon: 13.39 } },
   null,
 ];
 
