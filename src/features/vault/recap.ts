@@ -95,6 +95,8 @@ export type StoryFacts = {
   equivalents: string[];
   traits: string[];
   persona: Persona;
+  /** The year most of what you watched was filmed in (when it spans several years). */
+  era: { year: number; share: number; years: number } | null;
 };
 
 const PERSONAS: Record<string, Persona> = {
@@ -229,6 +231,15 @@ export function storyFacts(range: RRange, videos: RVideo[], plays: RPlay[], now:
   };
   const traits = sorted.slice(0, 3).map(([k]) => traitText[k]).filter(Boolean);
 
+  // Your era: watch time by the year each video was filmed.
+  const byFilmYear = new Map<number, number>();
+  for (const [id, x] of per) {
+    const y = new Date(byId.get(id)!.createdAt).getFullYear();
+    byFilmYear.set(y, (byFilmYear.get(y) ?? 0) + x.ms);
+  }
+  const eraTop = [...byFilmYear.entries()].sort((a, b) => b[1] - a[1])[0];
+  const era = byFilmYear.size >= 2 && eraTop && watchedMs ? { year: eraTop[0], share: eraTop[1] / watchedMs, years: byFilmYear.size } : null;
+
   return {
     range,
     watchedMs,
@@ -253,6 +264,7 @@ export function storyFacts(range: RRange, videos: RVideo[], plays: RPlay[], now:
     equivalents: equivalents(watchedMs),
     traits,
     persona,
+    era,
   };
 }
 

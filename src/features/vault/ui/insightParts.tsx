@@ -5,14 +5,14 @@
  * Presentational only.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 
 import Icon from './Icon';
 import { ICONS, type IconName } from './icons';
-import { DUR, EASE_OUT, enterUp, PressableScale } from './motion';
+import { DUR, EASE_OUT, enterUp, PressableScale, useReducedMotion } from './motion';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 
 /**
@@ -225,13 +225,34 @@ export function Medallion({ icon, tier, unlocked, size = 64, progress }: { icon:
   );
 }
 
+/** Fills from 0 to `to` when it appears (and eases to new values); straight there with Reduce Motion. */
+function useFill(to: number, ms = 900): number {
+  const reduce = useReducedMotion();
+  const [v, setV] = useState(reduce ? to : 0);
+  const from = useRef(reduce ? to : 0);
+  useEffect(() => {
+    if (reduce) return setV(to);
+    const start = Date.now();
+    const a = from.current;
+    const id = setInterval(() => {
+      const t = Math.min(1, (Date.now() - start) / ms);
+      const n = a + (to - a) * (1 - Math.pow(1 - t, 3));
+      from.current = n;
+      setV(n);
+      if (t >= 1) clearInterval(id);
+    }, 24);
+    return () => clearInterval(id);
+  }, [to, reduce]); // eslint-disable-line react-hooks/exhaustive-deps
+  return v;
+}
+
 /**
  * A progress ring drawn with plain views (two clipped half rings), so it needs
  * no extra native library. 0..1, and past 1 it shows a full ring.
  */
 export function Ring({ size, stroke, progress, color, track, children }: { size: number; stroke: number; progress: number; color: string; track?: string; children?: ReactNode }) {
   const p = usePalette();
-  const v = Math.max(0, Math.min(1, progress));
+  const v = useFill(Math.max(0, Math.min(1, progress)));
   const half = size / 2;
   // A ring with only its top and right borders coloured is a half ring from -45° to 135°.
   const arc = (end: number) => ({

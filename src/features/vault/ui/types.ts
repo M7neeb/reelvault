@@ -466,6 +466,9 @@ export type VaultPrefs = {
   showcase: string[];
   /** Your weekly watch-time goal on the dashboard, in minutes. */
   weeklyGoalMin: number;
+  /** Memories you saved, and ones you hid (their ids). */
+  memoryFavs: string[];
+  memoryHidden: string[];
 };
 
 export const DEFAULT_VAULT_PREFS: VaultPrefs = {
@@ -477,6 +480,8 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   hiddenSuggestions: [],
   showcase: [],
   weeklyGoalMin: 120,
+  memoryFavs: [],
+  memoryHidden: [],
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */
@@ -554,7 +559,9 @@ export type VaultScreenProps = {
     /** With viewerId: open the editor on this tab. */
     editorTab?: 'trim' | 'crop' | 'size';
     importMenuOpen?: boolean;
-    insightsTab?: 'dashboard' | 'wrapped' | 'badges' | 'storage';
+    insightsTab?: 'dashboard' | 'memories' | 'wrapped' | 'badges' | 'storage';
+    /** Play the first memory as Memories opens. */
+    memoryOpen?: boolean;
     personaliseOpen?: boolean;
     /** Overview: open this title ('s:<id>' or 'v:<id>'), or a sheet. */
     overviewKey?: string;

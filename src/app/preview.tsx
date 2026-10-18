@@ -267,6 +267,8 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   slideshow: { slideshowOpen: true },
   compare: { compareOpen: true },
   dashboard: { insightsTab: 'dashboard' },
+  memories: { insightsTab: 'memories' },
+  memory: { insightsTab: 'memories', memoryOpen: true },
   wrapped: { insightsTab: 'wrapped' },
   badges: { insightsTab: 'badges' },
   storage: { insightsTab: 'storage' },
