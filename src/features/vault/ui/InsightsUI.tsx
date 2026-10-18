@@ -1,8 +1,9 @@
 /**
- * My Videos, in five tabs:
+ * My Videos, in six tabs:
  * - Dashboard: weekly goal, things the app noticed, watch time for a period
  *   against the time before, memories, favourites to rediscover, habits,
  *   taste, ratings and how complete the library is (DashboardUI);
+ * - History: everything you watched, day by day, and Stats (HistoryUI);
  * - Memories: your videos made into little films (MemoriesUI);
  * - Wrapped: your year, months, weeks or any range, as a story that plays
  *   your videos (WrappedUI);
@@ -28,6 +29,8 @@ import { growth, journey, levelFor, monthRanges, personalRecords, spaceForecast,
 import { fmtBytes, fmtMs, recentWeeks, storageStats, wrapped as buildWrapped, type Range, type RatingLabels, type VaultPlay } from '../stats';
 import Badges from './BadgesUI';
 import Dashboard from './DashboardUI';
+import HistoryTab from './HistoryUI';
+import { LiveProvider, useLiveScope } from './live';
 import type { Filter } from './filters';
 import { tick } from './haptics';
 import Icon from './Icon';
@@ -42,12 +45,13 @@ import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
 import { previous, WrappedPicker, WrappedStory, type StoryInput } from './WrappedUI';
 
-export type InsightsTab = 'dashboard' | 'memories' | 'wrapped' | 'badges' | 'storage';
+export type InsightsTab = 'dashboard' | 'history' | 'memories' | 'wrapped' | 'badges' | 'storage';
 
 type SimklNumbers = Awaited<ReturnType<SimklBridge['insights']>>;
 
 const TABS: { key: InsightsTab; label: string; icon: IconName; color: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', color: '#0A84FF' },
+  { key: 'history', label: 'History', icon: 'history', color: '#30B0C7' },
   { key: 'memories', label: 'Memories', icon: 'memories', color: '#FF375F' },
   { key: 'wrapped', label: 'Wrapped', icon: 'sparkle', color: '#BF5AF2' },
   { key: 'badges', label: 'Badges', icon: 'trophy', color: '#FF9F0A' },
@@ -107,6 +111,9 @@ export default function VideoInsightsModal({
   ratingLabels,
   initialWrapped,
   initialMemory,
+  initialMemoryKind,
+  initialYear,
+  initialHistoryStats,
   onOpenVideo,
   onMakeSmaller,
   onFilter,
@@ -133,6 +140,12 @@ export default function VideoInsightsModal({
   initialWrapped?: boolean;
   /** Play the first memory straight away (the browser preview). */
   initialMemory?: boolean;
+  /** Play the first memory of this kind (the On this day notification). */
+  initialMemoryKind?: 'onThisDay';
+  /** Open this year's Wrapped (the 1 December notification). */
+  initialYear?: boolean;
+  /** Open History on Stats (the browser preview). */
+  initialHistoryStats?: boolean;
   onOpenVideo: (id: string) => void;
   onMakeSmaller: (ids: string[]) => void;
   /** Close and show these videos in the library (Recently Deleted, duplicates…). */
@@ -160,6 +173,8 @@ export default function VideoInsightsModal({
     void actions.setPrefs(next);
   };
   const logEvent = (k: string, v?: string) => savePrefs((cur) => ({ events: [...cur.events, { k, at: Date.now(), ...(v ? { v } : {}) } as AchEvent].slice(-3000) }));
+
+  const live = useLiveScope({ enableVideo, sound: prefs.liveSound, onSound: (on) => savePrefs({ liveSound: on }), paused: !!memory || !!story });
 
   useEffect(() => {
     actions.loadPlays().then(setPlays).catch(() => setPlays([]));
@@ -239,6 +254,14 @@ export default function VideoInsightsModal({
   useEffect(() => {
     if (initialMemory && memoryList.length && !memory) setMemory(memoryList.find((m) => m.kind !== 'custom') ?? memoryList[0]);
   }, [initialMemory, memoryList]); // eslint-disable-line react-hooks/exhaustive-deps
+  // From the On this day notification: today's memory, if there still is one.
+  const askedKind = useRef(false);
+  useEffect(() => {
+    if (!initialMemoryKind || askedKind.current || !plays) return;
+    askedKind.current = true;
+    const m = memoryList.find((x) => x.kind === initialMemoryKind);
+    if (m) openMemory(m);
+  }, [initialMemoryKind, memoryList, plays]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleIn = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   const favMemory = (id: string) => {
     tick();
@@ -292,7 +315,7 @@ export default function VideoInsightsModal({
     if (initialWrapped && plays) {
       const [, last] = recentWeeks(Date.now(), 2);
       // The browser preview can ask for the year instead (`&range=year`).
-      const year = Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('range') === 'year';
+      const year = initialYear || (Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('range') === 'year');
       openStory(year ? yearRange(new Date().getFullYear(), Date.now()) : last, sk ? 'everything' : 'videos');
     }
   }, [initialWrapped, plays]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -320,7 +343,8 @@ export default function VideoInsightsModal({
         {plays === null ? (
           <ActivityIndicator color={p.textSecondary} style={{ marginTop: 40 }} />
         ) : (
-          <ScrollView key={tab} contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 40 }]}>
+          <LiveProvider value={live.value}>
+          <ScrollView key={tab} contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 40 }]} {...live.scrollProps}>
             <Animated.View entering={FadeIn.duration(DUR.fast)} style={{ gap: 14 }}>
               {tab === 'dashboard' && (
                 <Dashboard
@@ -334,6 +358,19 @@ export default function VideoInsightsModal({
                   onAllMemories={() => setTab('memories')}
                   onGoal={(min) => savePrefs({ weeklyGoalMin: min })}
                   onOpen={onOpenVideo}
+                />
+              )}
+              {tab === 'history' && (
+                <HistoryTab
+                  items={items}
+                  plays={plays}
+                  thumbs={thumbs}
+                  initialStats={initialHistoryStats}
+                  onOpen={onOpenVideo}
+                  onDelete={(videoId, from, to) => {
+                    setPlays((list) => (list ?? []).filter((x) => !(x.videoId === videoId && x.startedAt >= from && x.startedAt <= to)));
+                    actions.deletePlays(videoId, from, to).catch((e) => console.log(`[HISTORY] remove failed: ${String(e)}`));
+                  }}
                 />
               )}
               {tab === 'memories' && (
@@ -388,6 +425,7 @@ export default function VideoInsightsModal({
               )}
             </Animated.View>
           </ScrollView>
+          </LiveProvider>
         )}
       </View>
       {memory && (

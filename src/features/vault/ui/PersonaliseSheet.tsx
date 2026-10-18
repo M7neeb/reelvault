@@ -24,6 +24,12 @@ const APP_ICONS: { key: string | null; label: string; colors: [string, string]; 
   { key: 'Forest', label: 'Forest', colors: ['#30D158', '#00785A'], image: require('../../../../assets/icons/forest.png') },
   { key: 'Grape', label: 'Grape', colors: ['#BF5AF2', '#5E5CE6'], image: require('../../../../assets/icons/grape.png') },
   { key: 'Mono', label: 'Mono', colors: ['#F5F5F7', '#DCDCE2'], image: require('../../../../assets/icons/mono.png') },
+  { key: 'Ocean', label: 'Ocean', colors: ['#64D2FF', '#0040DD'], image: require('../../../../assets/icons/ocean.png') },
+  { key: 'Cherry', label: 'Cherry', colors: ['#FF6B81', '#B0122E'], image: require('../../../../assets/icons/cherry.png') },
+  { key: 'Gold', label: 'Gold', colors: ['#FFE066', '#FF8A00'], image: require('../../../../assets/icons/gold.png') },
+  { key: 'Mint', label: 'Mint', colors: ['#7BF1C8', '#0F9D9A'], image: require('../../../../assets/icons/mint.png') },
+  { key: 'Aurora', label: 'Aurora', colors: ['#30D158', '#5E5CE6'], image: require('../../../../assets/icons/aurora.png') },
+  { key: 'Rose', label: 'Rose', colors: ['#FFC2D4', '#FF4F7B'], image: require('../../../../assets/icons/rose.png') },
 ];
 
 /** A tiny drawing of each layout, so the choice is visual. */
@@ -119,11 +125,28 @@ export default function PersonaliseSheet({
   const [labels, setLabels] = useState<RatingLabels>(prefs.ratingLabels);
   const [icon, setIcon] = useState<string | null>(() => actions.appIcon());
   const [weekly, setWeekly] = useState<boolean | null>(null);
+  const [otd, setOtd] = useState<boolean | null>(null);
+  const [yearly, setYearly] = useState<boolean | null>(null);
   const [note, setNote] = useState('');
 
   useEffect(() => {
     actions.getWrappedReminder().then(setWeekly).catch(() => setWeekly(false));
+    actions.getOnThisDayReminder().then(setOtd).catch(() => setOtd(false));
+    actions.getYearWrappedReminder().then(setYearly).catch(() => setYearly(false));
   }, [actions]);
+
+  /** Turns a notification on or off; a refusal from iOS turns the switch back off with a note. */
+  const toggle = (v: boolean, set: (b: boolean) => void, save: (on: boolean) => Promise<boolean>) => {
+    set(v);
+    save(v)
+      .then((ok) => {
+        if (!ok) {
+          set(false);
+          setNote('Notifications are off for ReelVault in iPhone Settings → Notifications.');
+        }
+      })
+      .catch(() => set(!v));
+  };
 
   const savePrefs = (next: Partial<VaultPrefs>) => void actions.setPrefs({ ...prefs, ratingLabels: labels, ...next });
 
@@ -253,24 +276,10 @@ export default function PersonaliseSheet({
         <Text style={styles.hint}>
           When a video is removed for good, its rating, status, keywords and picture stay in Overview. Off = only videos you rated, gave a status or put in a series.
         </Text>
-        {weekly !== null && (
-          <ToggleRow
-            label="Weekly Wrapped notification (Monday 10:00)"
-            value={weekly}
-            onChange={(v) => {
-              setWeekly(v);
-              actions
-                .setWrappedReminder(v)
-                .then((ok) => {
-                  if (!ok) {
-                    setWeekly(false);
-                    setNote('Notifications are off for ReelVault in iPhone Settings → Notifications.');
-                  }
-                })
-                .catch(() => setWeekly(!v));
-            }}
-          />
-        )}
+        {weekly !== null && <ToggleRow label="Weekly Wrapped notification (Monday 10:00)" value={weekly} onChange={(v) => toggle(v, setWeekly, actions.setWrappedReminder)} />}
+        {otd !== null && <ToggleRow label="On this day (9:00, on days with old videos)" value={otd} onChange={(v) => toggle(v, setOtd, actions.setOnThisDayReminder)} />}
+        {yearly !== null && <ToggleRow label="Your year's Wrapped is ready (1 December)" value={yearly} onChange={(v) => toggle(v, setYearly, actions.setYearWrappedReminder)} />}
+        <Text style={styles.hint}>On this day only fires on days you have videos from that date in earlier years; tapping it plays the memory.</Text>
       </Section>
     </SheetFrame>
   );

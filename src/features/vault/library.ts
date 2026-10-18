@@ -102,6 +102,15 @@ export async function addTagMany(ids: string[], name: string): Promise<void> {
   });
 }
 
+/** Takes the keyword off every video given (the keyword itself stays, for other videos). */
+export async function removeTagMany(ids: string[], name: string): Promise<void> {
+  if (!ids.length) return;
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ id: number }>('SELECT id FROM tags WHERE name = ?;', [name.trim()]);
+  if (!row) return;
+  await db.runAsync(`DELETE FROM video_tags WHERE tag_id = ? AND video_id IN (${marks(ids.length)});`, [row.id, ...ids]);
+}
+
 export async function setFlagMany(ids: string[], flag: -1 | 0 | 1): Promise<void> {
   if (!ids.length) return;
   const db = await getDb();

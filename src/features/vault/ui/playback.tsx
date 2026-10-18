@@ -1,6 +1,6 @@
 /**
- * Two full-screen players: HashPhotos' Slideshow (videos one after another)
- * and Compare and Pick (two videos stacked, keep the better one).
+ * Compare and Pick: two videos stacked, keep the better one. (Slideshow
+ * lives in slideshow.tsx.)
  *
  * expo-video is the one native module the UI may use (it has a web version);
  * `enableVideo=false` (the browser preview) shows placeholders instead.
@@ -17,112 +17,6 @@ import { fmtDuration, fmtSize } from './format';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 import Glyph from './Glyph';
-
-/** Plays the list from `startIndex`, moving on when each video ends. */
-export function SlideshowModal({
-  items,
-  startIndex,
-  enableVideo,
-  onClose,
-}: {
-  items: VaultItem[];
-  startIndex: number;
-  enableVideo: boolean;
-  onClose: () => void;
-}) {
-  const styles = useStyles(makeStyles);
-  const insets = useSafeAreaInsets();
-  const [index, setIndex] = useState(Math.min(Math.max(0, startIndex), Math.max(0, items.length - 1)));
-  const [paused, setPaused] = useState(false);
-  const item = items[index];
-
-  const player = useVideoPlayer(enableVideo && item?.uri ? item.uri : null, (pl) => {
-    pl.loop = false;
-    if (enableVideo) pl.play();
-  });
-
-  // A new video: load it into the same player.
-  useEffect(() => {
-    if (!enableVideo || !item?.uri) return;
-    player
-      .replaceAsync(item.uri)
-      .then(() => {
-        if (!paused) player.play();
-      })
-      .catch((e) => console.log(`[SLIDESHOW] could not load: ${String(e)}`));
-    // Only when the video changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index]);
-
-  useEffect(() => {
-    const sub = player.addListener('playToEnd', () => {
-      setIndex((i) => {
-        if (i + 1 < items.length) return i + 1;
-        onClose();
-        return i;
-      });
-    });
-    return () => sub.remove();
-  }, [player, items.length, onClose]);
-
-  function togglePause() {
-    if (!enableVideo) return setPaused((v) => !v);
-    if (player.playing) {
-      player.pause();
-      setPaused(true);
-    } else {
-      player.play();
-      setPaused(false);
-    }
-  }
-
-  if (!item) return null;
-
-  return (
-    <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.dark}>
-        {enableVideo ? (
-          <VideoView player={player} style={styles.full} contentFit="contain" nativeControls={false} />
-        ) : (
-          <Image source={item.thumbSource} style={styles.full} contentFit="contain" />
-        )}
-        <View style={[styles.slideTop, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity style={styles.round} onPress={onClose} accessibilityLabel="Close slideshow">
-            <Glyph name="close" color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.slideTitleWrap}>
-            <Text style={styles.slideTitle} numberOfLines={1}>
-              {friendlyName(item)}
-            </Text>
-            <Text style={styles.slideCount}>
-              {index + 1} of {items.length}
-            </Text>
-          </View>
-          <View style={styles.roundGhost} />
-        </View>
-        <View style={[styles.slideBottom, { paddingBottom: insets.bottom + 20 }]}>
-          <TouchableOpacity
-            style={[styles.round, index === 0 && styles.disabled]}
-            disabled={index === 0}
-            onPress={() => setIndex((i) => Math.max(0, i - 1))}
-            accessibilityLabel="Previous video">
-            <Glyph name="back" size={17} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.roundBig} onPress={togglePause} accessibilityLabel="Play or pause">
-            <Text style={styles.roundText}>{paused ? '▶' : '❚❚'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.round, index >= items.length - 1 && styles.disabled]}
-            disabled={index >= items.length - 1}
-            onPress={() => setIndex((i) => Math.min(items.length - 1, i + 1))}
-            accessibilityLabel="Next video">
-            <Text style={styles.roundText}>›</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-}
 
 function ComparePane({ item, enableVideo, label }: { item: VaultItem; enableVideo: boolean; label: string }) {
   const styles = useStyles(makeStyles);

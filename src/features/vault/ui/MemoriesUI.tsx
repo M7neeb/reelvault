@@ -14,6 +14,7 @@
  * Presentational only.
  */
 
+import { LiveCard } from './live';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -51,6 +52,9 @@ export const TONES: [string, string][] = [
   ['#FFD60A', '#3B1E00'],
   ['#5E5CE6', '#0E0B3A'],
   ['#AC8E68', '#1E160C'],
+  ['#66D4CF', '#022B2A'],
+  ['#FFD60A', '#2E2400'],
+  ['#7D7AFF', '#05042B'],
 ];
 const toneOf = (m: Memory) => TONES[m.tone % TONES.length];
 const longDate = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -342,8 +346,17 @@ function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, on
   const extra = m.videoIds.filter((id) => id !== m.coverId).slice(0, 3);
   return (
     <PressableScale onPress={onPress} scaleTo={0.97} style={[styles.featured, { width, height: h, backgroundColor: b }]} accessibilityRole="button" accessibilityLabel={`${m.title}. ${m.subtitle}. Play memory`}>
-      <KenBurns key={active ? 'on' : 'off'} source={thumbs.get(m.coverId)} ms={14000} seed={m.title.length} />
-      <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, ${hexA(b, 0)} 30%, ${hexA(b, 0.55)} 62%, ${hexA(b, 0.96)} 100%)`, hexA(b, 0.4))]} />
+      <LiveCard
+        id={`feat-${m.id}`}
+        uri={items.get(m.coverId)?.uri}
+        durationMs={items.get(m.coverId)?.durationMs}
+        radius={0}
+        priority={3}
+        style={StyleSheet.absoluteFill}
+        soundStyle={{ top: 58, right: 16 }}
+        under={<KenBurns key={active ? 'on' : 'off'} source={thumbs.get(m.coverId)} ms={14000} seed={m.title.length} />}
+      />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, ${hexA(b, 0)} 30%, ${hexA(b, 0.55)} 62%, ${hexA(b, 0.96)} 100%)`, hexA(b, 0.4))]} />
       {num && (
         <Text style={[styles.bigNum, { color: hexA(a, 0.9) }]} numberOfLines={1}>
           {num}

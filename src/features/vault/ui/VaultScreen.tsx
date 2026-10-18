@@ -42,7 +42,15 @@ import {
   resolveScheme,
   safeBatchGb,
 } from './logic';
-import { SlideshowModal, CompareModal } from './playback';
+import { CompareModal } from './playback';
+import { SlideshowModal } from './slideshow';
+import { DuplicateReview } from './dupReview';
+import { MetaImportSheet } from './metaImportUI';
+import { WifiScreen } from './wifiUI';
+import { isSmartSearch, parseSearch } from './query';
+import { tick } from './haptics';
+import { albumsByWatching, notInAYear, randomPick, sortByWatching, type WatchSort } from '../history';
+import type { VaultPlay } from '../stats';
 import { OptionsSheet, PromptSheet, type OptionItem } from './prompts';
 import SearchSheet from './SearchSheet';
 import { PasscodeSheet, SettingsSheet, type PasscodeMode } from './security';
@@ -51,6 +59,7 @@ import Sidebar from './Sidebar';
 import { paletteFor, rgbOf, sheet, ThemeContext, usePalette, useStyles, withAccent, type Palette } from './theme';
 import {
   SORTS,
+  WATCH_SORTS,
   type CompressQuality,
   type GroupBy,
   type ImportSource,
@@ -133,6 +142,8 @@ function VaultScreenBody({
   prefs = DEFAULT_VAULT_PREFS,
   wrappedRequest,
   onWrappedHandled,
+  openRequest,
+  onOpenRequestHandled,
   overview = EMPTY_OVERVIEW,
   devInitialState: dev,
 }: VaultScreenProps) {
@@ -157,6 +168,8 @@ function VaultScreenBody({
   const [personalise, setPersonalise] = useState(dev?.personaliseOpen ?? false);
   // Play counts for the Detailed layout.
   const [playCounts, setPlayCounts] = useState<Map<string, number>>(new Map());
+  // Every play, for sorting by watching, the year-old shelf and the random pick.
+  const [allPlays, setAllPlays] = useState<VaultPlay[]>([]);
   const loadPlayCounts = () => {
     actions
       .loadPlays()
@@ -164,6 +177,7 @@ function VaultScreenBody({
         const m = new Map<string, number>();
         for (const x of ps) m.set(x.videoId, (m.get(x.videoId) ?? 0) + 1);
         setPlayCounts(m);
+        setAllPlays(ps);
       })
       .catch(() => undefined);
   };
@@ -176,6 +190,22 @@ function VaultScreenBody({
     setOpenWrapped(true);
     onWrappedHandled?.();
   }, [wrappedRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // An On this day or yearly Wrapped notification was tapped.
+  const [memoryKind, setMemoryKind] = useState<'onThisDay' | undefined>(undefined);
+  const [openYear, setOpenYear] = useState(false);
+  useEffect(() => {
+    if (!openRequest) return;
+    if (openRequest === 'onThisDay') {
+      setMemoryKind('onThisDay');
+      setInsights('memories');
+    } else {
+      setOpenYear(true);
+      setOpenWrapped(true);
+      setInsights('wrapped');
+    }
+    onOpenRequestHandled?.();
+  }, [openRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VaultItem[] | null>(null);
@@ -206,6 +236,9 @@ function VaultScreenBody({
   const [dateFor, setDateFor] = useState<string[] | null>(null);
   const [slideshow, setSlideshow] = useState<{ items: VaultItem[]; start: number } | null>(null);
   const [compare, setCompare] = useState<[VaultItem, VaultItem] | null>(null);
+  const [dupReview, setDupReview] = useState<'duplicates' | 'similar' | null>(dev?.dupReviewOpen ? 'similar' : null);
+  const [metaOpen, setMetaOpen] = useState(dev?.metaImportOpen ?? false);
+  const [wifiOpen, setWifiOpen] = useState(dev?.wifiOpen ?? false);
   const [jumpTo, setJumpTo] = useState<{ key: string; nonce: number } | null>(null);
   /** The filter editor: a Smart Filter (`save`) or a one-off search (`search`). */
   const [editingSmart, setEditingSmart] = useState<{
@@ -236,6 +269,8 @@ function VaultScreenBody({
       .catch((e) => console.log(`[SECURITY] state failed: ${String(e)}`));
   }, [actions]);
 
+  // Smarter search: words like "2024", "8+", "long", "#holiday" or "unwatched" are filters; the rest is searched as text.
+  const parsedSearch = useMemo(() => parseSearch(query, allTags.map((t) => t.name), Date.now()), [query, allTags]);
   useEffect(() => {
     const q = query.trim();
     if (!q) {
@@ -243,12 +278,19 @@ function VaultScreenBody({
       return;
     }
     let cancelled = false;
+    const smart = isSmartSearch(parsedSearch);
     const t = setTimeout(() => {
-      actions
-        .search(q)
+      (parsedSearch.text ? actions.search(parsedSearch.text) : Promise.resolve(items))
         .then((r) => {
-          if (!cancelled) setResults(r);
-          console.log(`[SEARCH] "${q}" → ${r.length}`);
+          const out = smart
+            ? r.filter(
+                (v) =>
+                  matchesRule(v, parsedSearch.rule) &&
+                  (!parsedSearch.watch || (parsedSearch.watch === 'watched') === (playCounts.get(v.id) ?? 0) > 0)
+              )
+            : r;
+          if (!cancelled) setResults(out);
+          console.log(`[SEARCH] "${q}" → ${out.length}`);
         })
         .catch((e) => console.log(`[SEARCH] failed: ${String(e)}`));
     }, 250);
@@ -256,7 +298,7 @@ function VaultScreenBody({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [query, actions]);
+  }, [query, parsedSearch, actions, items, playCounts]);
 
   useEffect(() => {
     if (dev?.slideshowOpen && items.length) setSlideshow({ items: items.filter((v) => !v.isPrivate), start: 0 });
@@ -315,7 +357,7 @@ function VaultScreenBody({
     return m;
   }, [groups]);
 
-  const shown = useMemo(() => {
+  const shownRaw = useMemo(() => {
     const byGroups = (gs: string[][]) => {
       const byId = new Map(publicItems.map((v) => [v.id, v]));
       return gs.flat().flatMap((id) => {
@@ -372,6 +414,43 @@ function VaultScreenBody({
         return pool;
     }
   }, [filter, pool, visibleTrash, visibleGroups, similarGroups, publicItems, albums, tagMap, smartFilters]);
+  // Most / least / last watched are sorted here, from your plays (duplicates and Recently Deleted keep their order).
+  const shown = useMemo(
+    () =>
+      WATCH_SORTS.includes(viewOptions.sort) && !['deleted', 'duplicates', 'similar'].includes(filter.kind)
+        ? sortByWatching(shownRaw, allPlays, viewOptions.sort as WatchSort)
+        : shownRaw,
+    [shownRaw, allPlays, viewOptions.sort, filter.kind]
+  );
+
+  // "Haven't watched in a year" and the random pick.
+  const forgotten = useMemo(
+    () => (filter.kind === 'all' && !results ? notInAYear(publicItems, allPlays, Date.now(), 16) : []),
+    [filter.kind, results, publicItems, allPlays]
+  );
+  /** Albums as the sidebar lists them: A to Z (as stored), by how much their videos are watched, or by last use. */
+  function sortAlbums(list: UiAlbum[]): UiAlbum[] {
+    if (prefs.albumSort === 'watched') return albumsByWatching(list, (id) => items.filter((v) => v.albumIds.includes(id)).map((v) => v.id), allPlays);
+    if (prefs.albumSort === 'recent') return [...list].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
+    return list;
+  }
+
+  function playRandom() {
+    tick();
+    const from = shown.length ? shown : publicItems;
+    const order: VaultItem[] = [];
+    let left = [...from];
+    // A weighted shuffle: what you rarely watch comes up more, and swiping keeps it random.
+    while (left.length && order.length < 60) {
+      const pick = randomPick(left, allPlays, Date.now(), Math.random, order[order.length - 1]?.id);
+      if (!pick) break;
+      order.push(pick);
+      left = left.filter((v) => v.id !== pick.id);
+    }
+    if (!order.length) return;
+    setPlayList(order);
+    setPlaying(order[0]);
+  }
 
   const activeSmart = filter.kind === 'smart' ? smartFilters.find((s) => s.id === filter.id) : undefined;
   const activeAlbum = filter.kind === 'album' ? albums.find((a) => a.id === filter.id) : undefined;
@@ -530,6 +609,8 @@ function VaultScreenBody({
         { label: 'Record with Camera', onPress: () => actions.onImport('camera') },
         { label: 'Paste Link…', hint: 'Direct video link', onPress: pasteLink },
         { label: 'Whole Folder from Files…', hint: 'Copies', onPress: actions.onImportFolder },
+        { label: 'From Computer (Wi-Fi)…', hint: 'Drop videos in a browser', onPress: () => setWifiOpen(true) },
+        { label: 'HashPhotos Info…', hint: 'Keywords, ratings', onPress: () => setMetaOpen(true) },
       ],
     });
   }
@@ -857,6 +938,12 @@ function VaultScreenBody({
           {hiddenTrash > 0 ? ` ${plural(hiddenTrash, 'private video')} hidden - unlock Private to see.` : ''}
         </Text>
       )}
+      {(filter.kind === 'duplicates' || filter.kind === 'similar') && groups.length > 0 && (
+        <TouchableOpacity style={styles.reviewBtn} onPress={() => setDupReview(filter.kind as 'duplicates' | 'similar')}>
+          <Icon name="sparkle" size={15} color="#fff" />
+          <Text style={styles.reviewText}>Review and clean up…</Text>
+        </TouchableOpacity>
+      )}
       {(filter.kind === 'duplicates' || filter.kind === 'similar') && (
         <Text style={styles.note}>
           {groups.length
@@ -899,6 +986,39 @@ function VaultScreenBody({
           </ScrollView>
         </View>
       )}
+      {forgotten.length > 0 && look !== 'desktop' && (
+        <View style={styles.continueBox}>
+          <View style={styles.shelfHead}>
+            <Text style={styles.continueTitle}>Haven’t watched in a year</Text>
+            <TouchableOpacity onPress={() => setSlideshow({ items: forgotten.map((f) => f.video), start: 0 })} hitSlop={8}>
+              <Text style={styles.shelfAction}>Slideshow</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.continueRow}>
+            {forgotten.map(({ video: v, why }) => (
+              <TouchableOpacity
+                key={v.id}
+                style={styles.continueCard}
+                onPress={() => {
+                  setPlayList(forgotten.map((f) => f.video));
+                  setPlaying(v);
+                }}
+                accessibilityLabel={`${friendlyName(v)}. ${why}`}>
+                <ThumbImage source={v.thumbSource} style={styles.continueThumb} contentFit="cover" />
+                <View style={styles.continuePlay}>
+                  <Icon name="history" size={13} color="#fff" />
+                </View>
+                <Text style={styles.continueName} numberOfLines={1}>
+                  {friendlyName(v)}
+                </Text>
+                <Text style={styles.continueAt} numberOfLines={1}>
+                  {why}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
       {!results && !special && look !== 'simple' && look !== 'desktop' && (
         <View style={styles.sortRow}>
           <TouchableOpacity style={styles.chip} onPress={() => setViewOptionsOpen(true)}>
@@ -907,6 +1027,18 @@ function VaultScreenBody({
               {viewOptions.groupBy !== 'none' ? ` · by ${viewOptions.groupBy}` : ''} ›
             </Text>
           </TouchableOpacity>
+          {shown.length > 1 && (
+            <>
+              <TouchableOpacity style={[styles.chip, styles.chipRow]} onPress={playRandom} accessibilityLabel="Play a random video">
+                <Icon name="dice" size={13} color={p.link} />
+                <Text style={styles.chipText}>Random</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.chip, styles.chipRow]} onPress={() => setSlideshow({ items: shown, start: 0 })} accessibilityLabel="Slideshow">
+                <Icon name="slideshow" size={13} color={p.link} />
+                <Text style={styles.chipText}>Slideshow</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       )}
     </View>
@@ -1053,6 +1185,8 @@ function VaultScreenBody({
         <SearchSheet
           value={query}
           tags={allTags}
+          chips={query.trim() && isSmartSearch(parsedSearch) ? parsedSearch.chips : []}
+          matches={results?.length ?? null}
           onChange={setQuery}
           onClose={() => setSearchOpen(false)}
           onSaveSmart={() => {
@@ -1073,7 +1207,9 @@ function VaultScreenBody({
           tags={allTags}
           tagCounts={tagCounts}
           smartFilters={smartFilters}
-          albums={privateOpen ? albums : publicAlbums}
+          albums={sortAlbums(privateOpen ? albums : publicAlbums)}
+          albumSort={prefs.albumSort}
+          onAlbumSort={(albumSort) => actions.setPrefs({ ...prefs, albumSort }).catch(fail('PREFS'))}
           folders={folders}
           deletedCount={visibleTrash.length}
           duplicateCount={visibleGroups.flat().length}
@@ -1149,6 +1285,12 @@ function VaultScreenBody({
           onRate={(n) => actions.onRateMany(selected, n)}
           onFlag={(f) => actions.onSetFlag(selected, f)}
           onAddTag={(name) => actions.onAddTagMany(selected, name)}
+          onRemoveTag={(name) => actions.onRemoveTagMany(selected, name)}
+          selectedTags={(() => {
+            const m = new Map<string, number>();
+            for (const v of items) if (selected.includes(v.id)) for (const t of v.tagNames) m.set(t, (m.get(t) ?? 0) + 1);
+            return [...m.entries()].map(([name, n]) => ({ name, count: n })).sort((a, b) => b.count - a.count);
+          })()}
           onStatus={(s) => actions.onSetStatus(selected, s)}
           onAddToAlbums={(ids) => actions.onAddToAlbums(selected, ids)}
           onNewAlbum={() => newAlbum({ isPrivate: inPrivate }, selected)}
@@ -1236,6 +1378,8 @@ function VaultScreenBody({
       {settingsOpen && (
         <SettingsSheet
           security={security}
+          loadPasscodeLog={actions.passcodeLog}
+          onClearPasscodeLog={actions.clearPasscodeLog}
           onTurnOnPasscode={(kind) =>
             createPasscode(kind, 'Choose a Passcode', (code) => actions.setPasscode(kind, code))
           }
@@ -1253,7 +1397,7 @@ function VaultScreenBody({
           onFaceId={(enabled) => actions.setFaceId(enabled).then(refreshSecurity).catch(fail('SECURITY'))}
           onSetFake={() =>
             createPasscode(security?.passcodeKind ?? '6', 'Choose a Fake Passcode', async (code) => {
-              if ((await actions.checkPasscode(code)) === 'real') {
+              if ((await actions.checkPasscode(code, { log: false })) === 'real') {
                 notify('Pick a different code', 'The fake passcode must not be your real passcode.');
                 return;
               }
@@ -1322,6 +1466,9 @@ function VaultScreenBody({
           initialTab={insights}
           initialWrapped={openWrapped}
           initialMemory={dev?.memoryOpen}
+          initialMemoryKind={memoryKind}
+          initialYear={openYear}
+          initialHistoryStats={dev?.historyStats}
           items={inPrivate ? privateItems : publicItems}
           deleted={visibleTrash}
           albums={albums.length}
@@ -1366,6 +1513,7 @@ function VaultScreenBody({
           initialInfoOpen={dev?.infoOpen}
           initialMenuOpen={dev?.menuOpen}
           initialSmallerOpen={dev?.smallerOpen}
+          initialCoverOpen={dev?.coverPickerOpen}
           initialEditorTab={dev?.editorTab}
           onSlideshow={(item) => {
             const start = Math.max(0, shown.findIndex((v) => v.id === item.id));
@@ -1394,7 +1542,52 @@ function VaultScreenBody({
           items={slideshow.items}
           startIndex={slideshow.start}
           enableVideo={enableVideo}
+          options={prefs.slideshow}
+          autoplay={dev?.slideshowPlay}
+          onOptions={(o) => actions.setPrefs({ ...prefs, slideshow: o }).catch(fail('PREFS'))}
+          onOpenVideo={(item) => {
+            setSlideshow(null);
+            setPlaying(item);
+          }}
           onClose={() => setSlideshow(null)}
+        />
+      )}
+
+      {dupReview && (
+        <DuplicateReview
+          groups={dupReview === 'similar' ? similarGroups : visibleGroups}
+          items={publicItems}
+          plays={playCounts}
+          kind={dupReview}
+          onOpen={(v) => setPlaying(v)}
+          onApply={async (plans) => {
+            for (const pl of plans) {
+              for (const t of pl.addTags) await actions.onAddTagMany([pl.keep.id], t);
+              if (pl.rating) await actions.onRateMany([pl.keep.id], pl.rating);
+            }
+            await actions.onDeleteMany(plans.flatMap((pl) => pl.remove));
+          }}
+          onClose={() => setDupReview(null)}
+        />
+      )}
+
+      {metaOpen && (
+        <MetaImportSheet
+          items={items}
+          actions={actions}
+          autoPick={dev?.metaImportOpen}
+          onDone={(line) => console.log(`[META] ${line}`)}
+          onClose={() => setMetaOpen(false)}
+        />
+      )}
+
+      {wifiOpen && (
+        <WifiScreen
+          wifi={actions.wifi}
+          onClose={() => {
+            setWifiOpen(false);
+            loadPlayCounts();
+          }}
         />
       )}
 
@@ -1532,6 +1725,11 @@ const makeStyles = (p: Palette) =>
     pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
     note: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 4 },
     sortRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingHorizontal: 4, paddingTop: 2 },
+    chipRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    shelfHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingRight: 8 },
+    shelfAction: { color: p.link, fontSize: 14, fontWeight: '700' },
+    reviewBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, marginLeft: 4 },
+    reviewText: { color: '#fff', fontSize: 14, fontWeight: '800' },
     chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: p.elevated },
     chipText: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
     empty: { color: p.textMuted, fontStyle: 'italic', textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },

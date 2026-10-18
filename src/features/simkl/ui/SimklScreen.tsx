@@ -177,7 +177,7 @@ export default function SimklScreen(props: SimklScreenProps) {
         {connected && (
           <View style={styles.buttons}>
             <IconButton icon="dice" label="Pick something for me" onPress={() => setPick(true)} />
-            {category !== 'movie' && <IconButton icon="calendar" label="Upcoming episodes" onPress={() => setCalendar(true)} />}
+            <IconButton icon="calendar" label={category === 'movie' ? 'Upcoming releases' : 'Upcoming episodes'} onPress={() => setCalendar(true)} />
             <IconButton icon="stats" label="Stats and review" onPress={() => setStats('overview')} />
             <IconButton icon="more" label="Simkl settings" onPress={() => setAccount(true)} />
           </View>
@@ -418,7 +418,7 @@ export default function SimklScreen(props: SimklScreenProps) {
         />
       )}
       {discover && <DiscoverModal type={category} library={library} actions={actions} onOpen={setOpen} onClose={() => setDiscover(false)} />}
-      {calendar && <CalendarModal type={category} items={ofType} actions={actions} onOpen={setOpen} onClose={() => setCalendar(false)} />}
+      {calendar && <CalendarModal type={category} items={ofType} allItems={items} actions={actions} onOpen={setOpen} onClose={() => setCalendar(false)} />}
       {stats && <InsightsModal items={items} actions={actions} initialTab={stats} onClose={() => setStats(null)} />}
       {pick && (
         <PickModal

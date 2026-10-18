@@ -31,6 +31,9 @@
  * mounting the player and shows a placeholder stage instead.
  */
 
+// The one native view the viewer uses besides the player: Apple's AirPlay button (renders nothing where missing).
+import { AirPlayButton, hasAirPlay } from '../../../../modules/reelvault-airplay';
+import { CoverPicker } from './coverPicker';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -113,6 +116,7 @@ function ViewerPage({
   initialInfoOpen = false,
   initialMenuOpen = false,
   initialSmallerOpen = false,
+  initialCoverOpen = false,
   initialEditorTab,
   onSlideshow,
   onNearby,
@@ -140,6 +144,8 @@ function ViewerPage({
 
   const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (pl) => {
     pl.loop = false;
+    // AirPlay sends the video itself to the TV, not only the sound.
+    pl.allowsExternalPlayback = true;
     if (enableVideo) pl.play();
     pl.timeUpdateEventInterval = 0.2;
   });
@@ -162,6 +168,7 @@ function ViewerPage({
   const [dateOpen, setDateOpen] = useState(false);
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
   const [smallerOpen, setSmallerOpen] = useState(initialSmallerOpen);
+  const [coverOpen, setCoverOpen] = useState(initialCoverOpen);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'trim' | 'crop' | 'size' | null>(initialEditorTab ?? null);
   const [note, setNote] = useState('');
@@ -645,6 +652,11 @@ function ViewerPage({
                 </View>
 
                 <View style={styles.headerRight}>
+                  {hasAirPlay && (
+                    <View style={styles.airplay} accessibilityLabel="AirPlay">
+                      <AirPlayButton style={{ width: 26, height: 26 }} tint="#ffffff" activeTint={p.accent} />
+                    </View>
+                  )}
                   <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
                   <IconButton icon="more" label="More" clear color="#fff" size={38} onPress={() => setMenuOpen(true)} />
                 </View>
@@ -1087,6 +1099,15 @@ function ViewerPage({
                   }}
                 />
                 <MenuRow
+                  label="Choose Cover Frame…"
+                  hint="Scrub to the exact frame"
+                  onPress={() => {
+                    setMenuOpen(false);
+                    if (player.playing) player.pause();
+                    setCoverOpen(true);
+                  }}
+                />
+                <MenuRow
                   label="Choose Cover Photo…"
                   hint=""
                   onPress={() => {
@@ -1229,6 +1250,20 @@ function ViewerPage({
           />
         )}
 
+        {coverOpen && (
+          <CoverPicker
+            item={item}
+            frames={frames}
+            enableVideo={enableVideo}
+            startMs={progress * totalSec * 1000}
+            onUse={async (ms) => {
+              await actions.onSetCoverFrame(item, ms);
+              setNote('Cover changed');
+            }}
+            onClose={() => setCoverOpen(false)}
+          />
+        )}
+
         {smallerOpen && (
           <SmallerSheet
             items={[item]}
@@ -1269,6 +1304,7 @@ type ViewerProps = {
   initialInfoOpen?: boolean;
   initialMenuOpen?: boolean;
   initialSmallerOpen?: boolean;
+  initialCoverOpen?: boolean;
   /** Preview only: open the editor on this tab. */
   initialEditorTab?: 'trim' | 'crop' | 'size';
   /** Play the current list as a slideshow, starting here. */
@@ -1410,7 +1446,8 @@ const makeStyles = (p: Palette) =>
     titleWrap: { alignItems: 'center', flex: 1, paddingHorizontal: 8 },
     titleDate: { color: '#fff', fontSize: 17, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 6 },
     titleTime: { color: 'rgba(255,255,255,0.75)', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 6 },
-    headerRight: { flexDirection: 'row', gap: 8 },
+    headerRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+    airplay: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
     linkPill: {
       alignSelf: 'center',
       maxWidth: '80%',

@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.8.0",
+    "version": "1.9.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -10,7 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.muneeb.reelvault",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "ReelVault receives videos you send from your computer over Wi-Fi."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -117,11 +120,59 @@
               "foregroundImage": "./assets/icons/classic.png",
               "backgroundColor": "#000000"
             }
+          },
+          {
+            "name": "Ocean",
+            "ios": "./assets/icons/ocean.png",
+            "android": {
+              "foregroundImage": "./assets/icons/ocean.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Cherry",
+            "ios": "./assets/icons/cherry.png",
+            "android": {
+              "foregroundImage": "./assets/icons/cherry.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Gold",
+            "ios": "./assets/icons/gold.png",
+            "android": {
+              "foregroundImage": "./assets/icons/gold.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Mint",
+            "ios": "./assets/icons/mint.png",
+            "android": {
+              "foregroundImage": "./assets/icons/mint.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Aurora",
+            "ios": "./assets/icons/aurora.png",
+            "android": {
+              "foregroundImage": "./assets/icons/aurora.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Rose",
+            "ios": "./assets/icons/rose.png",
+            "android": {
+              "foregroundImage": "./assets/icons/rose.png",
+              "backgroundColor": "#000000"
+            }
           }
         ]
       ]
     ],
-    "runtimeVersion": "1.8.0",
+    "runtimeVersion": "1.9.0",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {

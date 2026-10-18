@@ -10,6 +10,7 @@
  * screenshot of the app never contains anything personal.
  */
 
+import { parseMetadataFile, type MetaFile } from '../hashphotos';
 import { groupDuplicates } from './logic';
 import type {
   OverviewData,
@@ -370,3 +371,12 @@ export const FIXTURE_OVERVIEW: OverviewData = {
     { videoId: 'fixture-7', seriesId: 'fixture-series-2', position: 3, label: null },
   ],
 };
+
+/** A HashPhotos metadata export for the preview: six files, one not in the vault. */
+export const FIXTURE_META: MetaFile = parseMetadataFile(
+  [
+    'Filename,Keywords,Rating,Title,Caption',
+    ...PUBLIC_ITEMS.slice(0, 5).map((v, i) => `${v.filename},"Holiday; ${['Beach', 'Family', 'City', 'Food', 'Night'][i]}",${5 - (i % 3)},,${i === 0 ? 'First day there' : ''}`),
+    'IMG_9999.MOV,"Old phone",3,,',
+  ].join('\n')
+)!;

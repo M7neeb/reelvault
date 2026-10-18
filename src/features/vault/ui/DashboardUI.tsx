@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated from 'react-native-reanimated';
 
@@ -27,6 +27,7 @@ import { Bars, Card, ChangePill, gradient, iconOr, PhotoCard, Ring, SectionTitle
 import { tick } from './haptics';
 import type { Memory } from '../memories';
 import { TONES } from './MemoriesUI';
+import { LiveCard } from './live';
 import { enterUp, PressableScale } from './motion';
 import { Aurora, CountUp, hexA, KenBurns, Pulse } from './storyKit';
 import { Segment } from './sheets';
@@ -79,6 +80,7 @@ export default function Dashboard({
   const all = useMemo(() => videoDashboard(items, plays), [items, plays]);
   const health = useMemo(() => libraryHealth(items, plays), [items, plays]);
   const own = useMemo(() => new Set(items.map((v) => v.id)), [items]);
+  const byIdMap = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
   const times = useMemo(() => plays.filter((x) => own.has(x.videoId)).map((x) => x.startedAt), [plays, own]);
   const streak = useMemo(() => streaks(times, now), [times]); // eslint-disable-line react-hooks/exhaustive-deps
   const heat = useMemo(() => watchHeatmap(times.map((t) => new Date(t).toISOString()), now, 18), [times]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -160,8 +162,16 @@ export default function Dashboard({
       {memory && onMemory && (
         <Animated.View entering={enterUp(1)}>
           <PressableScale onPress={() => onMemory(memory)} scaleTo={0.97} style={[styles.memory, { backgroundColor: TONES[memory.tone % TONES.length][1] }]} accessibilityLabel={`Play memory: ${memory.title}`}>
-            <KenBurns source={thumbs.get(memory.coverId)} ms={16000} seed={3} />
-            <View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, gradient(`linear-gradient(90deg, ${hexA(TONES[memory.tone % TONES.length][1], 0.95)} 0%, ${hexA(TONES[memory.tone % TONES.length][1], 0.55)} 55%, ${hexA(TONES[memory.tone % TONES.length][1], 0.1)} 100%)`)]} />
+            <LiveCard
+              id={`dash-memory-${memory.id}`}
+              uri={byIdMap.get(memory.coverId)?.uri}
+              durationMs={byIdMap.get(memory.coverId)?.durationMs}
+              radius={0}
+              priority={2}
+              style={StyleSheet.absoluteFill}
+              under={<KenBurns source={thumbs.get(memory.coverId)} ms={16000} seed={3} />}
+            />
+            <View pointerEvents="none" style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, gradient(`linear-gradient(90deg, ${hexA(TONES[memory.tone % TONES.length][1], 0.95)} 0%, ${hexA(TONES[memory.tone % TONES.length][1], 0.55)} 55%, ${hexA(TONES[memory.tone % TONES.length][1], 0.1)} 100%)`)]} />
             <View style={{ flex: 1, gap: 3, padding: 16, justifyContent: 'flex-end' }}>
               <Text style={[styles.memoryKicker, { color: TONES[memory.tone % TONES.length][0] }]}>A MEMORY FOR YOU · {memory.kicker}</Text>
               <Text style={styles.memoryTitle} numberOfLines={2}>

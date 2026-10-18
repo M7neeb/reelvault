@@ -180,3 +180,27 @@ test('storage extras: grade, forecast and a treemap that fills the box', async (
   assert.ok(Math.abs(a.w * a.h - 60000) < 1);
   for (const t of tiles) assert.ok(t.x >= -0.01 && t.y >= -0.01 && t.x + t.w <= 600.01 && t.y + t.h <= 400.01);
 });
+
+test('shrink candidates: big, rarely watched, not shrunk before', async () => {
+  const { shrinkCandidates } = await import('../src/features/vault/recap.ts');
+  const MB = 1024 * 1024;
+  const now = new Date(2026, 9, 18).getTime();
+  const v = (id, over) => ({ id, title: null, filename: `${id}.mov`, createdAt: 0, importedAt: 0, durationMs: 1, sizeBytes: 300 * MB, rating: 0, tagNames: [], ...over });
+  const vids = [v('big', { meta: { codec: 'avc1' } }), v('hevc', { meta: { codec: 'hvc1' } }), v('small', { sizeBytes: 50 * MB }), v('done', { originalSizeBytes: 600 * MB }), v('loved')];
+  const plays = [1, 2, 3].map((i) => ({ videoId: 'loved', startedAt: now - i * 86_400_000, watchedMs: 1000 }));
+  const out = shrinkCandidates(vids, plays, now);
+  assert.deepEqual(out.map((x) => x.video.id), ['big', 'hevc']);
+  assert.ok(out[0].saves > out[1].saves);
+});
+
+test('on this day notifications: only dates with videos from earlier years', async () => {
+  const { onThisDayPlan } = await import('../src/features/vault/recap.ts');
+  const now = new Date(2026, 9, 18, 20).getTime();
+  const v = (id, createdAt) => ({ id, title: id, filename: `${id}.mov`, createdAt, importedAt: 0, durationMs: 1, sizeBytes: 1, rating: 0, tagNames: [] });
+  const plan = onThisDayPlan([v('a', new Date(2024, 9, 20, 15).getTime()), v('b', new Date(2023, 9, 20).getTime()), v('c', new Date(2026, 9, 21).getTime()), v('d', new Date(2025, 9, 18).getTime())], now);
+  assert.equal(plan.length, 1);
+  assert.equal(new Date(plan[0].at).getDate(), 20);
+  assert.equal(new Date(plan[0].at).getHours(), 9);
+  assert.match(plan[0].title, /2 years of memories/);
+  assert.equal(plan[0].count, 2);
+});

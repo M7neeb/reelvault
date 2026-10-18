@@ -219,9 +219,14 @@ export function SettingsSheet({
   importQuality,
   onImportQuality,
   onPersonalise,
+  loadPasscodeLog,
+  onClearPasscodeLog,
   onClose,
 }: {
   security: SecurityState | null;
+  /** Wrong and fake passcodes typed at Private (newest first). */
+  loadPasscodeLog?: () => Promise<{ at: number; kind: 'wrong' | 'fake' | 'faceid-failed' }[]>;
+  onClearPasscodeLog?: () => Promise<void>;
   onTurnOnPasscode: (kind: PasscodeKind) => void;
   onChangePasscode: () => void;
   onTurnOffPasscode: () => void;
@@ -240,7 +245,14 @@ export function SettingsSheet({
 }) {
   const styles = useStyles(makeStyles);
   const [kind, setKind] = useState<PasscodeKind>('6');
+  const [log, setLog] = useState<{ at: number; kind: 'wrong' | 'fake' | 'faceid-failed' }[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const on = !!security?.passcodeKind;
+  useEffect(() => {
+    loadPasscodeLog?.()
+      .then(setLog)
+      .catch(() => setLog([]));
+  }, [loadPasscodeLog]);
 
   return (
     <SheetFrame title="Settings" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
@@ -288,6 +300,40 @@ export function SettingsSheet({
         )}
       </Section>
 
+      {log !== null && (
+        <Section label="Who tried to get in">
+          {log.length === 0 ? (
+            <Text style={styles.hint}>No wrong passcodes so far. Every wrong or fake passcode typed at Private shows up here, with the time.</Text>
+          ) : (
+            <>
+              <Text style={styles.body}>
+                {log.filter((x) => x.kind === 'wrong').length} wrong · {log.filter((x) => x.kind === 'fake').length} fake passcode
+                {log.filter((x) => x.kind === 'faceid-failed').length ? ` · ${log.filter((x) => x.kind === 'faceid-failed').length} Face ID failed` : ''}
+              </Text>
+              {(showAll ? log : log.slice(0, 6)).map((x, i) => (
+                <View key={`${x.at}-${i}`} style={styles.logRow}>
+                  <View style={[styles.logDot, { backgroundColor: x.kind === 'fake' ? '#FF9F0A' : '#FF453A' }]} />
+                  <Text style={styles.logText}>{x.kind === 'wrong' ? 'Wrong passcode' : x.kind === 'fake' ? 'Fake passcode used' : 'Face ID failed'}</Text>
+                  <Text style={styles.logTime}>{new Date(x.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Text>
+                </View>
+              ))}
+              <Wrap>
+                {log.length > 6 && <Chip label={showAll ? 'Show fewer' : `Show all ${log.length}`} onPress={() => setShowAll((v) => !v)} />}
+                {onClearPasscodeLog && (
+                  <Chip
+                    label="Clear the list"
+                    danger
+                    onPress={() => {
+                      void onClearPasscodeLog().then(() => setLog([]));
+                    }}
+                  />
+                )}
+              </Wrap>
+            </>
+          )}
+        </Section>
+      )}
+
       <Section label="Import">
         <Chip label="Import a whole folder from Files…" onPress={onImportFolder} />
         <Text style={styles.hint}>Copies every video in the folder and its sub-folders; the originals stay where they are.</Text>
@@ -324,6 +370,10 @@ const makeStyles = (p: Palette) =>
     body: { color: p.textSoft, fontSize: 14 },
     subLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', paddingTop: 8 },
     hint: { color: p.textSecondary, fontSize: 12 },
+    logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
+    logDot: { width: 8, height: 8, borderRadius: 4 },
+    logText: { color: p.text, fontSize: 14, flex: 1 },
+    logTime: { color: p.textSecondary, fontSize: 12, fontVariant: ['tabular-nums'] },
 
     screen: { flex: 1, backgroundColor: p.bg, alignItems: 'center', paddingTop: 70, paddingHorizontal: 24 },
     cancel: { position: 'absolute', top: 56, left: 20, padding: 8 },

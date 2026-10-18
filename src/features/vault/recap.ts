@@ -21,6 +21,8 @@ export type RVideo = {
   notes?: string | null;
   flag?: number;
   meta?: { codec?: string } | null;
+  /** Size before Make Smaller; set once a video has been shrunk. */
+  originalSizeBytes?: number | null;
 };
 
 export type RPlay = { videoId: string; startedAt: number; watchedMs: number };
@@ -435,6 +437,30 @@ export function onThisDay(videos: RVideo[], now: number): { videos: RVideo[]; ex
   return { videos: videos.filter((v) => near(v, 3)).sort((a, b) => b.createdAt - a.createdAt), exact: false };
 }
 
+/**
+ * The daily "On this day" notifications for the next `days` days, at `hour`
+ * o'clock: only days that have videos filmed on that date in earlier years.
+ * Planned ahead because iOS shows them by itself, with the app closed.
+ */
+export function onThisDayPlan(videos: RVideo[], now: number, days = 14, hour = 9): { at: number; title: string; body: string; count: number }[] {
+  const out: { at: number; title: string; body: string; count: number }[] = [];
+  const n = new Date(now);
+  for (let i = 0; i < days; i++) {
+    const day = new Date(n.getFullYear(), n.getMonth(), n.getDate() + i, hour, 0);
+    if (day.getTime() <= now + 60_000) continue;
+    const list = videos.filter((v) => {
+      const c = new Date(v.createdAt);
+      return c.getFullYear() < day.getFullYear() && c.getMonth() === day.getMonth() && c.getDate() === day.getDate();
+    });
+    if (!list.length) continue;
+    const years = [...new Set(list.map((v) => day.getFullYear() - new Date(v.createdAt).getFullYear()))].sort((a, b) => a - b);
+    const lead = years.length === 1 ? `${years[0]} year${years[0] === 1 ? '' : 's'} ago today` : `${years.length} years of memories today`;
+    const names = list.slice(0, 2).map(nameOf).join(', ');
+    out.push({ at: day.getTime(), title: `On this day · ${lead}`, body: `${list.length} video${list.length === 1 ? '' : 's'}: ${names}${list.length > 2 ? '…' : ''}`, count: list.length });
+  }
+  return out;
+}
+
 /** Favourites you have not watched in a while, then videos never watched. */
 export function rediscover(videos: RVideo[], plays: RPlay[], now: number, max = 10): { video: RVideo; why: string }[] {
   const last = new Map<string, number>();
@@ -474,7 +500,32 @@ export function spaceIdeas(videos: RVideo[], deleted: RVideo[], duplicateGroups:
   const watched = new Set(plays.map((p) => p.videoId));
   const cold = videos.filter((v) => !watched.has(v.id) && v.importedAt < now - 60 * DAY && v.sizeBytes > 50 * 1024 * 1024).sort((a, b) => b.sizeBytes - a.sizeBytes);
   if (cold.length) out.push({ key: 'cold', title: 'Big and never watched', detail: 'Over 50 MB, here for 2 months and never played.', bytes: sum(cold, (v) => v.sizeBytes), count: cold.length, action: 'unwatched', ids: cold.map((v) => v.id) });
+  const shrink = shrinkCandidates(videos, plays, now).filter((x) => !cold.some((c) => c.id === x.video.id));
+  if (shrink.length)
+    out.push({
+      key: 'rarely',
+      title: 'Shrink big videos you rarely watch',
+      detail: 'Over 100 MB and watched once or not at all in six months. Made smaller, they stay in the vault.',
+      bytes: sum(shrink, (x) => x.saves),
+      count: shrink.length,
+      action: 'smaller',
+      ids: shrink.map((x) => x.video.id),
+    });
   return out.sort((a, b) => b.bytes - a.bytes);
+}
+
+/**
+ * Big videos you hardly watch, biggest saving first: over 100 MB, at most one
+ * play in the last six months, and not made smaller before. `saves` is a
+ * cautious guess: about 45% for H.264 files, 25% for HEVC.
+ */
+export function shrinkCandidates<T extends RVideo>(videos: T[], plays: RPlay[], now: number): { video: T; plays: number; saves: number }[] {
+  const recent = new Map<string, number>();
+  for (const p of plays) if (p.startedAt >= now - 182 * DAY) recent.set(p.videoId, (recent.get(p.videoId) ?? 0) + 1);
+  return videos
+    .filter((v) => v.sizeBytes >= 100 * 1024 * 1024 && !v.originalSizeBytes && (recent.get(v.id) ?? 0) <= 1)
+    .map((v) => ({ video: v, plays: recent.get(v.id) ?? 0, saves: Math.round(v.sizeBytes * (/avc|264/i.test(v.meta?.codec ?? '') ? 0.45 : 0.25)) }))
+    .sort((a, b) => b.saves - a.saves);
 }
 
 /** Bytes added per month (for the growth chart), oldest first, the last `months`. */

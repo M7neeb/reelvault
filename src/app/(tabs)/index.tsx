@@ -37,6 +37,8 @@ export default function VideosRoute() {
         prefs={vault.prefs}
         wrappedRequest={vault.wrappedRequest}
         onWrappedHandled={vault.clearWrappedRequest}
+        openRequest={vault.openRequest}
+        onOpenRequestHandled={vault.clearOpenRequest}
         overview={{ kept: vault.kept, series: vault.series, members: vault.members }}
       />
     </TabBarSpace.Provider>

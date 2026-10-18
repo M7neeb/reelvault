@@ -273,6 +273,8 @@ export function BulkEditSheet({
   onRate,
   onFlag,
   onAddTag,
+  onRemoveTag,
+  selectedTags = [],
   onStatus,
   onAddToAlbums,
   onNewAlbum,
@@ -292,6 +294,10 @@ export function BulkEditSheet({
   onRate: (rating: number) => Promise<void>;
   onFlag: (flag: UiFlag) => Promise<void>;
   onAddTag: (name: string) => Promise<void>;
+  /** Take a keyword off every selected video. */
+  onRemoveTag?: (name: string) => Promise<void>;
+  /** Keywords on the selected videos, with how many of them have each. */
+  selectedTags?: { name: string; count: number }[];
   onStatus: (status: UiStatus | null) => Promise<void>;
   onAddToAlbums: (albumIds: number[]) => Promise<void>;
   onNewAlbum: () => void;
@@ -321,11 +327,16 @@ export function BulkEditSheet({
     }
   }
 
+  const [gone, setGone] = useState<string[]>([]);
   function addTag(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
+    // "beach, summer; family" adds three at once.
+    const names = [...new Set(name.split(/[,;]/).map((x) => x.trim()).filter(Boolean))];
+    if (!names.length) return;
     setDraft('');
-    void run(`Added #${trimmed}`, onAddTag(trimmed));
+    void run(
+      names.length === 1 ? `Added #${names[0]}` : `Added ${names.map((n) => `#${n}`).join(' ')}`,
+      names.reduce<Promise<void>>((chain, n) => chain.then(() => onAddTag(n)), Promise.resolve())
+    );
   }
 
   const videos = `${count} video${count === 1 ? '' : 's'}`;
@@ -392,11 +403,31 @@ export function BulkEditSheet({
         )}
       </Section>
 
-      <Section label="Add a keyword">
+      <Section label="Keywords">
+        {onRemoveTag && selectedTags.filter((t) => !gone.includes(t.name)).length > 0 && (
+          <>
+            <Text style={styles.hintSmall}>On these videos - tap to take one off all of them</Text>
+            <Wrap>
+              {selectedTags
+                .filter((t) => !gone.includes(t.name))
+                .map((t) => (
+                  <Chip
+                    key={t.name}
+                    label={`# ${t.name}  ${t.count}/${count}  ✕`}
+                    danger
+                    onPress={() => {
+                      setGone((g) => [...g, t.name]);
+                      void run(`Removed #${t.name}`, onRemoveTag(t.name));
+                    }}
+                  />
+                ))}
+            </Wrap>
+          </>
+        )}
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
-            placeholder="new keyword…"
+            placeholder="new keywords, comma between…"
             placeholderTextColor={p.textMuted}
             value={draft}
             onChangeText={setDraft}
@@ -776,6 +807,7 @@ export function newSmartFilterDraft(query: string): { name: string; rule: SmartR
 
 const makeStyles = (p: Palette) =>
   sheet({
+    hintSmall: { color: p.textSecondary, fontSize: 12 },
     kav: { flex: 1 },
     backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop },
     backdropTap: { flex: 1 },
