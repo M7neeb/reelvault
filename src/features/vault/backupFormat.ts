@@ -1,15 +1,17 @@
 /**
  * The library-info backup file: everything the user added to their videos
  * (ratings, titles, keywords, albums, flags, status, dates, smart filters,
- * series, and the info kept for removed videos) - not the videos themselves. Pure functions, no imports; `backup.ts` does the
- * reading and writing.
+ * series, and the info kept for removed videos) - not the videos themselves.
+ * Version 2 adds your watch history, bookmarks, where to continue, Simkl
+ * links and your settings (goals, memories, badges seen, pins, the player).
+ * Pure functions, no imports; `backup.ts` does the reading and writing.
  *
  * Videos are matched back by their content key (size + hash of both ends),
  * which survives renaming, and by name + size when that is missing.
  */
 
 export const BACKUP_KIND = 'reelvault-library-info';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 
 export type BackupVideo = {
   contentKey: string | null;
@@ -23,6 +25,17 @@ export type BackupVideo = {
   createdAt: number;
   keywords: string[];
   albums: string[];
+  /** v2: every play (start time, ms watched). */
+  plays?: [number, number][];
+  /** v2: bookmarks (position ms, name, made at). */
+  bookmarks?: { atMs: number; label: string | null; createdAt: number }[];
+  /** v2: "continue another time". */
+  resume?: { positionMs: number; savedAt: number } | null;
+  /** v2: the Simkl movie or episode it is linked to. */
+  link?: Record<string, unknown> | null;
+  inTray?: boolean;
+  /** v2: the id the video had, so settings that name videos (pins) can find it again. */
+  id?: string;
 };
 
 /** A video removed for good: only its info is left. */
@@ -61,6 +74,8 @@ export type Backup = {
   pinnedKeywords: string[];
   kept: BackupKept[];
   series: BackupSeries[];
+  /** v2: your settings (vault.prefs), as saved. */
+  prefs?: Record<string, unknown> | null;
 };
 
 /** Reads a backup file; null when it isn't one. */
@@ -84,6 +99,7 @@ export function parseBackup(json: string): Backup | null {
     smartFilters: Array.isArray(b.smartFilters) ? b.smartFilters : [],
     pinnedKeywords: Array.isArray(b.pinnedKeywords) ? b.pinnedKeywords.filter((k) => typeof k === 'string') : [],
     kept: Array.isArray(b.kept) ? b.kept.filter((k) => k && typeof k.id === 'string' && typeof k.filename === 'string') : [],
+    prefs: b.prefs && typeof b.prefs === 'object' && !Array.isArray(b.prefs) ? (b.prefs as Record<string, unknown>) : null,
     series: Array.isArray(b.series)
       ? b.series
           .filter((x) => x && typeof x.name === 'string' && Array.isArray(x.episodes))
@@ -133,4 +149,37 @@ export function seriesEpisodes(
       return id ? [{ videoId: id, label: e.label ?? null }] : [];
     }),
   }));
+}
+
+/**
+ * Puts restored settings together with the ones on the phone: lists are
+ * joined (favourite memories, hidden ones, seen ones, your own memories,
+ * badges seen, events), pinned videos are renamed to their ids in this
+ * library, and single settings come from the backup only where the phone
+ * still has nothing of its own (an empty list, no goal set yet).
+ */
+export function mergePrefs(current: Record<string, unknown>, saved: Record<string, unknown>, idMap: Map<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...current };
+  const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const union = (a: unknown[], b: unknown[], key: (x: unknown) => string = (x) => JSON.stringify(x)) => {
+    const seen = new Set(a.map(key));
+    return [...a, ...b.filter((x) => !seen.has(key(x)))];
+  };
+  for (const k of ['memoryFavs', 'memoryHidden', 'memoriesSeen', 'hiddenSuggestions', 'showcase']) {
+    out[k] = union(arr(current[k]), arr(saved[k]));
+  }
+  out.badgesSeen = current.badgesSeen === null && saved.badgesSeen ? saved.badgesSeen : union(arr(current.badgesSeen), arr(saved.badgesSeen));
+  out.customMemories = union(arr(current.customMemories), arr(saved.customMemories), (x) => String((x as { id?: unknown })?.id));
+  out.events = union(arr(current.events), arr(saved.events)).slice(-3000);
+  const pins = arr(saved.pinned)
+    .map((id) => (typeof id === 'string' ? idMap.get(id) : undefined))
+    .filter((x): x is string => !!x);
+  out.pinned = union(arr(current.pinned), pins).slice(0, 60);
+  // Singles: only where the phone has nothing of its own yet.
+  const blank = (v: unknown) => v === undefined || v === null || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+  for (const k of ['ratingLabels', 'player', 'slideshow', 'freezes', 'weeklyGoalMin', 'albumSort', 'liveSound', 'resumeEnabled', 'holdForSpeed', 'keepUnrated', 'videosMode']) {
+    if (blank(current[k]) && !blank(saved[k])) out[k] = saved[k];
+  }
+  if (current.ratingLabels && typeof current.ratingLabels === 'object' && Object.keys(current.ratingLabels as object).length === 0 && saved.ratingLabels) out.ratingLabels = saved.ratingLabels;
+  return out;
 }

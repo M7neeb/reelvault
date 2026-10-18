@@ -133,3 +133,32 @@ test('a year ago, first videos, milestones and after dark', () => {
   assert.equal(ms.title, 'Video number 100');
   assert.ok(kinds.has('night'));
 });
+
+test('quick mixes: best rated, this month through the years, random; each needs three videos', async () => {
+  const { memoryMixes } = await import('../src/features/vault/memories.ts');
+  const now = new Date(2026, 9, 18).getTime();
+  const v = (id, y, m, rating = 0) => ({ id, createdAt: new Date(y, m, 5).getTime(), rating });
+  const videos = [v('a', 2023, 9, 9), v('b', 2024, 9, 10), v('c', 2025, 9, 8), v('d', 2025, 2), v('e', 2026, 9)];
+  const seq = [0.1, 0.5, 0.9, 0.3, 0.7];
+  let n = 0;
+  const mixes = memoryMixes([], videos, [], now, () => seq[n++ % seq.length]);
+  const ids = mixes.map((m) => m.id);
+  assert.deepEqual(ids, ['mix:best', 'mix:month', 'mix:random']);
+  const best = mixes[0];
+  assert.deepEqual(best.videoIds, ['a', 'b', 'c']);
+  assert.equal(best.coverId, 'b');
+  assert.equal(best.kind, 'mix');
+  assert.deepEqual(mixes[1].videoIds, ['a', 'b', 'c']);
+  assert.equal(new Set(mixes[2].videoIds).size, 5);
+});
+
+test('the saved memories mix joins the memories you saved', async () => {
+  const { memoryMixes } = await import('../src/features/vault/memories.ts');
+  const videos = ['a', 'b', 'c', 'd'].map((id, i) => ({ id, createdAt: i * 1000 + 1, rating: 0 }));
+  const list = [
+    { id: 'm1', videoIds: ['a', 'b'] },
+    { id: 'm2', videoIds: ['b', 'c'] },
+  ];
+  const saved = memoryMixes(list, videos, ['m1', 'm2'], 10_000, () => 0).find((m) => m.id === 'mix:saved');
+  assert.deepEqual(saved.videoIds, ['a', 'b', 'c']);
+});

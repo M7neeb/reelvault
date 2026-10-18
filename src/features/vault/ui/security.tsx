@@ -353,12 +353,14 @@ export function SettingsSheet({
 
       <Section label="Backup">
         <Wrap>
-          <Chip label="Export library info" onPress={onExportBackup} />
-          <Chip label="Import library info" onPress={onImportBackup} />
+          <Chip label="Export all my info" onPress={onExportBackup} />
+          <Chip label="Restore from a file" onPress={onImportBackup} />
         </Wrap>
         <Text style={styles.hint}>
-          Ratings, titles, captions, keywords, albums, flags, status and smart filters as one small file - save it in
-          Files. It does not contain the videos, and leaves out private ones.
+          Everything you added, as one small file to save in Files or on your PC: ratings, titles, captions, keywords,
+          albums, flags, status, smart filters, series, your watch history, bookmarks, where to continue, Simkl links and
+          your settings (goals, memories, badges, pins, the player). It does not contain the videos, and leaves out
+          private ones. Restoring adds to what is here and never deletes anything; videos are matched even if renamed.
         </Text>
       </Section>
     </SheetFrame>

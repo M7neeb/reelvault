@@ -458,6 +458,8 @@ export default function PreviewRoute() {
       setOnThisDayReminder: async () => true,
       getYearWrappedReminder: async () => true,
       setYearWrappedReminder: async () => true,
+      getMonthWrappedReminder: async () => true,
+      setMonthWrappedReminder: async () => true,
       onRemoveTagMany: noop,
       deletePlays: noop,
       pickMetadataFile: async () => ({ name: 'HashPhotos Metadata.csv', file: FIXTURE_META }),

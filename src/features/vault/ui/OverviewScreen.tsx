@@ -5,6 +5,12 @@
  * 10, continue cards, plan to watch, top rated, status chips, and the library
  * as posters or rows that slide in. Series (videos that
  * belong together) show as one title. Removed videos stay with their rating.
+ *
+ * The videos play: the spotlight (it moves through up to five titles - what
+ * you are watching, your best, what you watched last; tap the dots) and the
+ * continue cards play their video with sound, the one most in view. Rate what
+ * you watched straight from its card, see what you watched lately, and let
+ * Surprise Me pick a title.
  * Presentational only (see the note at the top of types.ts).
  */
 
@@ -47,6 +53,7 @@ import IconButton from './IconButton';
 import OverviewDetail, { SeriesMaker } from './OverviewDetail';
 import { Cover, fmtStars, ModeSwitch, statusColor, toOvVideo } from './overviewParts';
 import { gradient, Ring } from './insightParts';
+import { LiveCard, LiveProvider, useLiveScope } from './live';
 import { DUR, EASE_OUT, enterUp, PressableScale, useReducedMotion } from './motion';
 import { GrowBar, GrowColumn, KenBurns } from './storyKit';
 import { OptionsSheet } from './prompts';
@@ -69,7 +76,10 @@ export default function OverviewScreen({
   onPersonalise,
   devKey,
   devSheet,
+  enableVideo = false,
 }: {
+  /** Play the videos in the cards (off in the browser preview). */
+  enableVideo?: boolean;
   items: VaultItem[];
   deletedItems: VaultItem[];
   data: OverviewData;
@@ -125,6 +135,49 @@ export default function OverviewScreen({
     [entries, filter, query, sort]
   );
   const open = openKey ? (entries.find((e) => e.key === openKey) ?? null) : null;
+  const live = useLiveScope({ enableVideo, sound: prefs.liveSound, onSound: (on) => void actions.setPrefs({ ...prefs, liveSound: on }), paused: !!open || !!maker });
+  const itemById = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
+  /** The video a title plays: the next episode, or the video itself. */
+  const videoOf = (e: OvEntry) => {
+    const ep = playable(e);
+    return ep ? itemById.get(ep.video.id) : undefined;
+  };
+
+  // The spotlight moves through a few titles: what you are watching, your best, what you watched last.
+  const spots = useMemo(() => {
+    const out: OvEntry[] = [];
+    const add = (e: OvEntry | null | undefined) => e && e.cover && !e.gone && !out.some((x) => x.key === e.key) && out.push(e);
+    add(ins.spotlight);
+    going.slice(0, 2).forEach(add);
+    best.slice(0, 2).forEach(add);
+    [...entries].filter((e) => e.lastWatchedAt).sort((a, b) => (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0)).slice(0, 2).forEach(add);
+    return out.slice(0, 5);
+  }, [ins.spotlight, going, best, entries]);
+  const [spotAt, setSpotAt] = useState(0);
+  useEffect(() => {
+    if (spots.length < 2 || open || maker) return;
+    const t = setInterval(() => setSpotAt((n) => (n + 1) % spots.length), 9000);
+    return () => clearInterval(t);
+  }, [spots.length, open, maker, spotAt]);
+  const spot = spots[spotAt % Math.max(1, spots.length)];
+
+  // Watched but not rated yet: rate it right here.
+  const [justRated, setJustRated] = useState<Set<string>>(new Set());
+  const toRate = useMemo(() => entries.filter((e) => !e.gone && e.rating === 0 && e.plays > 0 && !justRated.has(e.key)).sort((a, b) => (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0)).slice(0, 10), [entries, justRated]);
+  const rate = (e: OvEntry, n: number) => {
+    tick();
+    setJustRated((r) => new Set([...r, e.key]));
+    const job = e.kind === 'series' ? actions.ovUpdateSeries(e.id, { rating: n }) : actions.onRate(e.id, n);
+    job.catch(() => setJustRated((r) => new Set([...r].filter((k) => k !== e.key))));
+  };
+  const recent = useMemo(() => entries.filter((e) => e.lastWatchedAt && !e.gone).sort((a, b) => (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0)).slice(0, 12), [entries]);
+  const surprise = () => {
+    const pool = entries.filter((e) => !e.gone && (e.status === 'plantowatch' || e.plays === 0 || (e.kind === 'series' && e.next)));
+    const from = pool.length ? pool : entries.filter((e) => !e.gone);
+    if (!from.length) return;
+    tick();
+    setOpenKey(from[Math.floor(Math.random() * from.length)].key);
+  };
 
   const cols = look === 'simple' ? 2 : look === 'compact' ? 4 : 3;
   const asGrid = look === 'simple' || (look !== 'desktop' && look !== 'compact' && look !== 'detailed' && grid);
@@ -140,6 +193,7 @@ export default function OverviewScreen({
       <View style={styles.titleRow}>
         <Text style={styles.title}>Videos</Text>
         <View style={styles.buttons}>
+          <IconButton icon="dice" label="Surprise me" onPress={surprise} />
           <IconButton icon="plus" label="New series" onPress={() => setMaker({ name: '', ids: [] })} />
           <IconButton icon="stats" label="Dashboard, Wrapped and badges" onPress={onStats} />
           <IconButton icon="paint" label="Personalise" onPress={onPersonalise} />
@@ -149,16 +203,36 @@ export default function OverviewScreen({
         <ModeSwitch mode="overview" onChange={onMode} />
       </View>
 
-      {look !== 'simple' && ins.spotlight && (
-        <Spotlight
-          entry={ins.spotlight}
-          width={width - SIDE * 2}
-          onOpen={() => setOpenKey(ins.spotlight!.key)}
-          onPlay={() => {
-            const ep = playable(ins.spotlight!);
-            if (ep) onPlay(ep.video.id);
-          }}
-        />
+      {look !== 'simple' && spot && (
+        <>
+          <Spotlight
+            key={spot.key}
+            entry={spot}
+            video={videoOf(spot)}
+            width={width - SIDE * 2}
+            onOpen={() => setOpenKey(spot.key)}
+            onPlay={() => {
+              const ep = playable(spot);
+              if (ep) onPlay(ep.video.id);
+            }}
+          />
+          {spots.length > 1 && (
+            <View style={styles.spotDots}>
+              {spots.map((e, n) => (
+                <TouchableOpacity
+                  key={e.key}
+                  hitSlop={6}
+                  onPress={() => {
+                    tick();
+                    setSpotAt(n);
+                  }}
+                  accessibilityLabel={`Show ${e.title}`}>
+                  <View style={[styles.spotDot, n === spotAt % spots.length && styles.spotDotOn]} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </>
       )}
 
       {look !== 'simple' && (
@@ -226,6 +300,7 @@ export default function OverviewScreen({
             renderItem={({ item }) => (
               <ContinueCard
                 entry={item}
+                video={videoOf(item)}
                 width={cardW}
                 onOpen={() => setOpenKey(item.key)}
                 onPlay={() => {
@@ -275,6 +350,61 @@ export default function OverviewScreen({
                 </View>
               );
             })}
+          </ScrollView>
+        </>
+      )}
+
+      {toRate.length > 0 && look !== 'simple' && (
+        <>
+          <SectionHead title="Rate what you watched" detail={`${toRate.length}`} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
+            {toRate.map((e, i) => (
+              <Animated.View key={e.key} entering={FadeInDown.delay(i * 50).duration(DUR.base).easing(EASE_OUT)} style={styles.rateCard}>
+                <TouchableOpacity onPress={() => setOpenKey(e.key)} style={styles.rateHead} accessibilityLabel={`Open ${e.title}`}>
+                  <Cover source={e.cover} title={e.title} width={64} height={86} radius={10} hideTitle />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.rateTitle} numberOfLines={2}>
+                      {e.title}
+                    </Text>
+                    <Text style={styles.shelfSub} numberOfLines={1}>
+                      {e.lastWatchedAt ? `Watched ${fmtAgo(new Date(e.lastWatchedAt).toISOString())}` : `${e.plays} plays`}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.rateRow}>
+                  {Array.from({ length: 10 }, (_, n) => n + 1).map((n) => (
+                    <TouchableOpacity key={n} style={[styles.rateChip, n >= 8 && styles.rateChipHigh]} onPress={() => rate(e, n)} accessibilityLabel={`Rate ${n}`}>
+                      <Text style={[styles.rateChipText, n >= 8 && { color: p.rating }]}>{n}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </Animated.View>
+            ))}
+          </ScrollView>
+        </>
+      )}
+
+      {rich && recent.length > 1 && (
+        <>
+          <SectionHead title="Recently watched" detail={`${recent.length}`} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+            {recent.map((e) => (
+              <PressableScale key={e.key} style={{ width: 150 }} onPress={() => setOpenKey(e.key)} accessibilityLabel={e.title}>
+                <Cover source={e.kind === 'series' ? (e.episodes.find((x) => x.lastWatchedAt === e.lastWatchedAt)?.video.thumb ?? e.cover) : e.cover} title={e.title} width={150} height={92}>
+                  {e.rating > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>★ {fmtStars(e.rating)}</Text>
+                    </View>
+                  )}
+                </Cover>
+                <Text style={styles.shelfTitle} numberOfLines={1}>
+                  {e.title}
+                </Text>
+                <Text style={styles.shelfSub} numberOfLines={1}>
+                  {e.lastWatchedAt ? fmtAgo(new Date(e.lastWatchedAt).toISOString()) : ''}
+                </Text>
+              </PressableScale>
+            ))}
           </ScrollView>
         </>
       )}
@@ -404,9 +534,11 @@ export default function OverviewScreen({
   const footer = <View style={{ height: (tabSpace > 0 ? tabSpace : insets.bottom) + 30 }} />;
 
   return (
+    <LiveProvider value={live.value}>
     <View style={styles.screen}>
       {asGrid ? (
         <FlatList
+          {...live.scrollProps}
           key={`grid-${cols}`}
           data={shown}
           keyExtractor={(e) => e.key}
@@ -423,6 +555,7 @@ export default function OverviewScreen({
         />
       ) : (
         <FlatList
+          {...live.scrollProps}
           key="list"
           data={shown}
           keyExtractor={(e) => e.key}
@@ -482,6 +615,7 @@ export default function OverviewScreen({
         />
       )}
     </View>
+    </LiveProvider>
   );
 }
 
@@ -510,7 +644,7 @@ function StatusBar({ parts, total }: { parts: { key: string; count: number }[]; 
 }
 
 /** The title at the top: its picture moving slowly, what it is, and play. */
-function Spotlight({ entry, width, onOpen, onPlay }: { entry: OvEntry; width: number; onOpen: () => void; onPlay: () => void }) {
+function Spotlight({ entry, video, width, onOpen, onPlay }: { entry: OvEntry; video?: VaultItem; width: number; onOpen: () => void; onPlay: () => void }) {
   const styles = useStyles(makeStyles);
   const canPlay = !!playable(entry);
   const kicker = entry.status === 'watching' && entry.next ? 'CONTINUE WATCHING' : entry.rating > 0 ? 'ONE OF YOUR BEST' : 'SPOTLIGHT';
@@ -518,8 +652,19 @@ function Spotlight({ entry, width, onOpen, onPlay }: { entry: OvEntry; width: nu
   return (
     <Animated.View entering={enterUp(0)}>
       <PressableScale style={[styles.spot, { width, height: Math.min(330, width * 0.82) }]} onPress={onOpen} scaleTo={0.98} accessibilityLabel={`${entry.title}. Open`}>
-        <KenBurns source={entry.cover ?? undefined} ms={18000} seed={entry.title.length} />
-        <View style={[styles.fill, gradient('linear-gradient(180deg, rgba(0,0,0,0) 25%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.92) 100%)', 'rgba(0,0,0,0.4)')]} />
+        <LiveCard
+          id={`ov-spot-${entry.key}`}
+          uri={video?.uri}
+          durationMs={video?.durationMs}
+          cover={(video?.thumbSource ?? entry.cover ?? undefined) as VaultItem['thumbSource']}
+          radius={0}
+          priority={3}
+          style={styles.fill}
+          video={video}
+          soundStyle={{ top: 14, right: 14 }}
+          under={<KenBurns source={entry.cover ?? undefined} ms={18000} seed={entry.title.length} />}
+        />
+        <View pointerEvents="none" style={[styles.fill, gradient('linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.6) 68%, rgba(0,0,0,0.94) 100%)', 'rgba(0,0,0,0.35)')]} />
         <View style={styles.spotBody}>
           <Text style={styles.spotKicker}>{kicker}</Text>
           <Text style={styles.spotTitle} numberOfLines={2}>
@@ -595,7 +740,7 @@ function SectionHead({
 }
 
 /** A series you are in the middle of: its picture, the next episode, and play. */
-function ContinueCard({ entry, width, onOpen, onPlay }: { entry: OvEntry; width: number; onOpen: () => void; onPlay: () => void }) {
+function ContinueCard({ entry, video, width, onOpen, onPlay }: { entry: OvEntry; video?: VaultItem; width: number; onOpen: () => void; onPlay: () => void }) {
   const styles = useStyles(makeStyles);
   const next = entry.next;
   const canPlay = !!playable(entry);
@@ -604,7 +749,16 @@ function ContinueCard({ entry, width, onOpen, onPlay }: { entry: OvEntry; width:
   return (
     <PressableScale style={[styles.upCard, { width }]} onPress={onOpen} scaleTo={0.98} accessibilityLabel={`${entry.title}, episode ${next?.number}`}>
       {art ? (
-        <Image source={art} style={styles.fill} contentFit="cover" transition={150} />
+        <LiveCard
+          id={`ov-up-${entry.key}`}
+          uri={video?.uri}
+          durationMs={video?.durationMs}
+          cover={art as VaultItem['thumbSource']}
+          radius={0}
+          style={styles.fill}
+          video={video}
+          soundStyle={{ top: 10, right: 10 }}
+        />
       ) : (
         <View style={[styles.fill, { backgroundColor: `hsl(${hueFor(entry.title)}, 38%, 24%)` }]} />
       )}
@@ -793,6 +947,16 @@ const makeStyles = (p: Palette) =>
     stats: { flexDirection: 'row', gap: 8, paddingHorizontal: SIDE, paddingTop: 14 },
     ringText: { color: p.text, fontSize: 12, fontWeight: '900' },
     spot: { marginHorizontal: SIDE, marginTop: 14, borderRadius: 26, overflow: 'hidden', backgroundColor: p.elevated, justifyContent: 'flex-end' },
+    spotDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 10 },
+    spotDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: p.textMuted, opacity: 0.5 },
+    spotDotOn: { width: 18, backgroundColor: p.text, opacity: 1 },
+    rateCard: { width: 260, gap: 10, padding: 12, borderRadius: 18, backgroundColor: p.elevated },
+    rateHead: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+    rateTitle: { color: p.text, fontSize: 15, fontWeight: '800' },
+    rateRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+    rateChip: { width: 42, height: 32, borderRadius: 9, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    rateChipHigh: { borderWidth: 1, borderColor: `${p.rating}66` },
+    rateChipText: { color: p.text, fontSize: 14, fontWeight: '800' },
     spotBody: { padding: 18, gap: 5 },
     spotKicker: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
     spotTitle: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8, lineHeight: 33 },

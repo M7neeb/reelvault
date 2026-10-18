@@ -4,6 +4,9 @@
  * card most in view. Scrolling hands over to the next one; a small speaker
  * button mutes them all (remembered). The cover shows until the video is ready,
  * so nothing flashes black. In the browser preview the covers stay still.
+ *
+ * The whole picture always shows: a portrait video in a wide card sits in the
+ * middle over a blurred copy of itself instead of being cropped to a sliver.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -12,6 +15,7 @@ import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
+import { aspectOf, Backdrop, fitFor } from './frame';
 import { tick } from './haptics';
 import Icon from './Icon';
 import type { ThumbSource } from './types';
@@ -110,7 +114,7 @@ export function LiveProvider({ value, children }: { value: Live; children: React
 }
 
 /** The video behind a live card: a short loop from `startMs`, sound as chosen, fading in once it plays. */
-function LiveVideo({ uri, startMs, clipMs, sound, radius }: { uri: string; startMs: number; clipMs: number; sound: boolean; radius: number }) {
+function LiveVideo({ uri, startMs, clipMs, sound, radius, fit }: { uri: string; startMs: number; clipMs: number; sound: boolean; radius: number; fit: 'cover' | 'contain' }) {
   const [ready, setReady] = useState(false);
   const player = useVideoPlayer(uri, (pl) => {
     pl.loop = true;
@@ -136,7 +140,7 @@ function LiveVideo({ uri, startMs, clipMs, sound, radius }: { uri: string; start
   }, [player, startMs, clipMs]);
   return (
     <View style={[StyleSheet.absoluteFill, { borderRadius: radius, overflow: 'hidden', opacity: ready ? 1 : 0 }]} pointerEvents="none">
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsPictureInPicture={false} />
+      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} allowsPictureInPicture={false} />
     </View>
   );
 }
@@ -159,6 +163,7 @@ export function LiveCard({
   under,
   showSound = true,
   soundStyle,
+  video,
 }: {
   id: string;
   uri: string | null | undefined;
@@ -176,6 +181,8 @@ export function LiveCard({
   showSound?: boolean;
   /** Where the speaker button sits (top right by default). */
   soundStyle?: StyleProp<ViewStyle>;
+  /** The video's size, so it is shown whole instead of cropped. */
+  video?: { width?: number | null; height?: number | null } | null;
 }) {
   const live = useContext(LiveContext);
   const ref = useRef<View>(null);
@@ -185,11 +192,21 @@ export function LiveCard({
   }, [live?.register, id, uri, priority]); // eslint-disable-line react-hooks/exhaustive-deps
   const playing = !!live && live.enableVideo && live.active === id && !!uri;
   const start = startMs ?? Math.max(0, ((durationMs ?? 0) - clipMs) / 2);
+  const [box, setBox] = useState(0);
+  const fit = box ? fitFor(aspectOf(video), box) : 'cover';
   return (
-    <View ref={ref} collapsable={false} style={[{ borderRadius: radius, overflow: 'hidden' }, style]}>
-      {cover !== undefined && <Image source={cover} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />}
-      {under}
-      {playing && <LiveVideo uri={uri!} startMs={start} clipMs={clipMs} sound={live!.sound} radius={radius} />}
+    <View
+      ref={ref}
+      collapsable={false}
+      style={[{ borderRadius: radius, overflow: 'hidden' }, style]}
+      onLayout={(e) => {
+        const { width: w, height: h } = e.nativeEvent.layout;
+        if (w && h) setBox(w / h);
+      }}>
+      {(fit === 'contain' || playing) && <Backdrop source={cover} />}
+      {cover !== undefined && <Image source={cover} style={StyleSheet.absoluteFill} contentFit={fit} transition={150} />}
+      {!playing && under}
+      {playing && <LiveVideo uri={uri!} startMs={start} clipMs={clipMs} sound={live!.sound} radius={radius} fit={fit} />}
       {children}
       {playing && showSound && (
         <Animated.View entering={FadeIn} exiting={FadeOut} style={[styles.sound, soundStyle]}>

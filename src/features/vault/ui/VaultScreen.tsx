@@ -42,6 +42,7 @@ import {
   resolveScheme,
   safeBatchGb,
 } from './logic';
+import { setWatchInfo, watchInfoOf } from './logic';
 import { CompareModal } from './playback';
 import { SlideshowModal } from './slideshow';
 import { DuplicateReview } from './dupReview';
@@ -170,6 +171,8 @@ function VaultScreenBody({
   const [playCounts, setPlayCounts] = useState<Map<string, number>>(new Map());
   // Every play, for sorting by watching, the year-old shelf and the random pick.
   const [allPlays, setAllPlays] = useState<VaultPlay[]>([]);
+  // Smart filters with watch rules (never watched, not watched in a year…) read this.
+  useMemo(() => setWatchInfo(watchInfoOf(allPlays)), [allPlays]);
   const loadPlayCounts = () => {
     actions
       .loadPlays()
@@ -194,13 +197,15 @@ function VaultScreenBody({
   // An On this day or yearly Wrapped notification was tapped.
   const [memoryKind, setMemoryKind] = useState<'onThisDay' | undefined>(undefined);
   const [openYear, setOpenYear] = useState(false);
+  const [openMonth, setOpenMonth] = useState(false);
   useEffect(() => {
     if (!openRequest) return;
     if (openRequest === 'onThisDay') {
       setMemoryKind('onThisDay');
       setInsights('memories');
     } else {
-      setOpenYear(true);
+      if (openRequest === 'monthWrapped') setOpenMonth(true);
+      else setOpenYear(true);
       setOpenWrapped(true);
       setInsights('wrapped');
     }
@@ -884,6 +889,12 @@ function VaultScreenBody({
 
   const look = viewOptions.look;
   const continuing = !special && !results && look !== 'desktop' ? shown.filter((v) => resume.has(v.id)).slice(0, 12) : [];
+  // Pinned: your own shelf at the top of the library (All Videos only).
+  const pinnedItems = filter.kind === 'all' && !results ? prefs.pinned.map((id) => publicItems.find((v) => v.id === id)).filter((v): v is VaultItem => !!v) : [];
+  const unpin = (id: string) => {
+    tick();
+    actions.setPrefs({ ...prefs, pinned: prefs.pinned.filter((x) => x !== id) }).catch(fail('PREFS'));
+  };
   const gridOptions: ViewOptions =
     look === 'simple'
       ? { ...viewOptions, layout: 'grid', size: 'xlarge', infos: [], showRating: false, showKeywords: false, groupBy: 'none' }
@@ -960,6 +971,41 @@ function VaultScreenBody({
       {filter.kind === 'nearby' && <Text style={styles.note}>Videos filmed within 1 km, closest first.</Text>}
       {inPrivate && (
         <Text style={styles.note}>Only you can see these. Private locks again when you leave the app.</Text>
+      )}
+      {pinnedItems.length > 0 && (
+        <View style={styles.continueBox}>
+          <View style={styles.shelfHead}>
+            <Text style={styles.continueTitle}>Pinned</Text>
+            {pinnedItems.length > 1 && (
+              <TouchableOpacity onPress={() => setSlideshow({ items: pinnedItems, start: 0 })} hitSlop={8}>
+                <Text style={styles.shelfAction}>Slideshow</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.continueRow}>
+            {pinnedItems.map((v) => (
+              <TouchableOpacity
+                key={v.id}
+                style={styles.continueCard}
+                onPress={() => {
+                  setPlayList(pinnedItems);
+                  setPlaying(v);
+                }}
+                onLongPress={() => unpin(v.id)}
+                delayLongPress={450}
+                accessibilityLabel={`${friendlyName(v)}, pinned. Hold to unpin`}>
+                <ThumbImage source={v.thumbSource} style={styles.continueThumb} contentFit="cover" />
+                <View style={styles.continuePlay}>
+                  <Icon name="pin" size={13} color="#fff" />
+                </View>
+                <Text style={styles.continueName} numberOfLines={1}>
+                  {friendlyName(v)}
+                </Text>
+                <Text style={styles.continueAt}>{v.rating ? `★ ${v.rating}` : 'Hold to unpin'}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
       )}
       {continuing.length > 0 && (
         <View style={styles.continueBox}>
@@ -1428,6 +1474,7 @@ function VaultScreenBody({
       {videosMode === 'overview' && (
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
           <OverviewScreen
+            enableVideo={enableVideo}
             items={publicItems}
             deletedItems={deletedItems.filter((v) => !v.isPrivate)}
             data={overview}
@@ -1468,6 +1515,7 @@ function VaultScreenBody({
           initialMemory={dev?.memoryOpen}
           initialMemoryKind={memoryKind}
           initialYear={openYear}
+          initialMonth={openMonth}
           initialHistoryStats={dev?.historyStats}
           items={inPrivate ? privateItems : publicItems}
           deleted={visibleTrash}
@@ -1529,6 +1577,7 @@ function VaultScreenBody({
           onLinkChanged={reloadLinks}
           resumeAt={resume.get(playing.id) ?? null}
           prefs={prefs}
+          onPrefs={(np) => actions.setPrefs(np).catch(fail('PREFS'))}
           onClose={() => {
             setPlaying(null);
             setPlayList(null);

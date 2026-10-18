@@ -181,3 +181,38 @@ test('a chosen theme wins over the phone', () => {
   assert.equal(resolveScheme('light', 'dark'), 'light');
   assert.equal(resolveScheme('dark', 'light'), 'dark');
 });
+
+test('smart filters: watch rules, relative dates and any-of keywords', async () => {
+  const { matchesRule, watchInfoOf } = await import('../src/features/vault/ui/logic.ts');
+  const DAY = 86_400_000;
+  const now = 1_800_000_000_000;
+  const v = (id, over = {}) => ({ id, filename: `${id}.mp4`, rating: 0, tagNames: [], status: null, createdAt: now - 400 * DAY, importedAt: now - 2 * DAY, ...over });
+  const watch = watchInfoOf([
+    { videoId: 'a', startedAt: now - 1 * DAY },
+    { videoId: 'a', startedAt: now - 3 * DAY },
+    { videoId: 'b', startedAt: now - 500 * DAY },
+  ]);
+  const m = (item, rule) => matchesRule(item, rule, watch, now);
+  assert.equal(m(v('c'), { watched: 'never' }), true);
+  assert.equal(m(v('a'), { watched: 'never' }), false);
+  assert.equal(m(v('a'), { minPlays: 2 }), true);
+  assert.equal(m(v('b'), { minPlays: 2 }), false);
+  assert.equal(m(v('b'), { notWatchedDays: 365 }), true);
+  assert.equal(m(v('a'), { notWatchedDays: 365 }), false);
+  assert.equal(m(v('c'), { notWatchedDays: 365 }), true);
+  assert.equal(m(v('a'), { watchedWithinDays: 7 }), true);
+  assert.equal(m(v('b'), { watchedWithinDays: 7 }), false);
+  assert.equal(m(v('a'), { addedWithinDays: 7 }), true);
+  assert.equal(m(v('a', { importedAt: now - 40 * DAY }), { addedWithinDays: 30 }), false);
+  assert.equal(m(v('a'), { filmedWithinDays: 365 }), false);
+  assert.equal(m(v('a', { tagNames: ['trip'] }), { anyTags: ['beach', 'trip'] }), true);
+  assert.equal(m(v('a', { tagNames: ['home'] }), { anyTags: ['beach', 'trip'] }), false);
+});
+
+test('smart filter rules with the new fields survive a round trip', async () => {
+  const { parseRule, describeRule } = await import('../src/features/vault/ui/logic.ts');
+  const r = parseRule(JSON.stringify({ watched: 'never', minPlays: 3, notWatchedDays: 365, addedWithinDays: 30, anyTags: ['a', 'b'], filmedWithinDays: -4 }));
+  assert.deepEqual(r, { watched: 'never', minPlays: 3, notWatchedDays: 365, addedWithinDays: 30, anyTags: ['a', 'b'] });
+  assert.match(describeRule(r), /never watched/);
+  assert.match(describeRule(r), /#a or #b/);
+});

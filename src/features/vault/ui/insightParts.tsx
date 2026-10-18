@@ -11,6 +11,8 @@ import { Image } from 'expo-image';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 
 import Icon from './Icon';
+import { LiveCard } from './live';
+import type { VaultItem } from './types';
 import { ICONS, type IconName } from './icons';
 import { DUR, EASE_OUT, enterUp, PressableScale, useReducedMotion } from './motion';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
@@ -301,7 +303,10 @@ export function PhotoCard({
   width,
   height = 150,
   onPress,
+  video,
 }: {
+  /** Plays this video in the card while it is the one most in view. */
+  video?: Pick<VaultItem, 'id' | 'uri' | 'durationMs' | 'width' | 'height'> | null;
   source: unknown;
   kicker: string;
   value: string;
@@ -314,8 +319,21 @@ export function PhotoCard({
   const p = usePalette();
   const body = (
     <View style={{ width: '100%', height, borderRadius: 18, overflow: 'hidden', backgroundColor: p.tile, justifyContent: 'flex-end', padding: 12 }}>
-      {source ? <Image source={source as never} style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} contentFit="cover" transition={150} /> : null}
-      <View style={[{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }, gradient('linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.35) 45%, rgba(0,0,0,0.85) 100%)', 'rgba(0,0,0,0.45)')]} />
+      {video ? (
+        <LiveCard
+          id={`photo-${video.id}-${kicker}`}
+          uri={video.uri}
+          durationMs={video.durationMs}
+          cover={source as VaultItem['thumbSource']}
+          radius={0}
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}
+          video={video}
+          soundStyle={{ top: 10, right: 10 }}
+        />
+      ) : source ? (
+        <Image source={source as never} style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} contentFit="cover" transition={150} />
+      ) : null}
+      <View pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }, gradient('linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.85) 100%)', 'rgba(0,0,0,0.35)')]} />
       {icon && (
         <View style={{ position: 'absolute', top: 10, left: 10, width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name={iconOr(icon)} size={14} color="#fff" />

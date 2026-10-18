@@ -26,6 +26,8 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /* ------------------------------------------------------------ smart filters */
 
 type RuleTarget = {
+  id?: string;
+  importedAt?: number;
   filename: string;
   rating: number;
   tagNames: string[];
@@ -69,7 +71,37 @@ const outside = (value: number | undefined, min?: number, max?: number) =>
   value === undefined ? min !== undefined || max !== undefined : (min !== undefined && value < min) || (max !== undefined && value > max);
 
 /** True when the video meets every condition the rule sets. An empty rule matches all. */
-export function matchesRule(item: RuleTarget, rule: SmartRule): boolean {
+/** How often and when each video was last played, for the watch rules of smart filters. */
+export type WatchInfo = Map<string, { plays: number; lastAt: number }>;
+let WATCH: WatchInfo = new Map();
+/** The screen keeps this up to date as plays load, so every smart filter count can use it. */
+export function setWatchInfo(info: WatchInfo): void {
+  WATCH = info;
+}
+export function watchInfoOf(plays: { videoId: string; startedAt: number }[]): WatchInfo {
+  const m: WatchInfo = new Map();
+  for (const x of plays) {
+    const cur = m.get(x.videoId);
+    m.set(x.videoId, { plays: (cur?.plays ?? 0) + 1, lastAt: Math.max(cur?.lastAt ?? 0, x.startedAt) });
+  }
+  return m;
+}
+
+const DAY_MS = 86_400_000;
+
+export function matchesRule(item: RuleTarget, rule: SmartRule, watch: WatchInfo = WATCH, now: number = Date.now()): boolean {
+  if (rule.anyTags?.length && !rule.anyTags.some((t) => item.tagNames.includes(t))) return false;
+  if (rule.watched || rule.minPlays || rule.notWatchedDays || rule.watchedWithinDays) {
+    const w = item.id ? watch.get(item.id) : undefined;
+    const plays = w?.plays ?? 0;
+    if (rule.watched === 'never' && plays > 0) return false;
+    if (rule.watched === 'watched' && plays === 0) return false;
+    if (rule.minPlays && plays < rule.minPlays) return false;
+    if (rule.notWatchedDays && w && w.lastAt > now - rule.notWatchedDays * DAY_MS) return false;
+    if (rule.watchedWithinDays && (!w || w.lastAt < now - rule.watchedWithinDays * DAY_MS)) return false;
+  }
+  if (rule.addedWithinDays && (item.importedAt ?? 0) < now - rule.addedWithinDays * DAY_MS) return false;
+  if (rule.filmedWithinDays && (item.createdAt ?? 0) < now - rule.filmedWithinDays * DAY_MS) return false;
   const text = rule.text?.trim();
   if (text) {
     const haystack = [item.filename, item.title ?? '', item.notes ?? ''];
@@ -155,6 +187,13 @@ export function describeRule(rule: SmartRule): string {
   if (rule.minAlbums !== undefined || rule.maxAlbums !== undefined) parts.push(range(rule.minAlbums, rule.maxAlbums, 'albums'));
   if (rule.hasLocation !== undefined) parts.push(rule.hasLocation ? 'with location' : 'no location');
   if (rule.inTray) parts.push('in tray');
+  if (rule.anyTags?.length) parts.push(rule.anyTags.map((t) => `#${t}`).join(' or '));
+  if (rule.watched) parts.push(rule.watched === 'never' ? 'never watched' : 'watched');
+  if (rule.minPlays) parts.push(`played ${rule.minPlays}+ times`);
+  if (rule.notWatchedDays) parts.push(`not watched in ${rule.notWatchedDays} days`);
+  if (rule.watchedWithinDays) parts.push(`watched in the last ${rule.watchedWithinDays} days`);
+  if (rule.addedWithinDays) parts.push(`added in the last ${rule.addedWithinDays} days`);
+  if (rule.filmedWithinDays) parts.push(`filmed in the last ${rule.filmedWithinDays} days`);
   if (rule.text?.trim()) parts.push(rule.regex ? `/${rule.text.trim()}/` : `"${rule.text.trim()}"`);
   return parts.length ? parts.join(' · ') : 'everything';
 }
@@ -204,6 +243,15 @@ export function parseRule(json: string): SmartRule {
   if (typeof r.format === 'string' && /^[a-z0-9]{1,8}$/i.test(r.format)) rule.format = r.format.toUpperCase();
   if (typeof r.hasLocation === 'boolean') rule.hasLocation = r.hasLocation;
   if (r.inTray === true) rule.inTray = true;
+  if (Array.isArray(r.anyTags)) {
+    const tags = r.anyTags.filter((t): t is string => typeof t === 'string' && t.length > 0);
+    if (tags.length) rule.anyTags = tags;
+  }
+  if (r.watched === 'never' || r.watched === 'watched') rule.watched = r.watched;
+  for (const key of ['minPlays', 'notWatchedDays', 'watchedWithinDays', 'addedWithinDays', 'filmedWithinDays'] as const) {
+    const v = num(r[key], 1, 100_000);
+    if (v !== undefined) rule[key] = Math.round(v);
+  }
   return rule;
 }
 

@@ -228,3 +228,44 @@ export function fmtChange(change: number | null, prevMs: number | null, nowMs: n
   if (pct === 0) return 'Same as before';
   return `${pct > 0 ? '+' : '−'}${Math.abs(pct)} %`;
 }
+
+export type YearOverYear = {
+  /** This year and last, month by month (January to this month). */
+  months: { label: string; now: number; then: number; current: boolean }[];
+  /** This month so far, and the same days a year ago. */
+  month: { now: number; then: number; label: string };
+  /** The year so far, and the same stretch last year. */
+  ytd: { now: number; then: number };
+  /** The top video of this month, and of the same month last year. */
+  topNow: string | null;
+  topThen: string | null;
+};
+
+/** This year against last year: the month so far, the year so far, and every month side by side. */
+export function yearOverYear(plays: DashPlay[], now: number, known?: Set<string>): YearOverYear {
+  const d = new Date(now);
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const ps = known ? plays.filter((x) => known.has(x.videoId)) : plays;
+  const sum = (a: number, b: number) => ps.filter((x) => x.startedAt >= a && x.startedAt < b).reduce((t, x) => t + x.watchedMs, 0);
+  const top = (a: number, b: number) => {
+    const per = new Map<string, number>();
+    for (const x of ps) if (x.startedAt >= a && x.startedAt < b) per.set(x.videoId, (per.get(x.videoId) ?? 0) + x.watchedMs);
+    return [...per.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? null;
+  };
+  // The same moment a year ago (29 Feb falls back to 28 Feb).
+  const ago = new Date(y - 1, m, Math.min(d.getDate(), new Date(y - 1, m + 1, 0).getDate()), d.getHours(), d.getMinutes()).getTime();
+  const months = Array.from({ length: m + 1 }, (_, i) => ({
+    label: new Date(y, i, 1).toLocaleDateString('en-GB', { month: 'narrow' }),
+    now: sum(new Date(y, i, 1).getTime(), i === m ? now + 1 : new Date(y, i + 1, 1).getTime()),
+    then: sum(new Date(y - 1, i, 1).getTime(), new Date(y - 1, i + 1, 1).getTime()),
+    current: i === m,
+  }));
+  return {
+    months,
+    month: { now: sum(new Date(y, m, 1).getTime(), now + 1), then: sum(new Date(y - 1, m, 1).getTime(), ago + 1), label: new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'long' }) },
+    ytd: { now: sum(new Date(y, 0, 1).getTime(), now + 1), then: sum(new Date(y - 1, 0, 1).getTime(), ago + 1) },
+    topNow: top(new Date(y, m, 1).getTime(), now + 1),
+    topThen: top(new Date(y - 1, m, 1).getTime(), new Date(y - 1, m + 1, 1).getTime()),
+  };
+}

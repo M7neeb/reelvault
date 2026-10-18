@@ -68,3 +68,30 @@ test('sort by watching and albums by watching', () => {
   const albums = [{ id: 1 }, { id: 2 }];
   assert.deepEqual(albumsByWatching(albums, (id) => (id === 1 ? ['a'] : ['b']), plays).map((a) => a.id), [2, 1]);
 });
+
+test('unfinished: the last sitting stopped between 5 % and 90 %', async () => {
+  const { unfinished } = await import('../src/features/vault/history.ts');
+  const vids = [video('a'), video('b'), video('c')];
+  const out = unfinished(vids, [play('a', at(2026, 9, 10), 3 * MIN), play('b', at(2026, 9, 11), 9.5 * MIN), play('c', at(2026, 9, 12), 2 * MIN), play('c', at(2026, 9, 12, 12, 3), 2 * MIN)]);
+  assert.deepEqual(
+    out.map((x) => [x.video.id, Math.round(x.share * 100)]),
+    [
+      ['c', 40],
+      ['a', 30],
+    ]
+  );
+});
+
+test('punch card and month grid', async () => {
+  const { punchCard, monthGrid } = await import('../src/features/vault/history.ts');
+  // 18 Oct 2026 is a Sunday.
+  const pc = punchCard([play('a', at(2026, 9, 18, 21), 4 * MIN), play('a', at(2026, 9, 18, 21, 30), 2 * MIN)]);
+  assert.equal(pc.grid[6][21], 6 * MIN);
+  assert.equal(pc.max, 6 * MIN);
+  const cells = monthGrid(2026, 9, [play('a', at(2026, 9, 18, 21), 4 * MIN)]);
+  // October 2026 starts on a Thursday: three empty cells first.
+  assert.equal(cells.slice(0, 3).every((c) => c === null), true);
+  assert.equal(cells[3].day, 1);
+  assert.equal(cells.find((c) => c && c.day === 18).ms, 4 * MIN);
+  assert.equal(cells.filter(Boolean).length, 31);
+});

@@ -11,6 +11,13 @@
  * You can make your own (a keyword, an album, dates, a lowest rating), shuffle
  * to a random one, and new memories carry a dot until you open them.
  * Hold to pause, tap the sides to skip, drag down to close.
+ *
+ * The cards play: the big For you card runs a trailer of its clips (with
+ * sound), and the card most in view in a row plays its cover video. Quick
+ * mixes (your saved memories, only the best, this month through the years, a
+ * random handful) play in one tap; Looking back gathers a year ago, your
+ * first videos, milestones and late nights. The end card shows every clip
+ * (tap one to jump back to it) and the memory that comes next.
  * Presentational only.
  */
 
@@ -24,9 +31,10 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { customMatches, memoryClips, memoryLength, memorySections, MOODS, type Clip, type CustomMemory, type Memory, type Mood } from '../memories';
+import { customMatches, memoryClips, memoryLength, memoryMixes, memorySections, MOODS, type Clip, type CustomMemory, type Memory, type Mood } from '../memories';
 import { friendlyName } from '../names';
 import Fade from './Fade';
+import { aspectOf, Backdrop, fitFor } from './frame';
 import { success, tick } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
@@ -114,6 +122,14 @@ export function MemoriesTab({
   const p = usePalette();
   const { width } = useWindowDimensions();
   const s = useMemo(() => memorySections(list, hidden, favs), [list, hidden, favs]);
+  // Quick mixes; the random one is shuffled again each time the tab opens.
+  const mixes = useMemo(() => memoryMixes(list.filter((m) => !hidden.includes(m.id)), [...items.values()], favs, Date.now(), Math.random), [list, items, favs, hidden]);
+  const stats = useMemo(() => {
+    const shown = list.filter((m) => !hidden.includes(m.id));
+    const ids = new Set(shown.flatMap((m) => m.videoIds));
+    const years = [...ids].map((id) => items.get(id)?.createdAt).filter((t): t is number => !!t).map((t) => new Date(t).getFullYear());
+    return { count: shown.length, videos: ids.size, from: years.length ? Math.min(...years) : null, to: years.length ? Math.max(...years) : null };
+  }, [list, hidden, items]);
   const [page, setPage] = useState(0);
   const [building, setBuilding] = useState(false);
   const cardW = width - 32;
@@ -168,7 +184,7 @@ export function MemoriesTab({
         <SectionTitle title={title} detail={detail} />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bleed} contentContainerStyle={styles.row} decelerationRate="fast" snapToInterval={kind === 'tall' ? 162 : 232}>
           {ms.map((m, n) => (
-            <MemoryTile key={m.id} m={m} kind={kind} index={n} thumbs={thumbs} fav={favs.includes(m.id)} fresh={isNew(m)} onPress={() => onPlay(m)} />
+            <MemoryTile key={m.id} m={m} kind={kind} index={n} thumbs={thumbs} items={items} fav={favs.includes(m.id)} fresh={isNew(m)} onPress={() => onPlay(m)} />
           ))}
         </ScrollView>
       </Animated.View>
@@ -178,9 +194,11 @@ export function MemoriesTab({
     <>
       <Animated.View entering={enterUp(0)} style={{ gap: 10 }}>
         <View style={styles.forYouHead}>
-          <View>
+          <View style={{ flexShrink: 1 }}>
             <Text style={styles.forYou}>For you</Text>
-            <Text style={styles.forYouSub}>{list.length - hidden.filter((h) => list.some((m) => m.id === h)).length} memories</Text>
+            <Text style={styles.forYouSub} numberOfLines={1}>
+              {stats.count} memories · {stats.videos} videos{stats.from && stats.to && stats.from !== stats.to ? ` · ${stats.from}–${stats.to}` : ''}
+            </Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <PressableScale style={styles.pill} onPress={shuffle} accessibilityLabel="Play a random memory">
@@ -215,9 +233,20 @@ export function MemoriesTab({
           ))}
         </View>
       </Animated.View>
+      {mixes.length > 0 && (
+        <Animated.View entering={enterUp(1)} style={{ gap: 10 }}>
+          <SectionTitle title="Quick mixes" detail="Made on the spot" />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bleed} contentContainerStyle={styles.row}>
+            {mixes.map((m, n) => (
+              <MixCard key={m.id} m={m} index={n} thumbs={thumbs} onPress={() => onPlay(m)} />
+            ))}
+          </ScrollView>
+        </Animated.View>
+      )}
       {row('Made by you', 'Your own memories', s.mine, 'wide', 1)}
       {row('Favourite memories', 'The ones you saved', s.favourites, 'wide', 1)}
       {row('On this day', 'From earlier years', s.onThisDay, 'wide', 2)}
+      {row('Looking back', 'A year ago, your firsts, milestones, late nights', s.lookingBack, 'tall', 2)}
       {row('Moments', 'Trips and big days', s.moments, 'tall', 3)}
       {row('Themes', 'From your tags, ratings and plays', s.themes, 'mosaic', 4)}
       {row('Months & seasons', 'The best of each', s.months, 'tall', 5)}
@@ -344,19 +373,41 @@ function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, on
   const h = Math.min(480, width * 1.22);
   const num = bigNumber(m);
   const extra = m.videoIds.filter((id) => id !== m.coverId).slice(0, 3);
+  // A trailer: while the card is in front it moves through up to six of its clips.
+  const trailer = useMemo(() => [m.coverId, ...m.videoIds.filter((id) => id !== m.coverId)].filter((id) => items.has(id)).slice(0, 6), [m, items]);
+  const [clip, setClip] = useState(0);
+  useEffect(() => {
+    if (!active || trailer.length < 2) return;
+    const t = setInterval(() => setClip((c) => (c + 1) % trailer.length), 5000);
+    return () => clearInterval(t);
+  }, [active, trailer.length]);
+  const nowId = trailer[clip % Math.max(1, trailer.length)] ?? m.coverId;
+  const now = items.get(nowId);
   return (
     <PressableScale onPress={onPress} scaleTo={0.97} style={[styles.featured, { width, height: h, backgroundColor: b }]} accessibilityRole="button" accessibilityLabel={`${m.title}. ${m.subtitle}. Play memory`}>
-      <LiveCard
-        id={`feat-${m.id}`}
-        uri={items.get(m.coverId)?.uri}
-        durationMs={items.get(m.coverId)?.durationMs}
-        radius={0}
-        priority={3}
-        style={StyleSheet.absoluteFill}
-        soundStyle={{ top: 58, right: 16 }}
-        under={<KenBurns key={active ? 'on' : 'off'} source={thumbs.get(m.coverId)} ms={14000} seed={m.title.length} />}
-      />
-      <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, ${hexA(b, 0)} 30%, ${hexA(b, 0.55)} 62%, ${hexA(b, 0.96)} 100%)`, hexA(b, 0.4))]} />
+      <Animated.View key={nowId} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill}>
+        <LiveCard
+          id={`feat-${m.id}`}
+          uri={now?.uri}
+          durationMs={now?.durationMs}
+          cover={thumbs.get(nowId)}
+          clipMs={5200}
+          radius={0}
+          priority={3}
+          style={StyleSheet.absoluteFill}
+          soundStyle={{ top: 58, right: 16 }}
+          video={now}
+          under={<KenBurns key={active ? 'on' : 'off'} source={thumbs.get(nowId)} ms={14000} seed={m.title.length + clip} />}
+        />
+      </Animated.View>
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, rgba(0,0,0,0.3) 0%, ${hexA(b, 0)} 22%, ${hexA(b, 0)} 42%, ${hexA(b, 0.6)} 66%, ${hexA(b, 0.96)} 100%)`, hexA(b, 0.35))]} />
+      {trailer.length > 1 && (
+        <View style={styles.trailerBars} pointerEvents="none">
+          {trailer.map((id, n) => (
+            <View key={id} style={[styles.trailerBar, n === clip % trailer.length && { backgroundColor: '#fff' }]} />
+          ))}
+        </View>
+      )}
       {num && (
         <Text style={[styles.bigNum, { color: hexA(a, 0.9) }]} numberOfLines={1}>
           {num}
@@ -407,8 +458,35 @@ function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, on
   );
 }
 
+/** A quick mix: a fan of three covers and its name. */
+function MixCard({ m, index, thumbs, onPress }: { m: Memory; index: number; thumbs: Thumbs; onPress: () => void }) {
+  const styles = useStyles(makeStyles);
+  const [a, b] = toneOf(m);
+  const three = [m.coverId, ...m.videoIds.filter((id) => id !== m.coverId)].slice(0, 3);
+  return (
+    <Animated.View entering={FadeInDown.delay(60 + index * 60).duration(DUR.slow).easing(EASE_OUT)}>
+      <PressableScale onPress={onPress} style={[styles.mix, gradient(`linear-gradient(150deg, ${hexA(a, 0.9)} 0%, ${b} 100%)`, b)]} accessibilityRole="button" accessibilityLabel={`Play ${m.title}`}>
+        <View style={styles.mixFan}>
+          {three.map((id, i) => (
+            <Image key={id} source={thumbs.get(id)} style={[styles.mixImg, { left: 8 + i * 22, transform: [{ rotate: `${(i - 1) * 9}deg` }], zIndex: 3 - Math.abs(i - 1) }]} contentFit="cover" />
+          ))}
+        </View>
+        <Text style={styles.mixTitle} numberOfLines={2}>
+          {m.title}
+        </Text>
+        <View style={styles.mixFoot}>
+          <Text style={styles.mixSub}>{m.total} videos</Text>
+          <View style={styles.mixPlay}>
+            <Icon name="play" size={11} color="#000" />
+          </View>
+        </View>
+      </PressableScale>
+    </Animated.View>
+  );
+}
+
 /** A card in a row: tall (one cover), wide, or a mosaic of four covers. */
-function MemoryTile({ m, kind, index, thumbs, fav, fresh = false, onPress }: { m: Memory; kind: 'tall' | 'wide' | 'mosaic'; index: number; thumbs: Thumbs; fav: boolean; fresh?: boolean; onPress: () => void }) {
+function MemoryTile({ m, kind, index, thumbs, items, fav, fresh = false, onPress }: { m: Memory; kind: 'tall' | 'wide' | 'mosaic'; index: number; thumbs: Thumbs; items?: Map<string, VaultItem>; fav: boolean; fresh?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const [a, b] = toneOf(m);
   const size = kind === 'tall' ? { width: 152, height: 214 } : { width: 222, height: 160 };
@@ -424,9 +502,18 @@ function MemoryTile({ m, kind, index, thumbs, fav, fresh = false, onPress }: { m
             ))}
           </View>
         ) : (
-          <Image source={thumbs.get(m.coverId)} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <LiveCard
+            id={`tile-${m.id}`}
+            uri={items?.get(m.coverId)?.uri}
+            durationMs={items?.get(m.coverId)?.durationMs}
+            cover={thumbs.get(m.coverId)}
+            radius={0}
+            style={StyleSheet.absoluteFill}
+            soundStyle={{ top: 8, right: 8 }}
+            video={items?.get(m.coverId)}
+          />
         )}
-        <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, ${hexA(b, 0)} 25%, ${hexA(b, 0.7)} 55%, ${hexA(b, 0.97)} 100%)`, hexA(b, 0.4))]} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, ${hexA(b, 0)} 35%, ${hexA(b, 0.7)} 62%, ${hexA(b, 0.97)} 100%)`, hexA(b, 0.4))]} />
         {num && <Text style={[styles.tileNum, { color: hexA(a, 0.92) }]}>{num}</Text>}
         {fav && (
           <View style={styles.tileHeart}>
@@ -507,16 +594,24 @@ function ClipMedia({ clip, item, thumb, enableVideo, muted, paused, mood, seed }
   const punch = useSharedValue(1);
   useEffect(() => {
     if (reduce || !clip) return;
-    punch.value = mood === 'upbeat' ? withSequence(withTiming(1.1, { duration: 1 }), withSpring(1, { damping: 12, stiffness: 180 })) : withSequence(withTiming(1, { duration: 1 }), withTiming(1.06, { duration: clip.ms, easing: EASE_OUT }));
+    punch.value = mood === 'upbeat' ? withSequence(withTiming(1.05, { duration: 1 }), withSpring(1, { damping: 12, stiffness: 180 })) : withSequence(withTiming(1, { duration: 1 }), withTiming(1.03, { duration: clip.ms, easing: EASE_OUT }));
   }, [clip?.videoId, mood]); // eslint-disable-line react-hooks/exhaustive-deps
   const zoom = useAnimatedStyle(() => ({ transform: [{ scale: punch.value }] }));
   const fadeMs = reduce ? 0 : MOODS[mood].fadeMs;
+  const { width: sw, height: sh } = useWindowDimensions();
+  const fit = fitFor(aspectOf(item), sw / sh);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* The whole clip shows, over a blurred copy of itself where it doesn't fill the screen. */}
+      {clip && (
+        <Animated.View key={`b${clip.videoId}`} entering={FadeIn.duration(fadeMs)} exiting={FadeOut.duration(fadeMs)} style={StyleSheet.absoluteFill}>
+          <Backdrop source={thumb} dim={0.15} />
+        </Animated.View>
+      )}
       {enableVideo && (
         <Animated.View style={[StyleSheet.absoluteFill, zoom]}>
-          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
         </Animated.View>
       )}
       {clip && (!enableVideo || !ready) && (
@@ -540,9 +635,14 @@ export function MemoryPlayer({
   onDelete,
   onEvent,
   onOpenVideo,
+  next,
+  onNext,
   onClose,
 }: {
   memory: Memory;
+  /** The memory after this one, offered on the end card. */
+  next?: Memory | null;
+  onNext?: (m: Memory) => void;
   items: Map<string, VaultItem>;
   thumbs: Thumbs;
   enableVideo: boolean;
@@ -718,6 +818,18 @@ export function MemoryPlayer({
                   <Animated.Text entering={FadeInDown.delay(500).duration(DUR.slow)} style={styles.pSub}>
                     {m.total} {m.total === 1 ? 'video' : 'videos'} · {spanText(m)}
                   </Animated.Text>
+                  {clips.length > 1 && (
+                    <Animated.View entering={FadeInDown.delay(600).duration(DUR.slow)} style={{ alignSelf: 'stretch' }}>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.endClips}>
+                        {clips.map((c, n) => (
+                          <TouchableOpacity key={`${c.videoId}${n}`} onPress={() => go(n)} style={styles.endClip} accessibilityLabel={`Play clip ${n + 1} again`}>
+                            <Image source={thumbs.get(c.videoId)} style={StyleSheet.absoluteFill} contentFit="cover" />
+                            <Text style={styles.endClipN}>{n + 1}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </Animated.View>
+                  )}
                   <Animated.View entering={FadeInDown.delay(700).duration(DUR.slow)} style={styles.endRow}>
                     <EndButton icon="rewatch" label="Replay" onPress={() => go(-1)} />
                     <EndButton icon={fav ? 'heart' : 'heartOff'} label={fav ? 'Saved' : 'Favourite'} tint={fav ? '#FF375F' : undefined} onPress={onFav} />
@@ -736,6 +848,25 @@ export function MemoryPlayer({
                       }}
                     />
                   </Animated.View>
+                  {next && onNext && (
+                    <Animated.View entering={FadeInDown.delay(900).duration(DUR.slow)} style={{ alignSelf: 'stretch' }}>
+                      <TouchableOpacity style={styles.upNext} onPress={() => onNext(next)} accessibilityLabel={`Play next: ${next.title}`}>
+                        <Image source={thumbs.get(next.coverId)} style={styles.upNextImg} contentFit="cover" />
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={styles.upNextKicker}>UP NEXT</Text>
+                          <Text style={styles.upNextTitle} numberOfLines={1}>
+                            {next.title}
+                          </Text>
+                          <Text style={styles.upNextSub} numberOfLines={1}>
+                            {next.subtitle}
+                          </Text>
+                        </View>
+                        <View style={styles.upNextPlay}>
+                          <Icon name="play" size={14} color="#000" />
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  )}
                 </View>
               </View>
             )}
@@ -783,6 +914,24 @@ function EndButton({ icon, label, tint, onPress }: { icon: 'rewatch' | 'heart' |
 
 const makeStyles = (p: Palette) =>
   sheet({
+    trailerBars: { position: 'absolute', top: 12, left: 14, right: 14, flexDirection: 'row', gap: 4 },
+    trailerBar: { flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.35)' },
+    mix: { width: 172, height: 196, borderRadius: 22, padding: 12, overflow: 'hidden', justifyContent: 'flex-end', gap: 4 },
+    mixFan: { position: 'absolute', top: 14, left: 0, right: 0, height: 100 },
+    mixImg: { position: 'absolute', top: 6, width: 82, height: 94, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.85)', backgroundColor: 'rgba(0,0,0,0.3)' },
+    mixTitle: { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: -0.3 },
+    mixFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    mixSub: { color: 'rgba(255,255,255,0.82)', fontSize: 12, fontWeight: '700' },
+    mixPlay: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', paddingLeft: 2 },
+    endClips: { gap: 6, paddingHorizontal: 2, paddingVertical: 6 },
+    endClip: { width: 54, height: 72, borderRadius: 9, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)' },
+    endClipN: { position: 'absolute', left: 5, bottom: 3, color: '#fff', fontSize: 12, fontWeight: '900' },
+    upNext: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 10, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.35)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+    upNextImg: { width: 56, height: 56, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)' },
+    upNextKicker: { color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+    upNextTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
+    upNextSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600' },
+    upNextPlay: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', paddingLeft: 2 },
     bleed: { marginHorizontal: -16 },
     row: { paddingHorizontal: 16, gap: 10 },
     forYouHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },

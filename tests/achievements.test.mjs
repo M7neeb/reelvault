@@ -219,3 +219,26 @@ test('secret date badges and far from home', () => {
   assert.equal(list.find((a) => a.id === 'far-away').videoId, 'a');
   assert.equal(list.find((a) => a.id === 'leap-day').unlocked, false);
 });
+
+test('year over year: the month so far, the year so far, and month by month', async () => {
+  const { yearOverYear } = await import('../src/features/vault/dashboard.ts');
+  const at = (y, m, d) => new Date(y, m, d, 12).getTime();
+  const now = new Date(2026, 9, 18, 20).getTime();
+  const plays = [
+    { videoId: 'a', startedAt: at(2026, 9, 5), watchedMs: 10 },
+    { videoId: 'b', startedAt: at(2025, 9, 5), watchedMs: 4 },
+    { videoId: 'c', startedAt: at(2025, 9, 25), watchedMs: 100 },
+    { videoId: 'a', startedAt: at(2026, 0, 3), watchedMs: 7 },
+    { videoId: 'b', startedAt: at(2025, 0, 3), watchedMs: 2 },
+  ];
+  const r = yearOverYear(plays, now);
+  assert.equal(r.month.now, 10);
+  // Only up to 18 October last year counts for the month so far.
+  assert.equal(r.month.then, 4);
+  assert.equal(r.ytd.now, 17);
+  assert.equal(r.ytd.then, 6);
+  assert.equal(r.months.length, 10);
+  assert.equal(r.months[9].then, 104);
+  assert.equal(r.topNow, 'a');
+  assert.equal(r.topThen, 'c');
+});

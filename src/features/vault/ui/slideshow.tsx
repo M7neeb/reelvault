@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { friendlyName } from '../names';
 import { highlightAt } from '../recap';
+import { allowRotation, lockUpright } from '../rotate';
 import { success, tick } from './haptics';
 import Icon from './Icon';
 import { gradient } from './insightParts';
@@ -107,6 +108,12 @@ export function SlideshowModal({
     setOpts(next);
     onOptions?.(next);
   };
+  // While it plays, the slideshow turns with the phone; the setup and end pages stay upright.
+  useEffect(() => {
+    if (phase === 'play') allowRotation();
+    else lockUpright();
+  }, [phase]);
+  useEffect(() => lockUpright, []);
   const play = () => {
     success();
     setList(ordered(items, startIndex, opts.order));

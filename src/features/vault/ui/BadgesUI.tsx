@@ -118,26 +118,46 @@ function SecretMedal({ size }: { size: number }) {
   );
 }
 
-/** New badges, one after another, full screen. */
+/**
+ * New badges, full screen. A few are revealed one by one (tap anywhere for the
+ * next, the left edge to go back, or Skip all); many at once open straight on
+ * the haul: every new medal on one page, with the tiers they reached.
+ */
 function UnlockReveal({ list, thumbs, onPin, pinned, onDone }: { list: Achievement[]; thumbs: Map<string, VaultItem['thumbSource']>; onPin: (id: string) => void; pinned: string[]; onDone: () => void }) {
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const [i, setI] = useState(0);
+  // More than six: show them all together first (one by one is still a tap away).
+  const [haul, setHaul] = useState(list.length > 6);
   const a = list[Math.min(i, list.length - 1)];
   useEffect(() => {
     success();
-  }, [i]);
+  }, [i, haul]);
   if (!a) return null;
+  if (haul)
+    return (
+      <RevealHaul
+        list={list}
+        onOneByOne={() => {
+          setI(0);
+          setHaul(false);
+        }}
+        onDone={onDone}
+      />
+    );
   const [light, dark] = tierOf(a);
   const thumb = a.videoId ? thumbs.get(a.videoId) : undefined;
   const last = i >= list.length - 1;
+  const next = () => (last ? (list.length > 1 ? setHaul(true) : onDone()) : setI(i + 1));
+  const back = () => i > 0 && setI(i - 1);
+
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onDone} statusBarTranslucent>
       <View key={a.id} style={styles.reveal}>
         <Aurora colors={[dark, '#05030F']} accent={light} width={width} height={height} />
         {thumb && (
-          <View style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}>
+          <View style={[StyleSheet.absoluteFill, { opacity: 0.4 }]}>
             <KenBurns source={thumb} ms={9000} seed={i} />
           </View>
         )}
@@ -148,23 +168,48 @@ function UnlockReveal({ list, thumbs, onPin, pinned, onDone }: { list: Achieveme
         <View style={[StyleSheet.absoluteFill, { paddingBottom: height * 0.18 }]} pointerEvents="none">
           <Confetti colors={[light, dark, '#ffffff', '#FFD60A']} count={46} delay={500} />
         </View>
-        <View style={[styles.revealBody, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 30 }]}>
+
+        {/* Tap the left third to go back, anywhere else for the next one. */}
+        <View style={[StyleSheet.absoluteFill, { flexDirection: 'row' }]}>
+          <TouchableOpacity activeOpacity={1} style={{ flex: 1 }} onPress={back} accessibilityLabel="Previous badge" />
+          <TouchableOpacity activeOpacity={1} style={{ flex: 2 }} onPress={next} accessibilityLabel="Next badge" />
+        </View>
+
+        {list.length > 1 && (
+          <View style={[styles.revealTop, { top: insets.top + 10 }]} pointerEvents="box-none">
+            <View style={styles.revealDots} pointerEvents="none">
+              {list.slice(0, 30).map((x, n) => (
+                <View key={x.id} style={[styles.revealDot, { flex: 1, backgroundColor: n <= i ? '#fff' : 'rgba(255,255,255,0.28)' }]} />
+              ))}
+            </View>
+            <TouchableOpacity style={styles.revealSkipAll} onPress={() => setHaul(true)} hitSlop={10} accessibilityLabel="Skip all and see every new badge">
+              <Text style={styles.revealSkipAllText}>Skip all</Text>
+              <Icon name="forward" size={12} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={[styles.revealBody, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 30 }]} pointerEvents="box-none">
           <Animated.Text entering={FadeIn.duration(DUR.slow)} style={[styles.revealKicker, { color: light }]}>
             {list.length > 1 ? `NEW BADGE · ${i + 1} OF ${list.length}` : 'NEW BADGE'}
           </Animated.Text>
-          <Float amount={5}>
-            <TiltMedal a={a} size={Math.min(190, width * 0.48)} />
-          </Float>
-          <Words text={a.title} style={styles.revealTitle} delay={500} />
-          {a.kind === 'ladder' && (
-            <Animated.Text entering={FadeIn.delay(800)} style={[styles.revealTier, { color: light }]}>
-              {TIER_NAMES[a.tier]}
+          <View pointerEvents="box-none">
+            <Float amount={5}>
+              <TiltMedal a={a} size={Math.min(190, width * 0.48)} />
+            </Float>
+          </View>
+          <View pointerEvents="none" style={{ alignItems: 'center', gap: 14 }}>
+            <Words text={a.title} style={styles.revealTitle} delay={500} />
+            {a.kind === 'ladder' && (
+              <Animated.Text entering={FadeIn.delay(800)} style={[styles.revealTier, { color: light }]}>
+                {TIER_NAMES[a.tier]}
+              </Animated.Text>
+            )}
+            <Animated.Text entering={FadeInDown.delay(900).duration(DUR.slow)} style={styles.revealDetail}>
+              {a.detail}
+              {a.earnedAt ? ` · ${day(a.earnedAt)}` : ''}
             </Animated.Text>
-          )}
-          <Animated.Text entering={FadeInDown.delay(900).duration(DUR.slow)} style={styles.revealDetail}>
-            {a.detail}
-            {a.earnedAt ? ` · ${day(a.earnedAt)}` : ''}
-          </Animated.Text>
+          </View>
           <Animated.View entering={FadeInDown.delay(1100).duration(DUR.slow)} style={styles.revealButtons}>
             {a.kind !== 'monthly' && a.kind !== 'weekly' && (
               <TouchableOpacity style={styles.revealGhost} onPress={() => onPin(a.id)}>
@@ -172,15 +217,81 @@ function UnlockReveal({ list, thumbs, onPin, pinned, onDone }: { list: Achieveme
                 <Text style={styles.revealGhostText}>{pinned.includes(a.id) ? 'Pinned' : 'Pin'}</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.revealPrimary} onPress={() => (last ? onDone() : setI(i + 1))}>
-              <Text style={styles.revealPrimaryText}>{last ? 'Done' : `Next (${list.length - i - 1} more)`}</Text>
+            <TouchableOpacity style={styles.revealPrimary} onPress={next}>
+              <Text style={styles.revealPrimaryText}>{last ? (list.length > 1 ? 'See them all' : 'Done') : `Next (${list.length - i - 1} more)`}</Text>
             </TouchableOpacity>
           </Animated.View>
-          {list.length > 2 && !last && (
-            <TouchableOpacity onPress={onDone}>
-              <Text style={styles.revealSkip}>Skip the rest</Text>
+          {list.length > 1 && (
+            <Text style={styles.revealSkip} pointerEvents="none">
+              Tap anywhere for the next one
+            </Text>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** Every new badge on one page: the count, the tiers they reached, and each medal. */
+function RevealHaul({ list, onOneByOne, onDone }: { list: Achievement[]; onOneByOne: () => void; onDone: () => void }) {
+  const styles = useStyles(makeStyles);
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const best = [...list].sort((x, y) => y.tier - x.tier)[0];
+  const [light, dark] = tierOf(best);
+  const cols = width > 600 ? 5 : 3;
+  const cell = (width - 40 - (cols - 1) * 10) / cols;
+  const byTier = [5, 4, 3, 2, 1].map((t) => ({ t, n: list.filter((x) => x.kind === 'ladder' && x.tier === t).length })).filter((x) => x.n);
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onDone} statusBarTranslucent>
+      <View style={styles.reveal}>
+        <Aurora colors={[dark, '#05030F']} accent={light} width={width} height={height} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(5,3,15,0.55)' }]} />
+        <View style={[StyleSheet.absoluteFill, { height: height * 0.45 }]} pointerEvents="none">
+          <Confetti colors={[light, dark, '#ffffff', '#FFD60A']} count={60} delay={200} />
+        </View>
+        <ScrollView contentContainerStyle={{ paddingTop: insets.top + 36, paddingBottom: insets.bottom + 120, paddingHorizontal: 20, gap: 14 }}>
+          <Animated.Text entering={FadeIn.duration(DUR.slow)} style={[styles.revealKicker, { color: light, textAlign: 'center' }]}>
+            YOU UNLOCKED
+          </Animated.Text>
+          <View style={{ alignItems: 'center' }}>
+            <CountUp to={list.length} format={(n) => String(Math.round(n))} style={styles.haulCount} ms={900} />
+            <Text style={styles.haulWord}>{list.length === 1 ? 'new badge' : 'new badges'}</Text>
+          </View>
+          {byTier.length > 0 && (
+            <View style={styles.haulTiers}>
+              {byTier.map(({ t, n }) => (
+                <View key={t} style={[styles.haulTier, { borderColor: TIER_COLORS[t][0] }]}>
+                  <View style={[styles.haulTierDot, { backgroundColor: TIER_COLORS[t][0] }]} />
+                  <Text style={styles.haulTierText}>
+                    {n} {TIER_NAMES[t]}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <View style={styles.haulGrid}>
+            {list.map((x, n) => (
+              <Animated.View key={x.id} entering={ZoomIn.delay(Math.min(n, 18) * 45)} style={[styles.haulCell, { width: cell }]}>
+                <ShinyMedal icon={x.icon} tier={x.tier} size={Math.min(84, cell * 0.72)} delay={n * 120} />
+                <Text style={styles.haulName} numberOfLines={2}>
+                  {x.title}
+                </Text>
+                {x.kind === 'ladder' && <Text style={[styles.haulTierName, { color: tierOf(x)[0] }]}>{TIER_NAMES[x.tier]}</Text>}
+              </Animated.View>
+            ))}
+          </View>
+        </ScrollView>
+        <View style={[styles.haulBar, { paddingBottom: insets.bottom + 16 }]}>
+          {list.length > 1 && (
+            <TouchableOpacity style={styles.revealGhost} onPress={onOneByOne}>
+              <Icon name="play" size={13} color="#fff" />
+              <Text style={styles.revealGhostText}>One by one</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={[styles.revealPrimary, { flex: 1, alignItems: 'center' }]} onPress={onDone}>
+            <Text style={styles.revealPrimaryText}>Done</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -250,7 +361,7 @@ export default function Badges({
   const [showAllJourney, setShowAllJourney] = useState(false);
   const [filter, setFilter] = useState<'all' | 'earned' | 'todo'>('all');
   const [revealing, setRevealing] = useState(fresh.length > 0);
-  const [revealList] = useState(() => [...fresh].sort((a, b) => (a.earnedAt ?? 0) - (b.earnedAt ?? 0)).slice(-8));
+  const [revealList] = useState(() => [...fresh].sort((a, b) => (a.earnedAt ?? 0) - (b.earnedAt ?? 0)));
   const s = useMemo(() => summarize(list, 6), [list]);
   const now = new Date();
   const month = list.find((a) => a.kind === 'monthly' && a.id === `month-${now.getFullYear()}-${now.getMonth() + 1}`);
@@ -783,6 +894,22 @@ const makeStyles = (p: Palette) =>
     revealPrimary: { borderRadius: 999, paddingHorizontal: 26, paddingVertical: 13, backgroundColor: '#fff' },
     revealPrimaryText: { color: '#000', fontSize: 15, fontWeight: '900' },
     revealSkip: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700', marginTop: 6 },
+    revealTop: { position: 'absolute', left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 12, zIndex: 5 },
+    revealDots: { flex: 1, flexDirection: 'row', gap: 3 },
+    revealDot: { height: 3, borderRadius: 2 },
+    revealSkipAll: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
+    revealSkipAllText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    haulCount: { color: '#fff', fontSize: 92, fontWeight: '900', letterSpacing: -4, lineHeight: 96 },
+    haulWord: { color: 'rgba(255,255,255,0.85)', fontSize: 18, fontWeight: '800', marginTop: -6 },
+    haulTiers: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+    haulTier: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, backgroundColor: 'rgba(0,0,0,0.25)' },
+    haulTierDot: { width: 8, height: 8, borderRadius: 4 },
+    haulTierText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    haulGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
+    haulCell: { alignItems: 'center', gap: 6, paddingVertical: 12, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.07)' },
+    haulName: { color: '#fff', fontSize: 12, fontWeight: '800', textAlign: 'center', paddingHorizontal: 6 },
+    haulTierName: { fontSize: 10, fontWeight: '900', letterSpacing: 0.8, textTransform: 'uppercase' },
+    haulBar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 14, backgroundColor: 'rgba(5,3,15,0.85)' },
 
     sheetHero: { alignItems: 'center', gap: 8, paddingBottom: 8 },
     sheetPhoto: { alignSelf: 'stretch', height: 170, borderRadius: 20, overflow: 'hidden' },

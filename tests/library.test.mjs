@@ -196,3 +196,19 @@ test('backup files are recognised and matched back to the right videos', () => {
   assert.equal(matches.get(1), 'y', 'by name + size when there is no key');
   assert.equal(matches.has(2), false);
 });
+
+test('restored settings join the ones on the phone; pins follow the new video ids', async () => {
+  const { mergePrefs, parseBackup } = await import('../src/features/vault/backupFormat.ts');
+  const current = { memoryFavs: ['m1'], pinned: ['x'], weeklyGoalMin: 90, player: {}, customMemories: [{ id: 'c1' }], badgesSeen: null, events: [] };
+  const saved = { memoryFavs: ['m1', 'm2'], pinned: ['old-a', 'old-gone'], weeklyGoalMin: 300, player: { speed: 1.5 }, customMemories: [{ id: 'c1' }, { id: 'c2' }], badgesSeen: ['b1'], events: [{ k: 'quiz', at: 1 }] };
+  const out = mergePrefs(current, saved, new Map([['old-a', 'new-a']]));
+  assert.deepEqual(out.memoryFavs, ['m1', 'm2']);
+  assert.deepEqual(out.pinned, ['x', 'new-a']);
+  // The phone already has a goal: it stays. The player had nothing set: it comes back.
+  assert.equal(out.weeklyGoalMin, 90);
+  assert.deepEqual(out.player, { speed: 1.5 });
+  assert.deepEqual(out.customMemories.map((c) => c.id), ['c1', 'c2']);
+  assert.deepEqual(out.badgesSeen, ['b1']);
+  const b = parseBackup(JSON.stringify({ kind: 'reelvault-library-info', videos: [], prefs: { a: 1 } }));
+  assert.deepEqual(b.prefs, { a: 1 });
+});
