@@ -72,12 +72,15 @@ import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
 import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
 import OverviewScreen from './OverviewScreen';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import { DUR } from './motion';
 import { ModeSwitch } from './overviewParts';
 import PersonaliseSheet from './PersonaliseSheet';
 import { DesktopTable, DetailedList } from './VideoList';
 import { DEFAULT_VAULT_PREFS } from './types';
 import { Image as ThumbImage } from 'expo-image';
 import { fmtClock } from '../stats';
+import { friendlyName } from '../names';
 
 const EMPTY_RESUME = new Map<string, number>();
 const EMPTY_OVERVIEW: OverviewData = { kept: [], series: [], members: [] };
@@ -223,6 +226,8 @@ function VaultScreenBody({
   const [playing, setPlaying] = useState<VaultItem | null>(
     () => items.find((i) => i.id === dev?.viewerId) ?? null
   );
+  /** What swiping in the viewer moves through: a series' episodes, else the list on screen. */
+  const [playList, setPlayList] = useState<VaultItem[] | null>(null);
 
   useEffect(() => {
     actions
@@ -876,7 +881,7 @@ function VaultScreenBody({
             {continuing.map((v) => {
               const at = resume.get(v.id) ?? 0;
               return (
-                <TouchableOpacity key={v.id} style={styles.continueCard} onPress={() => setPlaying(v)} accessibilityLabel={`Continue ${v.title || v.filename}`}>
+                <TouchableOpacity key={v.id} style={styles.continueCard} onPress={() => setPlaying(v)} accessibilityLabel={`Continue ${friendlyName(v)}`}>
                   <ThumbImage source={v.thumbSource} style={styles.continueThumb} contentFit="cover" />
                   <View style={styles.continueTrack}>
                     <View style={[styles.continueFill, { width: `${v.durationMs ? Math.min(100, (at / v.durationMs) * 100) : 0}%` }]} />
@@ -885,7 +890,7 @@ function VaultScreenBody({
                     <Icon name="play" size={14} color="#fff" />
                   </View>
                   <Text style={styles.continueName} numberOfLines={1}>
-                    {v.title || v.filename}
+                    {friendlyName(v)}
                   </Text>
                   <Text style={styles.continueAt}>Stopped at {fmtClock(at)}</Text>
                 </TouchableOpacity>
@@ -1277,7 +1282,7 @@ function VaultScreenBody({
       )}
 
       {videosMode === 'overview' && (
-        <View style={StyleSheet.absoluteFill}>
+        <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
           <OverviewScreen
             items={publicItems}
             deletedItems={deletedItems.filter((v) => !v.isPrivate)}
@@ -1287,7 +1292,17 @@ function VaultScreenBody({
             actions={actions}
             onPlay={(id) => {
               const v = items.find((x) => x.id === id);
-              if (v) setPlaying(v);
+              if (!v) return;
+              const m = overview.members.find((x) => x.videoId === id);
+              const episodes = m
+                ? overview.members
+                    .filter((x) => x.seriesId === m.seriesId)
+                    .sort((a, b) => a.position - b.position)
+                    .map((x) => items.find((i) => i.id === x.videoId && !i.deletedAt))
+                    .filter((i): i is VaultItem => !!i)
+                : null;
+              setPlayList(episodes && episodes.length > 1 ? episodes : null);
+              setPlaying(v);
             }}
             onMode={switchMode}
             onStats={() => setInsights('dashboard')}
@@ -1295,7 +1310,7 @@ function VaultScreenBody({
             devKey={dev?.overviewKey}
             devSheet={dev?.overviewSheet}
           />
-        </View>
+        </Animated.View>
       )}
 
       {personalise && (
@@ -1309,6 +1324,17 @@ function VaultScreenBody({
           items={inPrivate ? privateItems : publicItems}
           deleted={visibleTrash}
           albums={albums.length}
+          smartFilters={smartFilters.length}
+          overview={overview}
+          prefs={prefs}
+          enableVideo={enableVideo}
+          freeGb={freeGb}
+          duplicateGroups={duplicateGroups}
+          onFilter={(f) => {
+            setInsights(null);
+            setOpenWrapped(false);
+            pickFilter(f);
+          }}
           actions={actions}
           simkl={simkl}
           ratingLabels={prefs.ratingLabels}
@@ -1330,6 +1356,8 @@ function VaultScreenBody({
       {playing && (
         <ViewerModal
           item={playing}
+          items={playList ?? (mode === 'normal' ? shown : [])}
+          onChangeItem={setPlaying}
           actions={actions}
           albums={playing.isPrivate ? privateAlbums : publicAlbums}
           enableVideo={enableVideo}
@@ -1353,6 +1381,7 @@ function VaultScreenBody({
           prefs={prefs}
           onClose={() => {
             setPlaying(null);
+            setPlayList(null);
             loadPlayCounts();
           }}
         />

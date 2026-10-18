@@ -1,77 +1,124 @@
 /**
- * Your videos in numbers, in four tabs:
- * - Dashboard: favourite tag, what you watch most (by tag), most watched and
- *   rewatched videos, your ratings, when you watch;
- * - Wrapped: a story for any week (one is made every week) or any range, of
- *   everything you watched or only your videos;
- * - Badges: tiers you unlock, with progress to the next one;
- * - Storage: what takes the space, and what Make Smaller could save.
+ * My Videos, in four tabs:
+ * - Dashboard: weekly goal, things the app noticed, watch time for a period
+ *   against the time before, memories, favourites to rediscover, habits,
+ *   taste, ratings and how complete the library is (DashboardUI);
+ * - Wrapped: your year, months, weeks or any range, as a story that plays
+ *   your videos (WrappedUI);
+ * - Badges: level, showcase, records, journey, ladders, one-offs and monthly
+ *   challenges (BadgesUI);
+ * - Storage: what takes the space, how it grew, and ways to free some.
  * Presentational only: plays and Simkl numbers come in through callbacks.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BarChart, RankedBars } from '@/features/simkl/ui/charts';
+import { RankedBars } from '@/features/simkl/ui/charts';
 import type { SimklBridge } from '@/features/simkl/ui/types';
-import { WEEKDAYS } from '@/features/simkl/insights';
 
-import {
-  badges as buildBadges,
-  fmtBytes,
-  fmtDay,
-  fmtMs,
-  longestStreak,
-  presetRange,
-  ratingLabel,
-  recentWeeks,
-  storageStats,
-  videoDashboard,
-  wrapped as buildWrapped,
-  type Badge,
-  type Range,
-  type RatingLabels,
-  type VaultPlay,
-  type Wrapped,
-} from '../stats';
-import Fade from './Fade';
-import { success, tick } from './haptics';
+import { achievements, summarize, type AchInput } from '../achievements';
+import { buildOverview } from '../overview';
+import { growth, journey, levelFor, personalRecords, spaceIdeas, storyFacts } from '../recap';
+import { fmtBytes, fmtMs, recentWeeks, storageStats, wrapped as buildWrapped, type Range, type RatingLabels, type VaultPlay } from '../stats';
+import Badges from './BadgesUI';
+import Dashboard from './DashboardUI';
+import type { Filter } from './filters';
+import { tick } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
-import { Segment } from './sheets';
+import type { IconName } from './icons';
+import { Bars, Card, gradient, Ring, StatTile } from './insightParts';
+import { DUR, enterUp, PressableScale, SPRING } from './motion';
+import { toOvVideo } from './overviewParts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
-import type { VaultActions, VaultItem } from './types';
+import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
+import { previous, WrappedPicker, WrappedStory, type StoryInput } from './WrappedUI';
 
 export type InsightsTab = 'dashboard' | 'wrapped' | 'badges' | 'storage';
 
 type SimklNumbers = Awaited<ReturnType<SimklBridge['insights']>>;
+
+const TABS: { key: InsightsTab; label: string; icon: IconName; color: string }[] = [
+  { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', color: '#0A84FF' },
+  { key: 'wrapped', label: 'Wrapped', icon: 'sparkle', color: '#BF5AF2' },
+  { key: 'badges', label: 'Badges', icon: 'trophy', color: '#FF9F0A' },
+  { key: 'storage', label: 'Storage', icon: 'storage', color: '#30D158' },
+];
+
+/** The tab bar: icons in coloured squares, a pill that slides to the chosen one. */
+function TabStrip({ value, onChange }: { value: InsightsTab; onChange: (t: InsightsTab) => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const [w, setW] = useState(0);
+  const idx = TABS.findIndex((t) => t.key === value);
+  const x = useSharedValue(0);
+  useEffect(() => {
+    if (w) x.value = withSpring(idx * (w / TABS.length), SPRING);
+  }, [idx, w]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+  return (
+    <View style={styles.tabs} onLayout={(e) => setW(e.nativeEvent.layout.width)} accessibilityRole="tablist">
+      {w > 0 && <Animated.View style={[styles.tabPill, { width: w / TABS.length }, pill]} />}
+      {TABS.map((t) => {
+        const on = t.key === value;
+        return (
+          <TouchableOpacity key={t.key} style={styles.tab} onPress={() => onChange(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+            <View style={[styles.tabIcon, { backgroundColor: on ? t.color : `${t.color}22` }]}>
+              <Icon name={t.icon} size={14} color={on ? '#fff' : t.color} />
+            </View>
+            <Text style={[styles.tabText, on && { color: p.text }]}>{t.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
 
 export default function VideoInsightsModal({
   initialTab = 'dashboard',
   items,
   deleted,
   albums,
+  smartFilters = 0,
+  overview,
+  prefs = DEFAULT_VAULT_PREFS,
+  enableVideo = true,
+  freeGb = null,
+  duplicateGroups = [],
   actions,
   simkl,
   ratingLabels,
   initialWrapped,
   onOpenVideo,
   onMakeSmaller,
+  onFilter,
   onClose,
 }: {
   initialTab?: InsightsTab;
   items: VaultItem[];
   deleted: VaultItem[];
   albums: number;
+  smartFilters?: number;
+  /** Series and removed videos, for their badges and Wrapped. */
+  overview?: OverviewData;
+  prefs?: VaultPrefs;
+  /** Play videos in Wrapped (off in the browser preview). */
+  enableVideo?: boolean;
+  freeGb?: number | null;
+  duplicateGroups?: string[][];
   actions: VaultActions;
   simkl?: SimklBridge;
   ratingLabels: RatingLabels;
-  /** Open straight into this week's Wrapped (from the Monday notification). */
+  /** Open straight into last week's Wrapped (from the Monday notification). */
   initialWrapped?: boolean;
   onOpenVideo: (id: string) => void;
   onMakeSmaller: (ids: string[]) => void;
+  /** Close and show these videos in the library (Recently Deleted, duplicates…). */
+  onFilter?: (f: Filter) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -81,7 +128,7 @@ export default function VideoInsightsModal({
   const [plays, setPlays] = useState<VaultPlay[] | null>(null);
   const [bookmarks, setBookmarks] = useState(0);
   const [sk, setSk] = useState<SimklNumbers | null>(null);
-  const [story, setStory] = useState<Wrapped | null>(null);
+  const [story, setStory] = useState<StoryInput | null>(null);
 
   useEffect(() => {
     actions.loadPlays().then(setPlays).catch(() => setPlays([]));
@@ -90,11 +137,84 @@ export default function VideoInsightsModal({
   }, [actions, simkl]);
 
   const thumbs = useMemo(() => new Map(items.map((v) => [v.id, v.thumbSource])), [items]);
+  const byId = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
+
+  const entries = useMemo(
+    () => (overview && plays ? buildOverview(items.map(toOvVideo).concat(overview.kept), overview.series, overview.members, plays) : []),
+    [overview, items, plays]
+  );
+
+  const achInput = useMemo<AchInput | null>(() => {
+    if (!plays) return null;
+    return {
+      videos: items.map((v) => ({ ...v, location: v.meta?.location ?? null })),
+      plays,
+      bookmarks,
+      albums,
+      smartFilters,
+      series: overview?.series.length ?? 0,
+      seriesFinished: entries.filter((e) => e.kind === 'series' && e.episodes.length > 0 && e.watchedCount === e.episodes.length).length,
+      kept: overview?.kept.length ?? 0,
+      simkl: sk
+        ? {
+            episodes: sk.events.filter((e) => e.type !== 'movie').length,
+            movies: sk.events.filter((e) => e.type === 'movie').length,
+            completed: sk.items.filter((i) => i.type !== 'movie' && i.status === 'completed').length,
+            rewatches: sk.events.filter((e) => e.rewatch).length,
+            lists: sk.lists ?? 0,
+            times: sk.events.map((e) => e.at),
+          }
+        : null,
+      now: Date.now(),
+    };
+  }, [plays, items, bookmarks, albums, smartFilters, overview, sk, entries]);
+  const badgeList = useMemo(() => (achInput ? achievements(achInput) : []), [achInput]);
+  const badgeAll = useMemo(() => (achInput ? achievements(achInput, { everyStep: true }) : []), [achInput]);
+  const level = useMemo(() => {
+    const s = summarize(badgeList);
+    const watched = (plays ?? []).filter((x) => byId.has(x.videoId)).reduce((a, x) => a + x.watchedMs, 0);
+    return levelFor(s.points, watched, items.length);
+  }, [badgeList, plays, items, byId]);
+  const records = useMemo(() => personalRecords(items, plays ?? [], fmtMs), [items, plays]);
+  const milestones = useMemo(
+    () =>
+      journey(
+        items,
+        plays ?? [],
+        badgeList.filter((a) => a.unlocked && a.earnedAt !== null).map((a) => ({ at: a.earnedAt!, title: a.title, videoId: a.videoId, icon: a.icon }))
+      ),
+    [items, plays, badgeList]
+  );
+
+  /** Everything the story needs for a range. */
+  const openStory = (r: Range, scope: 'everything' | 'videos') => {
+    if (!plays) return;
+    const now = Date.now();
+    const skUse = scope === 'everything' ? (sk ?? undefined) : undefined;
+    const series = entries
+      .filter((e) => e.kind === 'series')
+      .map((e) => ({
+        name: e.title,
+        episodes: new Set(plays.filter((x) => x.startedAt >= r.start && x.startedAt < r.end && e.episodes.some((ep) => ep.video.id === x.videoId)).map((x) => x.videoId)).size,
+        finished: e.episodes.length > 0 && e.watchedCount === e.episodes.length,
+      }))
+      .filter((s) => s.episodes > 0)
+      .sort((a, b) => b.episodes - a.episodes);
+    const prevR = previous(r);
+    setStory({
+      range: r,
+      facts: storyFacts(r, items, plays, now),
+      prev: prevR.start >= 0 ? storyFacts(prevR, items, plays, now) : null,
+      w: buildWrapped(r, items, plays, skUse),
+      earned: badgeList.filter((a) => a.unlocked && a.earnedAt !== null && a.earnedAt >= r.start && a.earnedAt < r.end),
+      series,
+    });
+  };
 
   useEffect(() => {
     if (initialWrapped && plays) {
-      const lastWeek = recentWeeks(Date.now(), 2)[1];
-      setStory(buildWrapped(lastWeek, items, plays, sk ?? undefined));
+      const [, last] = recentWeeks(Date.now(), 2);
+      openStory(last, sk ? 'everything' : 'videos');
     }
   }, [initialWrapped, plays]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -102,18 +222,14 @@ export default function VideoInsightsModal({
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
         <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerKicker}>REELVAULT</Text>
+            <Text style={styles.headerTitle}>My Videos</Text>
+          </View>
           <IconButton icon="close" label="Close" onPress={onClose} />
-          <Text style={styles.headerTitle}>My Videos</Text>
-          <View style={{ width: 40 }} />
         </View>
-        <View style={styles.segment}>
-          <Segment
-            options={[
-              { key: 'dashboard', label: 'Dashboard' },
-              { key: 'wrapped', label: 'Wrapped' },
-              { key: 'badges', label: 'Badges' },
-              { key: 'storage', label: 'Storage' },
-            ]}
+        <View style={styles.tabsWrap}>
+          <TabStrip
             value={tab}
             onChange={(k) => {
               tick();
@@ -124,532 +240,137 @@ export default function VideoInsightsModal({
         {plays === null ? (
           <ActivityIndicator color={p.textSecondary} style={{ marginTop: 40 }} />
         ) : (
-          <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 30 }]}>
-            {tab === 'dashboard' && <Dashboard items={items} plays={plays} labels={ratingLabels} thumbs={thumbs} onOpen={onOpenVideo} />}
-            {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} onOpen={setStory} />}
-            {tab === 'badges' && (
-              <Badges
-                list={buildBadges({
-                  videos: items,
-                  plays,
-                  bookmarks,
-                  albums,
-                  simklEpisodes: sk?.events.filter((e) => e.type !== 'movie').length ?? 0,
-                  simklMovies: sk?.events.filter((e) => e.type === 'movie').length ?? 0,
-                  simklCompleted: sk?.items.filter((i) => i.type !== 'movie' && i.status === 'completed').length ?? 0,
-                  simklRewatches: sk?.events.filter((e) => e.rewatch).length ?? 0,
-                  streakDays: longestStreak([...plays.map((x) => x.startedAt), ...(sk?.events.map((e) => e.at) ?? [])]),
-                  lists: sk?.lists ?? 0,
-                })}
-              />
-            )}
-            {tab === 'storage' && <Storage items={items} deleted={deleted} thumbs={thumbs} onOpen={onOpenVideo} onMakeSmaller={onMakeSmaller} />}
+          <ScrollView key={tab} contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 40 }]}>
+            <Animated.View entering={FadeIn.duration(DUR.fast)} style={{ gap: 14 }}>
+              {tab === 'dashboard' && (
+                <Dashboard
+                  items={items}
+                  plays={plays}
+                  labels={ratingLabels}
+                  thumbs={thumbs}
+                  goalMin={prefs.weeklyGoalMin}
+                  onGoal={(min) => void actions.setPrefs({ ...prefs, weeklyGoalMin: min })}
+                  onOpen={onOpenVideo}
+                />
+              )}
+              {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} thumbs={thumbs} onOpen={openStory} />}
+              {tab === 'badges' && (
+                <Badges
+                  list={badgeList}
+                  all={badgeAll}
+                  simkl={!!sk}
+                  level={level}
+                  records={records}
+                  milestones={milestones}
+                  thumbs={thumbs}
+                  showcase={prefs.showcase}
+                  onShowcase={(ids) => void actions.setPrefs({ ...prefs, showcase: ids })}
+                  onOpenVideo={onOpenVideo}
+                />
+              )}
+              {tab === 'storage' && (
+                <Storage
+                  items={items}
+                  deleted={deleted}
+                  plays={plays}
+                  thumbs={thumbs}
+                  freeGb={freeGb}
+                  duplicateGroups={duplicateGroups}
+                  onOpen={onOpenVideo}
+                  onMakeSmaller={onMakeSmaller}
+                  onFilter={onFilter}
+                />
+              )}
+            </Animated.View>
           </ScrollView>
         )}
       </View>
-      {story && <WrappedStory w={story} thumbs={thumbs} onClose={() => setStory(null)} />}
-    </Modal>
-  );
-}
-
-/* --------------------------------------------------------------- dashboard */
-
-function Tile({ value, label }: { value: string; label: string }) {
-  const styles = useStyles(makeStyles);
-  return (
-    <View style={styles.tile}>
-      <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-        {value}
-      </Text>
-      <Text style={styles.tileLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  const styles = useStyles(makeStyles);
-  return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function VideoRows({
-  rows,
-  thumbs,
-  format,
-  onOpen,
-}: {
-  rows: { key: string; label: string; value: number; sub?: string }[];
-  thumbs: Map<string, VaultItem['thumbSource']>;
-  format: (v: number) => string;
-  onOpen: (id: string) => void;
-}) {
-  const styles = useStyles(makeStyles);
-  if (!rows.length) return <Text style={styles.muted}>Nothing yet - watch a few of your videos.</Text>;
-  return (
-    <View style={{ gap: 10 }}>
-      {rows.slice(0, 5).map((r, i) => (
-        <TouchableOpacity key={r.key} style={styles.vrow} onPress={() => onOpen(r.key)}>
-          <Text style={styles.rank}>{i + 1}</Text>
-          <Image source={thumbs.get(r.key)} style={styles.vthumb} contentFit="cover" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.vtitle} numberOfLines={1}>
-              {r.label}
-            </Text>
-            {!!r.sub && <Text style={styles.vsub}>{r.sub}</Text>}
-          </View>
-          <Text style={styles.vvalue}>{format(r.value)}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
-function Dashboard({
-  items,
-  plays,
-  labels,
-  thumbs,
-  onOpen,
-}: {
-  items: VaultItem[];
-  plays: VaultPlay[];
-  labels: RatingLabels;
-  thumbs: Map<string, VaultItem['thumbSource']>;
-  onOpen: (id: string) => void;
-}) {
-  const styles = useStyles(makeStyles);
-  const p = usePalette();
-  const d = useMemo(() => videoDashboard(items, plays), [items, plays]);
-  const fav = d.favouriteTag;
-  const most = d.mostWatchedTag;
-  return (
-    <>
-      <View style={styles.tiles}>
-        <Tile value={String(d.videos)} label="videos" />
-        <Tile value={fmtMs(d.footageMs)} label="of footage" />
-        <Tile value={fmtMs(d.watchedMs)} label="watched here" />
-        <Tile value={String(d.plays)} label="plays" />
-      </View>
-
-      <View style={styles.heroRow}>
-        <View style={[styles.hero, { backgroundColor: 'hsl(330, 45%, 30%)' }]}>
-          <Text style={styles.heroKicker}>FAVOURITE TAG</Text>
-          <Text style={styles.heroTitle} numberOfLines={1}>
-            {fav ? `#${fav.tag}` : '—'}
-          </Text>
-          <Text style={styles.heroSub}>
-            {fav ? (fav.avgRating !== null ? `★ ${fav.avgRating.toFixed(1)} on ${fav.videos} videos` : `${fav.videos} videos`) : 'Tag and rate some videos'}
-          </Text>
-        </View>
-        <View style={[styles.hero, { backgroundColor: 'hsl(212, 55%, 30%)' }]}>
-          <Text style={styles.heroKicker}>YOU WATCH MOST</Text>
-          <Text style={styles.heroTitle} numberOfLines={1}>
-            {most ? `#${most.tag}` : '—'}
-          </Text>
-          <Text style={styles.heroSub}>{most ? `${fmtMs(most.watchedMs)} · ${most.plays} plays` : 'Play some tagged videos'}</Text>
-        </View>
-      </View>
-
-      <Card title="Most watched">
-        <VideoRows rows={d.mostWatched} thumbs={thumbs} format={(v) => fmtMs(v)} onOpen={onOpen} />
-      </Card>
-      {d.mostRewatched.length > 0 && (
-        <Card title="On repeat">
-          <VideoRows rows={d.mostRewatched} thumbs={thumbs} format={(v) => `×${v}`} onOpen={onOpen} />
-        </Card>
-      )}
-
-      <Card title="Your ratings">
-        <Text style={styles.muted}>
-          {d.rated} rated{d.avgRating !== null ? ` · average ★ ${d.avgRating.toFixed(1)}` : ''}
-          {d.avgRating !== null && ratingLabel(d.avgRating, labels) ? ` (“${ratingLabel(d.avgRating, labels)}”)` : ''}
-        </Text>
-        <BarChart
-          data={d.ratingHistogram.map((value, i) => ({ label: String(i + 1), value }))}
-          format={(v) => `${v} ${v === 1 ? 'video' : 'videos'}`}
+      {story && (
+        <WrappedStory
+          input={story}
+          items={byId}
+          thumbs={thumbs}
+          enableVideo={enableVideo}
+          loadBookmarks={(id) => actions.loadBookmarks(id).then((list) => list.map((b) => b.atMs))}
+          onOpenVideo={(id) => {
+            setStory(null);
+            onOpenVideo(id);
+          }}
+          onClose={() => setStory(null)}
         />
-        {d.topRated.length > 0 && (
-          <VideoRows
-            rows={d.topRated.map((r) => ({ ...r, sub: ratingLabel(r.value, labels) ?? undefined }))}
-            thumbs={thumbs}
-            format={(v) => `★ ${Number.isInteger(v) ? v : v.toFixed(1)}`}
-            onOpen={onOpen}
-          />
-        )}
-      </Card>
-
-      <Card title="By tag">
-        {d.tags.length === 0 ? (
-          <Text style={styles.muted}>No tags yet.</Text>
-        ) : (
-          <View>
-            <View style={[styles.trow, styles.thead]}>
-              <Text style={[styles.tcell, styles.tname, styles.th]}>Tag</Text>
-              <Text style={[styles.tcell, styles.th]}>Videos</Text>
-              <Text style={[styles.tcell, styles.th]}>Avg ★</Text>
-              <Text style={[styles.tcell, styles.th]}>Watched</Text>
-            </View>
-            {d.tags.slice(0, 15).map((t) => (
-              <View key={t.tag} style={styles.trow}>
-                <Text style={[styles.tcell, styles.tname]} numberOfLines={1}>
-                  #{t.tag}
-                </Text>
-                <Text style={styles.tcell}>{t.videos}</Text>
-                <Text style={[styles.tcell, { color: p.rating }]}>{t.avgRating !== null ? t.avgRating.toFixed(1) : '–'}</Text>
-                <Text style={styles.tcell}>{t.watchedMs ? fmtMs(t.watchedMs) : '–'}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </Card>
-
-      <Card title="When you watch">
-        <BarChart data={d.weekday.map((value, i) => ({ label: WEEKDAYS[i], value }))} format={(v) => fmtMs(v)} />
-        <Text style={styles.muted}>
-          {d.neverWatched} of {d.videos} videos not watched in ReelVault yet.
-        </Text>
-      </Card>
-    </>
-  );
-}
-
-/* ----------------------------------------------------------------- wrapped */
-
-function MiniCalendar({ value, onPick }: { value: number; onPick: (t: number) => void }) {
-  const styles = useStyles(makeStyles);
-  const [month, setMonth] = useState(() => {
-    const d = new Date(value);
-    return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-  });
-  const m = new Date(month);
-  const first = (m.getDay() + 6) % 7;
-  const days = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
-  const cells = [...Array(first).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
-  const sel = new Date(value);
-  return (
-    <View style={styles.cal}>
-      <View style={styles.calHead}>
-        <TouchableOpacity onPress={() => setMonth(new Date(m.getFullYear(), m.getMonth() - 1, 1).getTime())} hitSlop={10}>
-          <Icon name="back" size={16} color={styles.calTitle.color as string} />
-        </TouchableOpacity>
-        <Text style={styles.calTitle}>{m.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</Text>
-        <TouchableOpacity onPress={() => setMonth(new Date(m.getFullYear(), m.getMonth() + 1, 1).getTime())} hitSlop={10}>
-          <Icon name="forward" size={16} color={styles.calTitle.color as string} />
-        </TouchableOpacity>
-      </View>
-      <View style={styles.calGrid}>
-        {WEEKDAYS.map((w) => (
-          <Text key={w} style={styles.calDow}>
-            {w[0]}
-          </Text>
-        ))}
-        {cells.map((d, i) => {
-          const on = d !== null && sel.getFullYear() === m.getFullYear() && sel.getMonth() === m.getMonth() && sel.getDate() === d;
-          return (
-            <TouchableOpacity
-              key={i}
-              style={[styles.calCell, on && styles.calOn]}
-              disabled={d === null}
-              onPress={() => d !== null && onPick(new Date(m.getFullYear(), m.getMonth(), d).getTime())}>
-              <Text style={[styles.calDay, on && styles.calDayOn]}>{d ?? ''}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-function WrappedPicker({
-  items,
-  plays,
-  simkl,
-  onOpen,
-}: {
-  items: VaultItem[];
-  plays: VaultPlay[];
-  simkl: SimklNumbers | null;
-  onOpen: (w: Wrapped) => void;
-}) {
-  const styles = useStyles(makeStyles);
-  const p = usePalette();
-  const [scope, setScope] = useState<'everything' | 'videos'>(simkl ? 'everything' : 'videos');
-  const [from, setFrom] = useState(() => Date.now() - 14 * 86_400_000);
-  const [to, setTo] = useState(() => Date.now());
-  const [editing, setEditing] = useState<'from' | 'to' | null>(null);
-  const now = Date.now();
-  const earliest = Math.min(now, ...plays.map((x) => x.startedAt), ...items.map((v) => v.importedAt));
-  const make = (r: Range) => buildWrapped(r, items, plays, scope === 'everything' ? (simkl ?? undefined) : undefined);
-  const weeks = recentWeeks(now, 8).map((r) => ({ r, w: make(r) }));
-  const open = (w: Wrapped) => {
-    success();
-    onOpen(w);
-  };
-
-  return (
-    <>
-      <Segment
-        options={[
-          { key: 'everything', label: simkl ? 'Everything' : 'Everything (sign in to Simkl)' },
-          { key: 'videos', label: 'My videos only' },
-        ]}
-        value={scope}
-        onChange={setScope}
-      />
-      <Text style={styles.section}>Every week</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weekRow} style={styles.bleed}>
-        {weeks.map(({ r, w }, i) => (
-          <TouchableOpacity key={r.start} style={[styles.week, { backgroundColor: `hsl(${(250 + i * 37) % 360}, 52%, ${i === 0 ? 38 : 28}%)` }]} onPress={() => open(w)}>
-            <Text style={styles.weekLabel}>{r.label}</Text>
-            <Text style={styles.weekValue}>{w.totalMinutes >= 60 ? `${Math.round(w.totalMinutes / 6) / 10} h` : `${w.totalMinutes} min`}</Text>
-            <Text style={styles.weekSub}>
-              {fmtDay(r.start)} – {fmtDay(r.end - 1)}
-            </Text>
-            <View style={styles.weekPlay}>
-              <Icon name="play" size={12} color="#fff" />
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      <Text style={styles.section}>Make one</Text>
-      <View style={styles.presets}>
-        {(['days7', 'days30', 'month', 'year', 'all'] as const).map((k) => {
-          const r = presetRange(k, now, earliest);
-          return (
-            <TouchableOpacity key={k} style={styles.preset} onPress={() => open(make(r))}>
-              <Text style={styles.presetText}>{r.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>From date to date</Text>
-        <View style={styles.rangeRow}>
-          <TouchableOpacity style={[styles.rangeBtn, editing === 'from' && styles.rangeOn]} onPress={() => setEditing(editing === 'from' ? null : 'from')}>
-            <Text style={styles.rangeKey}>From</Text>
-            <Text style={styles.rangeVal}>{new Date(from).toLocaleDateString()}</Text>
-          </TouchableOpacity>
-          <Icon name="forward" size={14} color={p.textMuted} />
-          <TouchableOpacity style={[styles.rangeBtn, editing === 'to' && styles.rangeOn]} onPress={() => setEditing(editing === 'to' ? null : 'to')}>
-            <Text style={styles.rangeKey}>To</Text>
-            <Text style={styles.rangeVal}>{new Date(to).toLocaleDateString()}</Text>
-          </TouchableOpacity>
-        </View>
-        {editing && (
-          <MiniCalendar
-            value={editing === 'from' ? from : to}
-            onPick={(t) => {
-              tick();
-              if (editing === 'from') setFrom(Math.min(t, to));
-              else setTo(Math.max(t, from));
-              setEditing(null);
-            }}
-          />
-        )}
-        <TouchableOpacity
-          style={styles.primary}
-          onPress={() => {
-            const end = new Date(to);
-            open(make({ start: from, end: new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1).getTime(), label: `${fmtDay(from)} – ${fmtDay(to)}` }));
-          }}>
-          <Icon name="sparkle" size={16} color="#fff" />
-          <Text style={styles.primaryText}>Make my Wrapped</Text>
-        </TouchableOpacity>
-      </View>
-    </>
-  );
-}
-
-/** Full-screen, tap right for the next card, left to go back - like a story. */
-function WrappedStory({ w, thumbs, onClose }: { w: Wrapped; thumbs: Map<string, VaultItem['thumbSource']>; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-  const styles = useStyles(makeStyles);
-  const { width } = useWindowDimensions();
-  const v = w.videos;
-  const s = w.simkl;
-  const cards: { hue: number; body: React.ReactNode }[] = [];
-  const big = (t: string) => <Text style={styles.sBig}>{t}</Text>;
-  const kicker = (t: string) => <Text style={styles.sKicker}>{t}</Text>;
-  const line = (t: string) => <Text style={styles.sLine}>{t}</Text>;
-  const list = (rows: { key: string; label: string; sub?: string }[], withThumbs = false) => (
-    <View style={{ gap: 12, marginTop: 10 }}>
-      {rows.map((r, i) => (
-        <View key={r.key} style={styles.sRow}>
-          <Text style={styles.sRank}>{i + 1}</Text>
-          {withThumbs && <Image source={thumbs.get(r.key)} style={styles.sThumb} contentFit="cover" />}
-          <View style={{ flex: 1 }}>
-            <Text style={styles.sRowTitle} numberOfLines={1}>
-              {r.label}
-            </Text>
-            {!!r.sub && <Text style={styles.sRowSub}>{r.sub}</Text>}
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-
-  cards.push({
-    hue: 262,
-    body: (
-      <>
-        {kicker(`YOUR WRAPPED · ${w.range.label.toUpperCase()}`)}
-        {big(w.totalMinutes >= 60 ? `${Math.round(w.totalMinutes / 6) / 10} hours` : `${w.totalMinutes} minutes`)}
-        {line(s ? 'of watching, your videos and Simkl together.' : 'of watching your own videos.')}
-      </>
-    ),
-  });
-  cards.push({
-    hue: 212,
-    body: (
-      <>
-        {kicker('YOUR VIDEOS')}
-        {big(fmtMs(v.watchedMs))}
-        {line(`${v.plays} plays of ${v.videosWatched} different ${v.videosWatched === 1 ? 'video' : 'videos'}.`)}
-        {v.imported > 0 && line(`You added ${v.imported} new (${fmtBytes(v.importedBytes)}).`)}
-      </>
-    ),
-  });
-  if (v.topVideos.length)
-    cards.push({ hue: 330, body: <>{kicker('MOST WATCHED')}{list(v.topVideos, true)}</> });
-  if (v.topTags.length)
-    cards.push({ hue: 28, body: <>{kicker('YOUR TOP TAGS')}{big(`#${v.topTags[0].label}`)}{list(v.topTags.slice(1).map((t) => ({ ...t, label: `#${t.label}` })))}</> });
-  if (s && s.minutes > 0) {
-    cards.push({
-      hue: 160,
-      body: (
-        <>
-          {kicker('MOVIES, SHOWS & ANIME')}
-          {big(fmtMs(s.minutes * 60000))}
-          {line(`${s.episodes} episodes and ${s.movies} movies across ${s.titles} titles.`)}
-          {list(s.topTitles)}
-        </>
-      ),
-    });
-    if (s.topGenres.length) cards.push({ hue: 190, body: <>{kicker('YOUR GENRES')}{big(s.topGenres[0].label)}{list(s.topGenres.slice(1, 5))}</> });
-  }
-  cards.push({
-    hue: 8,
-    body: (
-      <>
-        {kicker('HIGHLIGHTS')}
-        {v.busiestDay && line(`Busiest day: ${new Date(v.busiestDay.day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })} · ${fmtMs(v.busiestDay.ms)}`)}
-        {v.longestSession && line(`Longest sitting: ${v.longestSession.label} · ${fmtMs(v.longestSession.ms)}`)}
-        {v.bestNew && line(`Best new video: ${v.bestNew.label} · ★ ${v.bestNew.value}`)}
-        {!v.busiestDay && !v.bestNew && line('A quiet one. Next week is yours.')}
-      </>
-    ),
-  });
-  cards.push({ hue: 286, body: <>{kicker('THIS MAKES YOU')}{big(v.persona)}{line('See you next week.')}</> });
-
-  const [i, setI] = useState(0);
-  const card = cards[Math.min(i, cards.length - 1)];
-  return (
-    <Modal visible animationType="fade" onRequestClose={onClose}>
-      <View style={[styles.story, { backgroundColor: `hsl(${card.hue}, 55%, 22%)` }]}>
-        <View style={[StyleFill, { backgroundColor: `hsl(${(card.hue + 40) % 360}, 70%, 45%)`, opacity: 0.55, transform: [{ rotate: '-18deg' }, { scale: 1.6 }], top: -width * 0.9, height: width * 1.2 }]} />
-        <Fade color="0,0,0" from={0} to={0.55} style={StyleFill} />
-        <View style={[styles.bars, { top: insets.top + 8 }]}>
-          {cards.map((_, n) => (
-            <View key={n} style={[styles.bar, n <= i && styles.barOn]} />
-          ))}
-        </View>
-        <View style={[styles.storyClose, { top: insets.top + 20 }]}>
-          <IconButton icon="close" label="Close" clear onPress={onClose} size={36} />
-        </View>
-        <View style={styles.storyBody}>{card.body}</View>
-        <View style={styles.taps}>
-          <TouchableOpacity style={{ flex: 1 }} onPress={() => setI(Math.max(0, i - 1))} accessibilityLabel="Previous" />
-          <TouchableOpacity
-            style={{ flex: 2 }}
-            onPress={() => {
-              tick();
-              if (i >= cards.length - 1) onClose();
-              else setI(i + 1);
-            }}
-            accessibilityLabel="Next"
-          />
-        </View>
-      </View>
+      )}
     </Modal>
-  );
-}
-
-/* ------------------------------------------------------------------ badges */
-
-function Badges({ list }: { list: Badge[] }) {
-  const styles = useStyles(makeStyles);
-  const groups: Badge['group'][] = ['Videos', 'Watching', 'Simkl'];
-  const got = list.filter((b) => b.unlocked).length;
-  return (
-    <>
-      <Text style={styles.muted}>
-        {got} unlocked · {list.length - got} to go
-      </Text>
-      {groups.map((g) => (
-        <View key={g} style={{ gap: 10 }}>
-          <Text style={styles.section}>{g}</Text>
-          <View style={styles.badgeGrid}>
-            {list
-              .filter((b) => b.group === g)
-              .map((b) => (
-                <View key={b.id} style={[styles.badge, !b.unlocked && styles.badgeLocked]}>
-                  <Text style={[styles.badgeEmoji, !b.unlocked && { opacity: 0.35 }]}>{b.emoji}</Text>
-                  <Text style={styles.badgeTitle} numberOfLines={1}>
-                    {b.title}
-                  </Text>
-                  <Text style={styles.badgeDetail} numberOfLines={2}>
-                    {b.unlocked ? 'Unlocked' : b.detail}
-                  </Text>
-                  {!b.unlocked && (
-                    <View style={styles.track}>
-                      <View style={[styles.fill, { width: `${Math.min(100, (b.current / b.target) * 100)}%` }]} />
-                    </View>
-                  )}
-                  {!b.unlocked && (
-                    <Text style={styles.badgeProgress}>
-                      {Math.min(b.current, b.target)} / {b.target}
-                    </Text>
-                  )}
-                </View>
-              ))}
-          </View>
-        </View>
-      ))}
-    </>
   );
 }
 
 /* ----------------------------------------------------------------- storage */
 
 const QUALITY_COLORS: Record<string, string> = { '4K': '#0A84FF', '1080p': '#5E5CE6', '720p': '#30D158', Smaller: '#FF9F0A', Unknown: '#8E8E93' };
+const GB = 1024 ** 3;
 
 function Storage({
   items,
   deleted,
+  plays,
   thumbs,
+  freeGb,
+  duplicateGroups,
   onOpen,
   onMakeSmaller,
+  onFilter,
 }: {
   items: VaultItem[];
   deleted: VaultItem[];
+  plays: VaultPlay[];
   thumbs: Map<string, VaultItem['thumbSource']>;
+  freeGb: number | null;
+  duplicateGroups: string[][];
   onOpen: (id: string) => void;
   onMakeSmaller: (ids: string[]) => void;
+  onFilter?: (f: Filter) => void;
 }) {
   const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const now = Date.now();
   const s = useMemo(() => storageStats(items, deleted), [items, deleted]);
-  const h264 = items.filter((v) => /avc|264/i.test(v.meta?.codec ?? '')).map((v) => v.id);
+  const ideas = useMemo(() => spaceIdeas(items, deleted, duplicateGroups, plays, now), [items, deleted, duplicateGroups, plays]); // eslint-disable-line react-hooks/exhaustive-deps
+  const grow = useMemo(() => growth(items, now, 12), [items]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byTag = useMemo(() => {
+    const m = new Map<string, { bytes: number; n: number }>();
+    for (const v of items) for (const t of v.tagNames) m.set(t, { bytes: (m.get(t)?.bytes ?? 0) + v.sizeBytes, n: (m.get(t)?.n ?? 0) + 1 });
+    return [...m.entries()].sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 6);
+  }, [items]);
+  const maxBig = Math.max(1, ...s.biggest.map((b) => b.value));
+  const appGb = (s.totalBytes + s.deletedBytes) / GB;
+  const phoneGb = freeGb !== null ? freeGb + appGb : null;
+  const savable = ideas.reduce((a, i) => a + i.bytes, 0);
+
+  const act = (i: (typeof ideas)[number]) => {
+    if (i.action === 'smaller' || i.action === 'unwatched') return onMakeSmaller(i.ids);
+    if (!onFilter) return;
+    onFilter(i.action === 'deleted' ? { kind: 'deleted' } : i.action === 'duplicates' ? { kind: 'duplicates' } : { kind: 'rejects' });
+  };
+  const ideaIcon: Record<string, IconName> = { deleted: 'trash', dups: 'videos', rejects: 'close', smaller: 'sparkle', cold: 'eye' };
+
   return (
     <>
-      <View style={styles.card}>
-        <Text style={styles.kicker}>IN REELVAULT</Text>
-        <Text style={styles.bigValue}>{fmtBytes(s.totalBytes)}</Text>
-        <Text style={styles.muted}>{s.count} videos</Text>
+      {/* ── the phone ─────────────────────────────────────────── */}
+      <Animated.View entering={enterUp(0)} style={[styles.storeHero, gradient('linear-gradient(135deg, #1F6F3F 0%, #0B3B2A 60%, #06201A 100%)')]}>
+        <Ring size={110} stroke={11} progress={phoneGb ? appGb / phoneGb : 0} color="#30D158" track="rgba(255,255,255,0.18)">
+          <Text style={styles.storePct}>{phoneGb ? `${Math.round((appGb / phoneGb) * 100)}%` : '–'}</Text>
+          <Text style={styles.storePctLabel}>of room left</Text>
+        </Ring>
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={styles.storeKicker}>REELVAULT USES</Text>
+          <Text style={styles.storeValue}>{fmtBytes(s.totalBytes + s.deletedBytes)}</Text>
+          <Text style={styles.storeSub}>
+            {s.count} videos{s.count ? ` · ${fmtBytes(s.totalBytes / s.count)} each on average` : ''}
+          </Text>
+          {freeGb !== null && <Text style={styles.storeSub}>{freeGb} GB still free on the phone</Text>}
+        </View>
+      </Animated.View>
+
+      <Card index={1} title="What takes the space">
         <View style={styles.stack}>
           {s.byQuality.map((g) => (
             <View key={g.key} style={{ flex: Math.max(0.02, g.value / Math.max(1, s.totalBytes)), backgroundColor: QUALITY_COLORS[g.key] ?? '#8E8E93' }} />
@@ -660,131 +381,127 @@ function Storage({
             <View key={g.key} style={styles.legendItem}>
               <View style={[styles.dot, { backgroundColor: QUALITY_COLORS[g.key] ?? '#8E8E93' }]} />
               <Text style={styles.legendText}>
-                {g.label} · {fmtBytes(g.value)}
+                {g.label} · {fmtBytes(g.value)} · {g.sub}
               </Text>
             </View>
           ))}
         </View>
-      </View>
+      </Card>
 
-      <View style={styles.tiles}>
-        <Tile value={fmtBytes(s.savedBytes)} label="saved by Make Smaller" />
-        <Tile value={fmtBytes(s.couldSaveBytes)} label={`could still save (${s.couldSaveCount} H.264)`} />
-        <Tile value={fmtBytes(s.deletedBytes)} label="in Recently Deleted" />
-      </View>
-      {h264.length > 0 && (
-        <TouchableOpacity style={styles.primary} onPress={() => onMakeSmaller(h264)}>
-          <Icon name="sparkle" size={16} color="#fff" />
-          <Text style={styles.primaryText}>Make the {h264.length} H.264 videos smaller…</Text>
-        </TouchableOpacity>
+      {/* ── free up space ─────────────────────────────────────── */}
+      {ideas.length > 0 && (
+        <Card index={2} title="Free up space" sub={`Up to ${fmtBytes(savable)} you could get back`}>
+          {ideas.map((i) => (
+            <PressableScale key={i.key} style={styles.idea} onPress={() => act(i)} accessibilityLabel={`${i.title}, ${fmtBytes(i.bytes)}`}>
+              <View style={styles.ideaIcon}>
+                <Icon name={ideaIcon[i.key] ?? 'storage'} size={16} color="#30D158" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.ideaTitle}>{i.title}</Text>
+                <Text style={styles.muted} numberOfLines={2}>
+                  {i.count} {i.count === 1 ? 'video' : 'videos'} · {i.detail}
+                </Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={styles.ideaBytes}>{fmtBytes(i.bytes)}</Text>
+                <Icon name="forward" size={12} color={p.textMuted} />
+              </View>
+            </PressableScale>
+          ))}
+        </Card>
       )}
 
-      <Card title="Biggest videos">
-        <VideoRows rows={s.biggest} thumbs={thumbs} format={(v) => fmtBytes(v)} onOpen={onOpen} />
+      <View style={styles.tiles}>
+        <StatTile index={3} icon="sparkle" value={fmtBytes(s.savedBytes)} label="saved by Make Smaller" tint={p.success} />
+        <StatTile index={4} icon="trash" value={fmtBytes(s.deletedBytes)} label={`in Recently Deleted (${deleted.length})`} tint={p.danger} />
+      </View>
+
+      <Card index={5} title="How your library grew" sub="Space added each month">
+        <Bars
+          data={grow.map((g) => ({ label: g.label, value: g.bytes, current: g.key === grow[grow.length - 1].key, detail: `${new Date(g.key).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · ${g.count} videos` }))}
+          format={(v) => (v ? fmtBytes(v) : 'nothing added')}
+          height={90}
+          highlight="#30D158"
+          everyLabel={1}
+        />
       </Card>
-      <Card title="By format">
+
+      <Card index={6} title="Biggest videos">
+        {s.biggest.length === 0 ? (
+          <Text style={styles.muted}>No videos yet.</Text>
+        ) : (
+          s.biggest.slice(0, 8).map((r) => (
+            <TouchableOpacity key={r.key} style={styles.vrow} onPress={() => onOpen(r.key)}>
+              <Image source={thumbs.get(r.key)} style={styles.vthumb} contentFit="cover" />
+              <View style={{ flex: 1, gap: 4 }}>
+                <View style={styles.vline}>
+                  <Text style={styles.vtitle} numberOfLines={1}>
+                    {r.label}
+                  </Text>
+                  <Text style={styles.vvalue}>{fmtBytes(r.value)}</Text>
+                </View>
+                <View style={styles.sizeTrack}>
+                  <View style={[styles.sizeFill, { width: `${(r.value / maxBig) * 100}%` }]} />
+                </View>
+                <Text style={styles.vsub}>{r.sub}</Text>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
+      </Card>
+      {byTag.length > 0 && (
+        <Card index={7} title="By keyword">
+          <RankedBars rows={byTag.map(([t, v]) => ({ label: `#${t} · ${v.n} ${v.n === 1 ? 'video' : 'videos'}`, value: v.bytes }))} format={fmtBytes} />
+        </Card>
+      )}
+      <Card index={8} title="By format">
         <RankedBars rows={s.byCodec.map((g) => ({ label: `${g.label} · ${g.sub}`, value: g.value }))} format={fmtBytes} />
       </Card>
-      <Card title="By year filmed">
+      <Card index={9} title="By year filmed">
         <RankedBars rows={s.byYear.map((g) => ({ label: `${g.label} · ${g.sub}`, value: g.value }))} format={fmtBytes} />
       </Card>
+      <Text style={styles.foot}>Nothing is deleted from here. Every button opens the videos so you can choose.</Text>
     </>
   );
 }
 
-const StyleFill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 };
-
 const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingBottom: 8 },
-    headerTitle: { color: p.text, fontSize: 17, fontWeight: '700' },
-    segment: { paddingHorizontal: 16, paddingBottom: 8 },
-    body: { paddingHorizontal: 16, gap: 14, paddingTop: 6 },
-    bleed: { marginHorizontal: -16 },
-    section: { color: p.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3, marginTop: 6 },
-    muted: { color: p.textSecondary, fontSize: 13 },
-    kicker: { color: p.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 0.8 },
-    bigValue: { color: p.text, fontSize: 40, fontWeight: '900', letterSpacing: -1 },
-
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingBottom: 10 },
+    headerKicker: { color: p.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
+    headerTitle: { color: p.text, fontSize: 32, fontWeight: '900', letterSpacing: -0.8 },
+    tabsWrap: { paddingHorizontal: 16, paddingBottom: 10 },
+    tabs: { flexDirection: 'row', backgroundColor: p.elevated, borderRadius: 18, padding: 4 },
+    tabPill: { position: 'absolute', top: 4, bottom: 4, left: 4, borderRadius: 14, backgroundColor: p.card },
+    tab: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 8 },
+    tabIcon: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+    tabText: { color: p.textSecondary, fontSize: 12, fontWeight: '800' },
+    body: { paddingHorizontal: 16, paddingTop: 6 },
+    muted: { color: p.textSecondary, fontSize: 12, lineHeight: 16 },
+    foot: { color: p.textMuted, fontSize: 12, textAlign: 'center', paddingHorizontal: 20, lineHeight: 17 },
     tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    tile: { flexGrow: 1, flexBasis: '45%', backgroundColor: p.elevated, borderRadius: 16, padding: 14, gap: 2 },
-    tileValue: { color: p.text, fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
-    tileLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
 
-    heroRow: { flexDirection: 'row', gap: 10 },
-    hero: { flex: 1, borderRadius: 18, padding: 14, gap: 4, minHeight: 112, justifyContent: 'flex-end' },
-    heroKicker: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
-    heroTitle: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
-    heroSub: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '600' },
+    storeHero: { flexDirection: 'row', alignItems: 'center', gap: 18, borderRadius: 26, padding: 18 },
+    storePct: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
+    storePctLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: '800' },
+    storeKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    storeValue: { color: '#fff', fontSize: 34, fontWeight: '900', letterSpacing: -1 },
+    storeSub: { color: 'rgba(255,255,255,0.88)', fontSize: 13, fontWeight: '600' },
 
-    card: { backgroundColor: p.elevated, borderRadius: 18, padding: 14, gap: 12 },
-    cardTitle: { color: p.text, fontSize: 17, fontWeight: '800' },
-    vrow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    rank: { color: p.textSecondary, fontSize: 15, fontWeight: '800', width: 18, textAlign: 'center' },
-    vthumb: { width: 64, height: 40, borderRadius: 8, backgroundColor: p.tile },
-    vtitle: { color: p.text, fontSize: 15, fontWeight: '600' },
+    idea: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+    ideaIcon: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#30D15826', alignItems: 'center', justifyContent: 'center' },
+    ideaTitle: { color: p.text, fontSize: 15, fontWeight: '800' },
+    ideaBytes: { color: '#30D158', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'] },
+
+    vrow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    vline: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+    vthumb: { width: 72, height: 46, borderRadius: 9, backgroundColor: p.tile },
+    vtitle: { color: p.text, fontSize: 15, fontWeight: '700', flexShrink: 1 },
     vsub: { color: p.textSecondary, fontSize: 12 },
-    vvalue: { color: p.textSoft, fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
-
-    trow: { flexDirection: 'row', paddingVertical: 7, borderTopWidth: 1, borderTopColor: p.separator },
-    thead: { borderTopWidth: 0 },
-    th: { color: p.textSecondary, fontWeight: '700', fontSize: 12 },
-    tcell: { flex: 1, color: p.textSoft, fontSize: 14, textAlign: 'right', fontVariant: ['tabular-nums'] },
-    tname: { flex: 2, textAlign: 'left', color: p.text, fontWeight: '600' },
-
-    weekRow: { gap: 10, paddingHorizontal: 16 },
-    week: { width: 150, height: 170, borderRadius: 20, padding: 14, justifyContent: 'flex-end', gap: 2 },
-    weekLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '800' },
-    weekValue: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8 },
-    weekSub: { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '600' },
-    weekPlay: { position: 'absolute', top: 12, right: 12, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
-    presets: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    preset: { backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
-    presetText: { color: p.text, fontSize: 14, fontWeight: '700' },
-    rangeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    rangeBtn: { flex: 1, backgroundColor: p.card, borderRadius: 12, padding: 10 },
-    rangeOn: { borderWidth: 2, borderColor: p.accent, padding: 8 },
-    rangeKey: { color: p.textSecondary, fontSize: 11, fontWeight: '700' },
-    rangeVal: { color: p.text, fontSize: 15, fontWeight: '700' },
-    primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.accent, borderRadius: 14, paddingVertical: 13 },
-    primaryText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-
-    cal: { backgroundColor: p.card, borderRadius: 14, padding: 10, gap: 8 },
-    calHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
-    calTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
-    calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-    calDow: { width: '14.28%', textAlign: 'center', color: p.textSecondary, fontSize: 11, fontWeight: '700', paddingBottom: 4 },
-    calCell: { width: '14.28%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 999 },
-    calOn: { backgroundColor: p.accent },
-    calDay: { color: p.text, fontSize: 14, fontWeight: '600' },
-    calDayOn: { color: '#fff', fontWeight: '800' },
-
-    story: { flex: 1, overflow: 'hidden' },
-    bars: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', gap: 4 },
-    bar: { flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)' },
-    barOn: { backgroundColor: '#fff' },
-    storyClose: { position: 'absolute', right: 12 },
-    storyBody: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, gap: 10 },
-    sKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '900', letterSpacing: 1.2 },
-    sBig: { color: '#fff', fontSize: 46, fontWeight: '900', letterSpacing: -1.5, lineHeight: 50 },
-    sLine: { color: 'rgba(255,255,255,0.9)', fontSize: 18, fontWeight: '600', lineHeight: 25 },
-    sRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    sRank: { color: 'rgba(255,255,255,0.6)', fontSize: 22, fontWeight: '900', width: 26 },
-    sThumb: { width: 64, height: 40, borderRadius: 8 },
-    sRowTitle: { color: '#fff', fontSize: 18, fontWeight: '800' },
-    sRowSub: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' },
-    taps: { ...StyleFill, flexDirection: 'row', top: 90 },
-
-    badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    badge: { width: '31%', flexGrow: 1, backgroundColor: p.elevated, borderRadius: 16, padding: 12, alignItems: 'center', gap: 3 },
-    badgeLocked: { backgroundColor: p.panel },
-    badgeEmoji: { fontSize: 34 },
-    badgeTitle: { color: p.text, fontSize: 13, fontWeight: '800', textAlign: 'center' },
-    badgeDetail: { color: p.textSecondary, fontSize: 11, textAlign: 'center' },
-    badgeProgress: { color: p.textSecondary, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
-    track: { alignSelf: 'stretch', height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginTop: 4 },
-    fill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
+    vvalue: { color: p.textSoft, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    sizeTrack: { height: 5, borderRadius: 3, backgroundColor: p.card, overflow: 'hidden' },
+    sizeFill: { height: 5, borderRadius: 3, backgroundColor: '#FF9F0A' },
 
     stack: { flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', gap: 2 },
     legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },

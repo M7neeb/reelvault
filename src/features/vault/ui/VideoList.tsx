@@ -7,6 +7,7 @@
  * The grid layouts (Standard, Simple, Compact) stay in Grid.tsx.
  */
 
+import { friendlyName } from '../names';
 import { FlatList, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -19,7 +20,7 @@ import type { IconName } from './icons';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem, VaultSort } from './types';
 
-const nameOf = (v: VaultItem) => v.title || v.filename.replace(/\.[a-z0-9]{2,4}$/i, '');
+const nameOf = (v: VaultItem) => friendlyName(v);
 const quality = (v: VaultItem) => {
   const s = Math.min(v.width ?? 0, v.height ?? 0);
   return !s ? null : s >= 2000 ? '4K' : s >= 1000 ? '1080p' : s >= 700 ? '720p' : `${s}p`;

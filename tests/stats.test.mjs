@@ -1,9 +1,8 @@
-// Run with `npm test`. Videos dashboard, storage, Wrapped, badges, rating meanings, resume, keywords.
+// Run with `npm test`. Videos dashboard, storage, Wrapped, streaks, rating meanings, resume, keywords.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  badges,
   canResume,
   fmtClock,
   longestStreak,
@@ -90,14 +89,7 @@ test('wrapped: only the range counts, with Simkl minutes on top', () => {
   assert.ok(presetRange('days30', T).start < T);
 });
 
-test('badges: unlocked tiers plus the next one with progress; streaks', () => {
-  const list = badges({
-    videos: Array.from({ length: 12 }, (_, i) => v(String(i), { rating: i < 3 ? 8 : 0 })),
-    plays: [], bookmarks: 0, albums: 0, simklEpisodes: 120, simklMovies: 0, simklCompleted: 0, simklRewatches: 0, streakDays: 4, lists: 0,
-  });
-  const lib = list.filter((b) => b.id.startsWith('library'));
-  assert.deepEqual(lib.map((b) => [b.target, b.unlocked]), [[10, true], [100, false]]);
-  assert.equal(list.find((b) => b.id === 'episodes-500').current, 120);
+test('streaks: the longest run of days in a row', () => {
   const day = 86400000;
   assert.equal(longestStreak([T, T + day, T + 2 * day, T + 5 * day, T + 5 * day + 1000]), 3);
   assert.equal(longestStreak([]), 0);

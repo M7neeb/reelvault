@@ -68,6 +68,18 @@ export const ICONS = {
   dashboard: { sf: 'chart.pie.fill', ion: 'pie-chart' },
   paint: { sf: 'paintpalette', ion: 'color-palette-outline' },
   layout: { sf: 'rectangle.3.group', ion: 'grid-outline' },
+  arrowUp: { sf: 'arrow.up.right', ion: 'trending-up' },
+  arrowDown: { sf: 'arrow.down.right', ion: 'trending-down' },
+  medal: { sf: 'medal.fill', ion: 'medal' },
+  moon: { sf: 'moon.stars.fill', ion: 'moon' },
+  sun: { sf: 'sunrise.fill', ion: 'sunny' },
+  heart: { sf: 'heart.fill', ion: 'heart' },
+  sound: { sf: 'speaker.wave.2.fill', ion: 'volume-high' },
+  muted: { sf: 'speaker.slash.fill', ion: 'volume-mute' },
+  pin: { sf: 'pin.fill', ion: 'pin' },
+  question: { sf: 'questionmark', ion: 'help' },
+  target: { sf: 'target', ion: 'locate' },
+  photo: { sf: 'photo.on.rectangle', ion: 'images-outline' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

@@ -6,6 +6,11 @@
 
 import { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, SlideInLeft } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTabBarSpace } from './chrome';
+import { DUR, EASE_OUT, useReducedMotion } from './motion';
 
 import { gbFromBytes } from './format';
 import { sameFilter, type Filter } from './filters';
@@ -129,6 +134,9 @@ export default function Sidebar(props: SidebarProps) {
   } = props;
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const insets = useSafeAreaInsets();
+  const tabSpace = useTabBarSpace();
+  const reduce = useReducedMotion();
   const [openFolders, setOpenFolders] = useState<number[]>([]);
 
   const favorites = items.filter((v) => v.rating >= 8).length;
@@ -174,9 +182,13 @@ export default function Sidebar(props: SidebarProps) {
   );
 
   return (
-    <View style={styles.root}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
-      <View style={styles.drawer}>
+    <Animated.View style={styles.root} exiting={FadeOut.duration(DUR.fast)}>
+      <Animated.View style={styles.backdrop} entering={FadeIn.duration(DUR.base)}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} accessibilityLabel="Close the library panel" />
+      </Animated.View>
+      <Animated.View
+        style={[styles.drawer, { paddingTop: insets.top + 12, paddingBottom: (tabSpace > 0 ? tabSpace : insets.bottom) + 10 }]}
+        entering={reduce ? FadeIn.duration(DUR.fast) : SlideInLeft.duration(DUR.base).easing(EASE_OUT)}>
         <Text style={styles.title}>ReelVault</Text>
         <ScrollView contentContainerStyle={styles.scroll}>
           <View style={styles.tiles}>
@@ -295,7 +307,9 @@ export default function Sidebar(props: SidebarProps) {
 
         <View style={styles.footer}>
           <TouchableOpacity style={styles.action} onPress={props.onImport}>
-            <Text style={styles.actionText}>+ Import</Text>
+            <Text style={styles.actionText} numberOfLines={1}>
+              + Import
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.ghost} onPress={props.onPersonalise} accessibilityLabel="Personalise">
             <Icon name="paint" size={16} color={p.text} />
@@ -307,8 +321,8 @@ export default function Sidebar(props: SidebarProps) {
             <Text style={styles.ghostText}>Close</Text>
           </TouchableOpacity>
         </View>
-      </View>
-    </View>
+      </Animated.View>
+    </Animated.View>
   );
 }
 
@@ -334,8 +348,6 @@ const makeStyles = (p: Palette) =>
       bottom: 0,
       width: 300,
       backgroundColor: p.panel,
-      paddingTop: 62,
-      paddingBottom: 24,
     },
     title: { color: p.text, fontSize: 22, fontWeight: '800', paddingHorizontal: 18, paddingBottom: 12 },
     scroll: { paddingHorizontal: 12, paddingBottom: 24, gap: 2 },
@@ -368,8 +380,8 @@ const makeStyles = (p: Palette) =>
     tip: { color: p.textMuted, fontSize: 12, paddingHorizontal: 12, paddingTop: 12 },
     muted: { color: p.textMuted, fontStyle: 'italic', paddingHorizontal: 12 },
     footer: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10 },
-    action: { flex: 1.2, backgroundColor: p.accent, padding: 12, borderRadius: 12, alignItems: 'center' },
+    action: { flex: 1.4, backgroundColor: p.accent, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 12, alignItems: 'center' },
     actionText: { color: '#fff', fontWeight: '700' },
-    ghost: { flex: 1, backgroundColor: p.card, padding: 12, borderRadius: 12, alignItems: 'center' },
+    ghost: { flex: 1, backgroundColor: p.card, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 12, alignItems: 'center' },
     ghostText: { color: p.textSoft, fontWeight: '700' },
   });

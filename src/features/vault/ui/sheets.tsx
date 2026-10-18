@@ -4,7 +4,8 @@
  * Presentational only (see the rule in types.ts).
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -19,6 +20,7 @@ import {
 
 import { dayKey, matchesRule } from './logic';
 import { tick } from './haptics';
+import { SPRING } from './motion';
 import Icon from './Icon';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import {
@@ -130,6 +132,7 @@ export function Wrap({ children }: { children: ReactNode }) {
 }
 
 /** A row of options where exactly one is chosen. */
+/** A segmented control; the highlight slides to the chosen option. */
 export function Segment<K extends string>({
   options,
   value,
@@ -140,13 +143,24 @@ export function Segment<K extends string>({
   onChange: (key: K) => void;
 }) {
   const styles = useStyles(makeStyles);
+  const [width, setWidth] = useState(0);
+  const index = Math.max(0, options.findIndex((o) => o.key === value));
+  const itemW = width > 0 ? (width - 6) / options.length : 0;
+  const x = useSharedValue(0);
+  useEffect(() => {
+    if (itemW) x.value = withSpring(3 + index * itemW, SPRING);
+  }, [index, itemW]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
   return (
-    <View style={styles.segment}>
+    <View style={styles.segment} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} accessibilityRole="tablist">
+      {itemW > 0 && <Animated.View pointerEvents="none" style={[styles.segmentPill, { width: itemW }, pill]} />}
       {options.map((o) => (
         <TouchableOpacity
           key={o.key}
-          style={[styles.segmentItem, value === o.key && styles.segmentOn]}
-          onPress={() => onChange(o.key)}>
+          style={styles.segmentItem}
+          onPress={() => onChange(o.key)}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: value === o.key }}>
           <Text style={[styles.segmentText, value === o.key && styles.chipTextOn]} numberOfLines={1}>
             {o.label}
           </Text>
@@ -853,7 +867,7 @@ const makeStyles = (p: Palette) =>
 
     segment: { flexDirection: 'row', backgroundColor: p.card, borderRadius: 10, padding: 3 },
     segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-    segmentOn: { backgroundColor: p.accent },
+    segmentPill: { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 8, backgroundColor: p.accent },
     segmentText: { color: p.textSoft, fontWeight: '600', fontSize: 13 },
 
     toggleRow: {

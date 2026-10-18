@@ -462,6 +462,10 @@ export type VaultPrefs = {
   keepUnrated: boolean;
   /** Series suggestions you dismissed (by their name). */
   hiddenSuggestions: string[];
+  /** Up to three badges you pinned to the top of Badges (their ids). */
+  showcase: string[];
+  /** Your weekly watch-time goal on the dashboard, in minutes. */
+  weeklyGoalMin: number;
 };
 
 export const DEFAULT_VAULT_PREFS: VaultPrefs = {
@@ -471,6 +475,8 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   videosMode: 'watch',
   keepUnrated: true,
   hiddenSuggestions: [],
+  showcase: [],
+  weeklyGoalMin: 120,
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */

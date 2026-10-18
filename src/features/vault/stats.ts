@@ -1,11 +1,13 @@
 /**
  * Numbers about your own videos: the Videos dashboard, the storage dashboard,
- * Wrapped (yours and Simkl's, for a week or any range), badges, rating
+ * Wrapped (yours and Simkl's, for a week or any range), streaks, rating
  * meanings and "continue another time". Pure (no database, no files), so it
  * is tested in Node; the screens get the plays and items from the data layer.
  */
 
 import type { SimklItem } from '../simkl/logic';
+// The .ts extension lets Node run this file directly in the tests.
+import { friendlyName } from './names.ts';
 import type { Meta, WatchEvent } from '../simkl/insights';
 
 /** The parts of a video these numbers need (a subset of VaultItem). */
@@ -30,7 +32,7 @@ export type VaultPlay = { videoId: string; startedAt: number; watchedMs: number 
 export type Ranked = { key: string; label: string; value: number; sub?: string };
 
 const DAY = 86_400_000;
-export const nameOf = (v: Pick<StatVideo, 'title' | 'filename'>) => v.title || v.filename.replace(/\.[a-z0-9]{2,4}$/i, '');
+export const nameOf = (v: Pick<StatVideo, 'title' | 'filename'> & { createdAt?: number }) => friendlyName(v);
 
 /* -------------------------------------------------------------- dashboard */
 
@@ -237,6 +239,15 @@ export type VideoWrapped = {
   bestNew: Ranked | null;
   /** A one-word take on the period, for the last card. */
   persona: string;
+  /** Days with something watched, and the best run of days in a row. */
+  activeDays: number;
+  bestRun: number;
+  /** The hour you most often press play (0..23), or null. */
+  peakHour: number | null;
+  /** The first thing you watched in the period. */
+  firstVideo: Ranked | null;
+  /** The share of the time that went to the top video (0..1). */
+  topShare: number;
 };
 
 export type SimklWrapped = {
@@ -268,7 +279,9 @@ export function wrapped(
   const days = new Map<number, number>();
   const tags = new Map<string, number>();
   let longest: { label: string; ms: number } | null = null;
+  const hourCount = Array(24).fill(0);
   for (const p of ps) {
+    hourCount[new Date(p.startedAt).getHours()] += p.watchedMs;
     per.set(p.videoId, (per.get(p.videoId) ?? 0) + p.watchedMs);
     const day = startOfDay(p.startedAt);
     days.set(day, (days.get(day) ?? 0) + p.watchedMs);
@@ -299,6 +312,14 @@ export function wrapped(
     longestSession: longest,
     bestNew: best ? { key: best.id, label: nameOf(best), value: best.rating } : null,
     persona: persona(ps.length, per.size, topTags[0]?.label),
+    activeDays: days.size,
+    bestRun: longestStreak(ps.map((p) => p.startedAt)),
+    peakHour: Math.max(...hourCount) > 0 ? hourCount.indexOf(Math.max(...hourCount)) : null,
+    firstVideo: (() => {
+      const f = [...ps].sort((a, b) => a.startedAt - b.startedAt)[0];
+      return f ? { key: f.videoId, label: nameOf(byId.get(f.videoId)!), value: f.startedAt } : null;
+    })(),
+    topShare: watchedMs ? Math.max(0, ...per.values()) / watchedMs : 0,
   };
 
   let simklPart: SimklWrapped | null = null;
@@ -337,67 +358,7 @@ function persona(plays: number, distinct: number, topTag?: string): string {
   return 'The Regular';
 }
 
-/* ------------------------------------------------------------------- badges */
-
-export type Badge = {
-  id: string;
-  emoji: string;
-  title: string;
-  detail: string;
-  current: number;
-  target: number;
-  unlocked: boolean;
-  group: 'Videos' | 'Watching' | 'Simkl';
-};
-
-export type BadgeInput = {
-  videos: StatVideo[];
-  plays: VaultPlay[];
-  bookmarks: number;
-  albums: number;
-  simklEpisodes: number;
-  simklMovies: number;
-  simklCompleted: number;
-  simklRewatches: number;
-  /** Longest run of days in a row with anything watched. */
-  streakDays: number;
-  lists: number;
-};
-
-/** Each badge has tiers; the next locked tier is shown with progress. */
-const LADDERS: { id: string; emoji: string; group: Badge['group']; name: (n: number) => string; detail: (n: number) => string; tiers: number[]; value: (i: BadgeInput) => number }[] = [
-  { id: 'library', emoji: '🎞️', group: 'Videos', name: (n) => `${n} videos`, detail: (n) => `Import ${n} videos`, tiers: [10, 100, 500, 1000, 5000], value: (i) => i.videos.length },
-  { id: 'critic', emoji: '⭐', group: 'Videos', name: (n) => `Critic ${n}`, detail: (n) => `Rate ${n} videos`, tiers: [10, 50, 250, 1000], value: (i) => i.videos.filter((v) => v.rating > 0).length },
-  { id: 'tagger', emoji: '🏷️', group: 'Videos', name: (n) => `Tagger ${n}`, detail: (n) => `Tag ${n} videos`, tiers: [10, 100, 500], value: (i) => i.videos.filter((v) => v.tagNames.length > 0).length },
-  { id: 'curator', emoji: '🗂️', group: 'Videos', name: (n) => `Curator ${n}`, detail: (n) => `Make ${n} albums`, tiers: [3, 10, 25], value: (i) => i.albums },
-  { id: 'bookmarks', emoji: '🔖', group: 'Watching', name: (n) => (n === 1 ? 'First bookmark' : `${n} bookmarks`), detail: (n) => (n === 1 ? 'Bookmark a moment' : `Bookmark ${n} moments`), tiers: [1, 10, 50], value: (i) => i.bookmarks },
-  { id: 'hours', emoji: '⏱️', group: 'Watching', name: (n) => (n === 1 ? 'First hour' : `${n} hours in`), detail: (n) => `Watch ${n} ${n === 1 ? 'hour' : 'hours'} of your videos`, tiers: [1, 10, 50, 200], value: (i) => Math.floor(i.plays.reduce((a, p) => a + p.watchedMs, 0) / 3_600_000) },
-  { id: 'replay', emoji: '🔁', group: 'Watching', name: (n) => `On repeat ×${n}`, detail: (n) => `Watch one video ${n} times`, tiers: [3, 10, 25], value: (i) => Math.max(0, ...countBy(i.plays.map((p) => p.videoId)).values()) },
-  { id: 'streak', emoji: '🔥', group: 'Watching', name: (n) => `${n}-day streak`, detail: (n) => `Watch something ${n} days in a row`, tiers: [3, 7, 30, 100], value: (i) => i.streakDays },
-  { id: 'episodes', emoji: '📺', group: 'Simkl', name: (n) => `${n} episodes`, detail: (n) => `Watch ${n} episodes`, tiers: [10, 100, 500, 1000, 5000], value: (i) => i.simklEpisodes },
-  { id: 'movies', emoji: '🍿', group: 'Simkl', name: (n) => `${n} movies`, detail: (n) => `Watch ${n} movies`, tiers: [10, 50, 100, 500], value: (i) => i.simklMovies },
-  { id: 'finisher', emoji: '🏁', group: 'Simkl', name: (n) => `Finisher ${n}`, detail: (n) => (n === 1 ? 'Complete a show or anime' : `Complete ${n} shows or anime`), tiers: [1, 10, 50, 100], value: (i) => i.simklCompleted },
-  { id: 'rewatcher', emoji: '♻️', group: 'Simkl', name: (n) => `Rewatcher ${n}`, detail: (n) => (n === 1 ? 'Log a rewatch' : `Log ${n} rewatches`), tiers: [1, 10, 50], value: (i) => i.simklRewatches },
-  { id: 'lists', emoji: '📋', group: 'Simkl', name: (n) => (n === 1 ? 'First list' : `${n} lists`), detail: (n) => (n === 1 ? 'Make a list of your own' : `Make ${n} of your own lists`), tiers: [1, 5, 15], value: (i) => i.lists },
-];
-
-function countBy(keys: string[]): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
-  return m;
-}
-
-export function badges(input: BadgeInput): Badge[] {
-  const out: Badge[] = [];
-  for (const l of LADDERS) {
-    const v = l.value(input);
-    const unlocked = l.tiers.filter((t) => v >= t);
-    for (const t of unlocked) out.push({ id: `${l.id}-${t}`, emoji: l.emoji, title: l.name(t), detail: l.detail(t), current: v, target: t, unlocked: true, group: l.group });
-    const next = l.tiers.find((t) => v < t);
-    if (next !== undefined) out.push({ id: `${l.id}-${next}`, emoji: l.emoji, title: l.name(next), detail: l.detail(next), current: v, target: next, unlocked: false, group: l.group });
-  }
-  return out;
-}
+/* ------------------------------------------------------------------ streaks */
 
 /** Longest run of consecutive days that have a play or a Simkl watch. */
 export function longestStreak(times: number[]): number {
@@ -470,7 +431,7 @@ export function fmtMs(ms: number): string {
   const m = Math.round(ms / 60000);
   if (m < 1) return ms > 0 ? `${Math.max(1, Math.round(ms / 1000))} s` : '0 min';
   const h = Math.floor(m / 60);
-  return h ? `${h} h ${m % 60} min` : `${m} min`;
+  return h ? (m % 60 ? `${h} h ${m % 60} min` : `${h} h`) : `${m} min`;
 }
 
 export function fmtBytes(b: number): string {

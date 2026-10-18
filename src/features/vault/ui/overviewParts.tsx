@@ -3,6 +3,7 @@
  * the Watch / Overview switch, status colours. Presentational only.
  */
 
+import { useEffect, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -10,7 +11,10 @@ import { hueFor } from '@/features/simkl/ui/Poster';
 
 import type { OvEntry, OvStatus, OvVideo } from '../overview';
 import Fade from './Fade';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+
 import { tick } from './haptics';
+import { SPRING } from './motion';
 import Icon from './Icon';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
@@ -53,23 +57,48 @@ export function toOvVideo(v: VaultItem): OvVideo {
   };
 }
 
-/** Watch ⟷ Overview, at the top of the Videos tab in both modes. */
+/** Watch ⟷ Overview, at the top of the Videos tab in both modes. The pill slides across. */
 export function ModeSwitch({ mode, onChange }: { mode: 'watch' | 'overview'; onChange: (m: 'watch' | 'overview') => void }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const [sizes, setSizes] = useState<{ x: number; w: number }[]>([]);
+  const index = mode === 'watch' ? 0 : 1;
+  const x = useSharedValue(0);
+  const w = useSharedValue(0);
+  useEffect(() => {
+    const s = sizes[index];
+    if (!s) return;
+    // The other side starts where the pill was, so switching slides it across.
+    const other = mode === 'watch' ? sizes[1] : sizes[0];
+    if (other && w.value === 0) {
+      x.value = other.x;
+      w.value = other.w;
+    }
+    x.value = withSpring(s.x, SPRING);
+    w.value = withSpring(s.w, SPRING);
+  }, [index, sizes]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }], width: w.value }));
+  const items = [
+    ['watch', 'Watch', 'play'],
+    ['overview', 'Overview', 'star'],
+  ] as const;
   return (
     <View style={styles.mode} accessibilityRole="tablist">
-      {(
-        [
-          ['watch', 'Watch', 'play'],
-          ['overview', 'Overview', 'star'],
-        ] as const
-      ).map(([key, label, icon]) => {
+      <Animated.View pointerEvents="none" style={[styles.modePill, pill]} />
+      {items.map(([key, label, icon], i) => {
         const on = mode === key;
         return (
           <TouchableOpacity
             key={key}
-            style={[styles.modeItem, on && styles.modeOn]}
+            style={styles.modeItem}
+            onLayout={(e) => {
+              const { x: lx, width } = e.nativeEvent.layout;
+              setSizes((old) => {
+                const next = [...old];
+                next[i] = { x: lx, w: width };
+                return next;
+              });
+            }}
             onPress={() => {
               if (on) return;
               tick();
@@ -130,7 +159,7 @@ const makeStyles = (p: Palette) =>
   sheet({
     mode: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: p.elevated, borderRadius: 999, padding: 3 },
     modeItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
-    modeOn: { backgroundColor: p.accent },
+    modePill: { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 999, backgroundColor: p.accent },
     modeText: { color: p.textSecondary, fontSize: 14, fontWeight: '700' },
     modeTextOn: { color: '#fff' },
   });
