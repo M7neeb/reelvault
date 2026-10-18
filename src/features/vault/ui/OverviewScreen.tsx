@@ -42,6 +42,7 @@ import Icon from './Icon';
 import IconButton from './IconButton';
 import OverviewDetail, { SeriesMaker } from './OverviewDetail';
 import { Cover, fmtStars, ModeSwitch, statusColor, toOvVideo } from './overviewParts';
+import { PressableScale } from './motion';
 import { OptionsSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { Look, OverviewData, VaultActions, VaultItem, VaultPrefs } from './types';
@@ -144,7 +145,7 @@ export default function OverviewScreen({
       {look !== 'simple' && (
         <View style={styles.stats}>
           <Stat value={String(stats.titles)} label={stats.series ? `titles · ${stats.series} series` : 'titles'} />
-          <Stat value={stats.avgRating !== null ? `★ ${fmtStars(stats.avgRating)}` : '–'} label={`average · ${stats.rated} rated`} />
+          <Stat value={stats.avgRating !== null ? `★ ${fmtStars(stats.avgRating)}` : '–'} label={`average of ${stats.rated} rated`} />
           <Stat value={fmtMs(stats.watchedMs)} label="watched" />
         </View>
       )}
@@ -221,7 +222,7 @@ export default function OverviewScreen({
           <SectionHead title="Top Rated" detail={`${best.length}`} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
             {best.map((e, i) => (
-              <TouchableOpacity key={e.key} style={{ width: 112 }} onPress={() => setOpenKey(e.key)} accessibilityLabel={e.title}>
+              <PressableScale key={e.key} style={{ width: 112 }} onPress={() => setOpenKey(e.key)} accessibilityLabel={e.title}>
                 <Cover source={e.cover} title={e.title} width={112} height={160}>
                   <View style={styles.rank}>
                     <Text style={styles.rankText}>{i + 1}</Text>
@@ -236,7 +237,7 @@ export default function OverviewScreen({
                 <Text style={styles.shelfSub} numberOfLines={1}>
                   {ratingLabel(e.rating, labels) ?? (e.kind === 'series' ? `${e.episodes.length} episodes` : fmtMs(e.totalMs))}
                 </Text>
-              </TouchableOpacity>
+              </PressableScale>
             ))}
           </ScrollView>
         </>
@@ -399,10 +400,10 @@ function Stat({ value, label }: { value: string; label: string }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.stat}>
-      <Text style={styles.statValue} numberOfLines={1}>
+      <Text style={[styles.statValue, value.length > 7 && { fontSize: 15 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {value}
       </Text>
-      <Text style={styles.statLabel} numberOfLines={1}>
+      <Text style={styles.statLabel} numberOfLines={2}>
         {label}
       </Text>
     </View>
@@ -446,7 +447,7 @@ function ContinueCard({ entry, width, onOpen, onPlay }: { entry: OvEntry; width:
   const progress = entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
   const art = next?.video.thumb ?? entry.cover;
   return (
-    <TouchableOpacity style={[styles.upCard, { width }]} onPress={onOpen} activeOpacity={0.9} accessibilityLabel={`${entry.title}, episode ${next?.number}`}>
+    <PressableScale style={[styles.upCard, { width }]} onPress={onOpen} scaleTo={0.98} accessibilityLabel={`${entry.title}, episode ${next?.number}`}>
       {art ? (
         <Image source={art} style={styles.fill} contentFit="cover" transition={150} />
       ) : (
@@ -479,7 +480,7 @@ function ContinueCard({ entry, width, onOpen, onPlay }: { entry: OvEntry; width:
       <View style={styles.upTrack}>
         <View style={[styles.upFill, { width: `${Math.round(progress * 100)}%` }]} />
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -488,7 +489,7 @@ function GridPoster({ entry, width, height, bare, onPress }: { entry: OvEntry; w
   const series = entry.kind === 'series';
   const progress = series && entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
   return (
-    <TouchableOpacity style={{ width }} onPress={onPress} accessibilityLabel={entry.title}>
+    <PressableScale style={{ width }} onPress={onPress} accessibilityLabel={entry.title}>
       {series && (
         <>
           <View style={[styles.stack2, { width: width - 16 }]} />
@@ -528,7 +529,7 @@ function GridPoster({ entry, width, height, bare, onPress }: { entry: OvEntry; w
           </Text>
         </>
       )}
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -539,7 +540,7 @@ function Row({ entry, detailed, labels, onPress }: { entry: OvEntry; detailed?: 
   const word = ratingLabel(entry.rating, labels);
   const progress = series && entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} accessibilityLabel={entry.title}>
+    <PressableScale style={styles.row} onPress={onPress} accessibilityLabel={entry.title} scaleTo={0.98}>
       <Cover source={entry.cover} title={entry.title} width={64} height={92} radius={8} hideTitle>
         {entry.gone && <View style={[styles.goneVeil, { justifyContent: 'center' }]} />}
       </Cover>
@@ -580,7 +581,7 @@ function Row({ entry, detailed, labels, onPress }: { entry: OvEntry; detailed?: 
           </Text>
         )}
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 

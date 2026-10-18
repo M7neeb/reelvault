@@ -6,6 +6,7 @@
  * `enableVideo=false` (the browser preview) shows placeholders instead.
  */
 
+import { friendlyName } from '../names';
 import { useEffect, useState } from 'react';
 import { Modal, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -91,7 +92,7 @@ export function SlideshowModal({
           </TouchableOpacity>
           <View style={styles.slideTitleWrap}>
             <Text style={styles.slideTitle} numberOfLines={1}>
-              {item.title || item.filename}
+              {friendlyName(item)}
             </Text>
             <Text style={styles.slideCount}>
               {index + 1} of {items.length}

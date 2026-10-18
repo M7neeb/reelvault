@@ -6,6 +6,9 @@
  * (no database, no files), so it is tested in Node.
  */
 
+// The .ts extension lets Node run this file directly in the tests.
+import { friendlyName } from './names.ts';
+
 export type OvStatus = 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped';
 
 type Thumb = number | string | { uri: string };
@@ -119,7 +122,7 @@ export const OV_SORTS: { key: OvSort; label: string }[] = [
   { key: 'length', label: 'Length' },
 ];
 
-export const videoName = (v: Pick<OvVideo, 'title' | 'filename'>) => v.title?.trim() || v.filename.replace(/\.[a-z0-9]{2,4}$/i, '');
+export const videoName = (v: Pick<OvVideo, 'title' | 'filename'> & { createdAt?: number }) => friendlyName(v);
 
 /**
  * Watched = you set it to Watched, or you have watched 80% of its length in

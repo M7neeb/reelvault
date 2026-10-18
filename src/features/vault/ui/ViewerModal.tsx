@@ -13,6 +13,11 @@
  * Tapping the video hides all of it (full screen) and brings it back. The
  * metadata lives in a SEPARATE panel opened by the info button.
  *
+ * Gestures, like the iOS Photos app: swipe left or right for the next or
+ * previous video, drag down to close (the library shows through as you pull),
+ * double-tap the left or right half to jump 10 seconds, and drag the playback
+ * bar to scrub. The back button does the same as dragging down.
+ *
  * A video linked to a Simkl movie or episode scrobbles while it plays: Simkl
  * shows it as "watching now", and finishing it marks it watched there.
  *
@@ -26,8 +31,22 @@
  * mounting the player and shows a placeholder stage instead.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  SlideInDown,
+  SlideOutDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -65,15 +84,28 @@ import {
   type VaultPrefs,
 } from './types';
 import Glyph from './Glyph';
+import Fade from './Fade';
+import { DUR, EASE_OUT, fadeIn, SPRING, useReducedMotion, zoomIn } from './motion';
+import Scrubber from './Scrubber';
 
 const FRAME_W = 52;
 const FRAME_H = 36;
 const FRAME_GAP = 3;
+/** Space between videos while you swipe from one to the next. */
+const PAGE_GAP = 24;
+const fill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 };
+
+type Stage = { tx: SharedValue<number>; ty: SharedValue<number>; dx: SharedValue<number> };
 
 /** The vault's own definition of a favourite (see the sidebar). */
 const FAVOURITE_RATING = 8;
 
-export default function ViewerModal({
+function ViewerPage({
+  stage,
+  prev,
+  next,
+  onStep,
+  onDismiss,
   item,
   actions,
   albums,
@@ -90,34 +122,21 @@ export default function ViewerModal({
   resumeAt = null,
   prefs = DEFAULT_VAULT_PREFS,
   onClose,
-}: {
-  item: VaultItem;
-  actions: VaultScreenProps['actions'];
-  /** Albums this video can go into (private ones only for private videos). */
-  albums: UiAlbum[];
-  enableVideo: boolean;
-  /** Preview-only: open a panel on first render so it can be screenshotted. */
-  initialInfoOpen?: boolean;
-  initialMenuOpen?: boolean;
-  initialSmallerOpen?: boolean;
-  /** Preview only: open the editor on this tab. */
-  initialEditorTab?: 'trim' | 'crop' | 'size';
-  /** Play the current list as a slideshow, starting here. */
-  onSlideshow: (item: VaultItem) => void;
-  /** Show the videos filmed near this one. */
-  onNearby: (item: VaultItem) => void;
-  /** Simkl, for linking this video to a movie or episode and scrobbling it. */
-  simkl?: SimklBridge;
-  link?: VideoLink | null;
-  onLinkChanged?: () => void;
-  /** A saved "continue another time" point (ms), if there is one. */
-  resumeAt?: number | null;
-  prefs?: VaultPrefs;
-  onClose: () => void;
+}: ViewerProps & {
+  stage: Stage;
+  prev?: VaultItem;
+  next?: VaultItem;
+  /** Move to the next (1) or previous (-1) video. */
+  onStep: (dir: 1 | -1) => void;
+  /** Close with the animation (the back button). */
+  onDismiss: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const { width: W, height: H } = useWindowDimensions();
+  const reduce = useReducedMotion();
+  const { tx, ty, dx } = stage;
 
   const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (pl) => {
     pl.loop = false;
@@ -137,7 +156,6 @@ export default function ViewerModal({
   const [frames, setFrames] = useState<ThumbSource[]>([]);
   const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState(enableVideo);
-  const [trackW, setTrackW] = useState(0);
   const [infoOpen, setInfoOpen] = useState(initialInfoOpen);
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
   const [chrome, setChrome] = useState(true);
@@ -153,7 +171,27 @@ export default function ViewerModal({
   const [markMenu, setMarkMenu] = useState<Bookmark | null>(null);
   const [renaming, setRenaming] = useState<Bookmark | null>(null);
   const [resumedFrom, setResumedFrom] = useState<number | null>(null);
+  const [ready, setReady] = useState(false);
+  const [skip, setSkip] = useState<{ dir: -1 | 1; n: number } | null>(null);
   const resumeDone = useRef(false);
+  /** While the bar is being dragged (and just after), player time updates are ignored. */
+  const scrubbing = useRef(false);
+  const holdUntil = useRef(0);
+  const wasPlaying = useRef(false);
+  const lastSeek = useRef(0);
+
+  // The cover stays on top until the first frame is ready, so changing videos never flashes black.
+  useEffect(() => {
+    if (player.status === 'readyToPlay') setReady(true);
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') setReady(true);
+    });
+    const play = player.addListener('playingChange', ({ isPlaying }) => setPlaying(isPlaying));
+    return () => {
+      sub.remove();
+      play.remove();
+    };
+  }, [player]);
 
   const loadMarks = () => {
     actions
@@ -260,6 +298,7 @@ export default function ViewerModal({
   // Playhead + auto-scroll the strip.
   useEffect(() => {
     const sub = player.addListener('timeUpdate', (payload) => {
+      if (scrubbing.current || Date.now() < holdUntil.current) return;
       const total = player.duration || (item.durationMs ?? 0) / 1000;
       if (!total) return;
       const fraction = Math.min(1, Math.max(0, payload.currentTime / total));
@@ -335,9 +374,13 @@ export default function ViewerModal({
     setPlaying(!player.playing);
   }
 
+  const durationSec = () => player.duration || (item.durationMs ?? 0) / 1000;
+
   function seek(fraction: number) {
+    setProgress(fraction);
+    holdUntil.current = Date.now() + 500;
     if (!enableVideo) return;
-    const d = player.duration || (item.durationMs ?? 0) / 1000;
+    const d = durationSec();
     if (d > 0) {
       player.currentTime = d * fraction;
       player.play();
@@ -345,6 +388,127 @@ export default function ViewerModal({
       console.log(`[SEEK] ${(fraction * 100).toFixed(0)}%`);
     }
   }
+
+  /* Scrubbing: pause under the finger, show the frame as it moves, carry on after. */
+  function scrubStart() {
+    scrubbing.current = true;
+    wasPlaying.current = enableVideo ? player.playing : false;
+    if (enableVideo && player.playing) player.pause();
+  }
+  function scrubMove(f: number) {
+    setProgress(f);
+    const now = Date.now();
+    if (!enableVideo || now - lastSeek.current < 70) return;
+    lastSeek.current = now;
+    const d = durationSec();
+    if (d > 0) player.currentTime = d * f;
+  }
+  function scrubEnd(f: number) {
+    setProgress(f);
+    holdUntil.current = Date.now() + 500;
+    scrubbing.current = false;
+    if (!enableVideo) return;
+    const d = durationSec();
+    if (d > 0) player.currentTime = d * f;
+    if (wasPlaying.current) player.play();
+  }
+
+  /** Double-tap a side: 10 seconds back or forward. */
+  function jump(dir: -1 | 1) {
+    tick();
+    setSkip((s) => ({ dir, n: s && s.dir === dir ? s.n + 10 : 10 }));
+    const d = durationSec();
+    if (enableVideo && d > 0) {
+      const t = Math.min(d, Math.max(0, player.currentTime + dir * 10));
+      player.currentTime = t;
+      setProgress(t / d);
+      holdUntil.current = Date.now() + 400;
+    }
+  }
+  useEffect(() => {
+    if (!skip) return;
+    const t = setTimeout(() => setSkip(null), 700);
+    return () => clearTimeout(t);
+  }, [skip]);
+
+  /* ---------------------------------------------------------- gestures */
+
+  const hasPrev = !!prev;
+  const hasNext = !!next;
+  const axis = useSharedValue(0); // 0 = not decided, 1 = sideways (paging), 2 = down (closing)
+
+  const pan = Gesture.Pan()
+    .minDistance(12)
+    .onStart(() => {
+      'worklet';
+      axis.value = 0;
+    })
+    .onUpdate((e) => {
+      'worklet';
+      if (axis.value === 0) axis.value = Math.abs(e.translationX) > Math.abs(e.translationY) ? 1 : e.translationY > 0 ? 2 : 0;
+      if (axis.value === 1) {
+        const x = e.translationX;
+        // Past the first or last video it only gives a little, like a rubber band.
+        tx.value = (x > 0 && !hasPrev) || (x < 0 && !hasNext) ? x * 0.22 : x;
+      } else if (axis.value === 2) {
+        ty.value = Math.max(0, e.translationY);
+        dx.value = e.translationX * 0.7;
+      }
+    })
+    .onEnd((e) => {
+      'worklet';
+      if (axis.value === 1) {
+        const dir = (e.translationX < -W * 0.22 || e.velocityX < -650) && hasNext ? 1 : (e.translationX > W * 0.22 || e.velocityX > 650) && hasPrev ? -1 : 0;
+        if (dir !== 0) {
+          tx.value = withTiming(-dir * (W + PAGE_GAP), { duration: DUR.base, easing: EASE_OUT }, (done) => {
+            if (done) scheduleOnRN(onStep, dir as 1 | -1);
+          });
+        } else tx.value = withSpring(0, SPRING);
+      } else if (axis.value === 2) {
+        if (e.translationY > 110 || e.velocityY > 900) {
+          ty.value = withTiming(H, { duration: DUR.base, easing: EASE_OUT }, (done) => {
+            if (done) scheduleOnRN(onClose);
+          });
+        } else {
+          ty.value = withSpring(0, SPRING);
+          dx.value = withSpring(0, SPRING);
+        }
+      }
+    });
+
+  const singleTap = Gesture.Tap()
+    .runOnJS(true)
+    .maxDuration(260)
+    .onEnd((_e, ok) => {
+      if (ok) setChrome((c) => !c);
+    });
+  const doubleTap = Gesture.Tap()
+    .runOnJS(true)
+    .numberOfTaps(2)
+    .maxDelay(240)
+    .onEnd((e, ok) => {
+      if (ok) jump(e.x < W / 2 ? -1 : 1);
+    });
+  const hold = Gesture.LongPress()
+    .runOnJS(true)
+    .minDuration(280)
+    .onStart((e) => {
+      if (e.x < W * 0.28 || e.x > W * 0.72) holdFast(true);
+    })
+    .onFinalize(() => holdFast(false));
+  const gestures = Gesture.Race(pan, hold, Gesture.Exclusive(doubleTap, singleTap));
+
+  const rowStyle = useAnimatedStyle(() => {
+    const pull = Math.min(1, ty.value / Math.max(1, H));
+    return { transform: [{ translateX: tx.value + dx.value }, { translateY: ty.value }, { scale: 1 - pull * 0.35 }] };
+  });
+  const chromeFade = useAnimatedStyle(() => ({ opacity: 1 - Math.min(1, ty.value / 90) - Math.min(0.6, Math.abs(tx.value) / Math.max(1, W)) }));
+  const dark = useSharedValue(0);
+  useEffect(() => {
+    dark.value = withTiming(chrome ? 0 : 1, { duration: DUR.base, easing: EASE_OUT });
+  }, [chrome]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bgStyle = useAnimatedStyle(() => ({ opacity: 1 - Math.min(1, ty.value / (H * 0.55)) }));
+  const blackStyle = useAnimatedStyle(() => ({ opacity: dark.value }));
 
   async function onRate(n: number) {
     const next = n === rating ? 0 : n;
@@ -418,77 +582,90 @@ export default function ViewerModal({
   const camera = [item.meta?.make, item.meta?.model].filter(Boolean).join(' ');
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View style={[styles.viewer, !chrome && styles.viewerBare]}>
-        {/* ── media: tap to hide or show everything else ───────────────── */}
-        <View style={styles.stage}>
-          <TouchableOpacity activeOpacity={1} onPress={() => setChrome((c) => !c)} style={styles.stageTouch}>
-            {enableVideo ? (
-              <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} />
-            ) : (
-              <View style={styles.videoPlaceholder}>
-                <Text style={styles.videoPlaceholderText}>video</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          {/* Hold either edge for 2x; a short tap still shows or hides the controls. */}
-          {prefs.holdForSpeed && (
-            <>
-              <Pressable
-                style={[styles.edge, { left: 0 }]}
-                onPress={() => setChrome((c) => !c)}
-                onLongPress={() => holdFast(true)}
-                onPressOut={() => holdFast(false)}
-                delayLongPress={280}
-                accessibilityLabel="Hold for double speed"
-              />
-              <Pressable
-                style={[styles.edge, { right: 0 }]}
-                onPress={() => setChrome((c) => !c)}
-                onLongPress={() => holdFast(true)}
-                onPressOut={() => holdFast(false)}
-                delayLongPress={280}
-                accessibilityLabel="Hold for double speed"
-              />
-            </>
-          )}
+    <View style={styles.viewer}>
+        <Animated.View style={[fill, { backgroundColor: p.bg }, bgStyle]} pointerEvents="none">
+          <Animated.View style={[fill, { backgroundColor: '#000' }, blackStyle]} />
+        </Animated.View>
+
+        {/* ── media: swipe for the next video, drag down to close, tap to hide everything else ── */}
+        <Animated.View style={styles.stage} layout={reduce ? undefined : LinearTransition.duration(DUR.base).easing(EASE_OUT)}>
+          <GestureDetector gesture={gestures}>
+            <View style={styles.stageTouch} collapsable={false}>
+              <Animated.View style={[fill, rowStyle]}>
+                {prev && <Image source={prev.thumbSource} style={[styles.neighbour, { left: -(W + PAGE_GAP), width: W }]} contentFit="contain" />}
+                {enableVideo ? (
+                  <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} />
+                ) : (
+                  <View style={styles.video} />
+                )}
+                {!ready && (
+                  <Animated.View style={fill} exiting={FadeOut.duration(DUR.fast)} pointerEvents="none">
+                    <Image source={item.thumbSource} style={styles.video} contentFit="contain" />
+                  </Animated.View>
+                )}
+                {next && <Image source={next.thumbSource} style={[styles.neighbour, { left: W + PAGE_GAP, width: W }]} contentFit="contain" />}
+              </Animated.View>
+            </View>
+          </GestureDetector>
           {fast && (
-            <View style={[styles.fastPill, { top: insets.top + 60 }]} pointerEvents="none">
+            <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.fastPill, { top: insets.top + 60 }]} pointerEvents="none">
               <Icon name="fast" size={13} color="#fff" />
               <Text style={styles.fastText}>2×</Text>
-            </View>
+            </Animated.View>
           )}
-        </View>
+          {skip && (
+            <Animated.View
+              key={`${skip.dir}${skip.n}`}
+              entering={FadeIn.duration(120)}
+              exiting={FadeOut.duration(DUR.base)}
+              pointerEvents="none"
+              style={[styles.skipPill, skip.dir < 0 ? { left: 24 } : { right: 24 }]}>
+              <Icon name={skip.dir < 0 ? 'rewatch' : 'fast'} size={14} color="#fff" />
+              <Text style={styles.fastText}>
+                {skip.dir < 0 ? '−' : '+'}
+                {skip.n}s
+              </Text>
+            </Animated.View>
+          )}
+        </Animated.View>
 
         {chrome && (
           <>
-            {/* ── header ──────────────────────────────────────────────── */}
-            <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
-              <IconButton icon="back" label="Back" clear onPress={onClose} size={38} />
+            {/* ── header (over the video, with a soft shade so the buttons always show) ── */}
+            <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.headerWrap, chromeFade]} pointerEvents="box-none">
+              <Fade color="0,0,0" from={0} to={0.55} reverse style={[fill, { bottom: -30 }]} />
+              <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+                <IconButton icon="back" label="Back" clear color="#fff" onPress={onDismiss} size={38} />
 
-              <View style={styles.titleWrap}>
-                <Text style={styles.titleDate}>{item.title || dt.date}</Text>
-                <Text style={styles.titleTime}>{item.title ? `${dt.date} ${dt.time}` : dt.time}</Text>
-              </View>
+                <View style={styles.titleWrap} pointerEvents="none">
+                  <Text style={styles.titleDate} numberOfLines={1}>
+                    {item.title || dt.date}
+                  </Text>
+                  <Text style={styles.titleTime}>{item.title ? `${dt.date} ${dt.time}` : dt.time}</Text>
+                </View>
 
-              <View style={styles.headerRight}>
-                <IconButton icon="info" label="Info" clear size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
-                <IconButton icon="more" label="More" clear size={38} onPress={() => setMenuOpen(true)} />
+                <View style={styles.headerRight}>
+                  <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
+                  <IconButton icon="more" label="More" clear color="#fff" size={38} onPress={() => setMenuOpen(true)} />
+                </View>
               </View>
-            </View>
-            {link && (
-              <TouchableOpacity style={[styles.linkPill, { top: insets.top + 54 }]} onPress={() => setLinkOpen(true)} accessibilityLabel="Linked to Simkl">
-                <Icon name="tv" size={12} color="#fff" />
-                <Text style={styles.linkPillText} numberOfLines={1}>
-                  {link.title}
-                  {link.type !== 'movie' ? ` · ${episodeCode(link.type, link.season ?? 1, link.episode ?? 1)}` : ''}
-                  {link.loggedAt ? '  ✓' : ''}
-                </Text>
-              </TouchableOpacity>
-            )}
+              {link && (
+                <TouchableOpacity style={styles.linkPill} onPress={() => setLinkOpen(true)} accessibilityLabel="Linked to Simkl">
+                  <Icon name="tv" size={12} color="#fff" />
+                  <Text style={styles.linkPillText} numberOfLines={1}>
+                    {link.title}
+                    {link.type !== 'movie' ? ` · ${episodeCode(link.type, link.season ?? 1, link.episode ?? 1)}` : ''}
+                    {link.loggedAt ? '  ✓' : ''}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </Animated.View>
 
             {/* ── bottom stack ────────────────────────────────────────── */}
-            <View style={styles.bottom}>
+            <Animated.View
+              entering={reduce ? fadeIn : SlideInDown.duration(DUR.base).easing(EASE_OUT)}
+              exiting={reduce ? FadeOut.duration(DUR.fast) : SlideOutDown.duration(DUR.fast)}
+              style={[styles.bottom, chromeFade]}>
               {!!note && (
                 <TouchableOpacity onPress={() => setNote('')}>
                   <Text style={styles.note}>{note}</Text>
@@ -498,14 +675,17 @@ export default function ViewerModal({
                 <TouchableOpacity onPress={togglePlay} hitSlop={10} accessibilityLabel="Play or pause">
                   <Icon name={playing ? 'pause' : 'play'} size={18} color={p.text} />
                 </TouchableOpacity>
-                <View style={styles.scrubTrack} onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}>
-                  <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
-                  {totalSec > 0 &&
-                    marks.map((m) => (
-                      <View key={m.id} style={[styles.scrubMark, { left: Math.min(1, m.atMs / 1000 / totalSec) * Math.max(0, trackW - 3) }]} />
-                    ))}
-                  <View style={[styles.scrubThumb, { left: progress * Math.max(0, trackW - 3) }]} />
-                </View>
+                <Scrubber
+                  fraction={progress}
+                  durationSec={totalSec}
+                  marks={marks.map((m) => m.atMs)}
+                  color={p.text}
+                  trackColor={p.border}
+                  markColor={p.rating}
+                  onStart={scrubStart}
+                  onMove={scrubMove}
+                  onEnd={scrubEnd}
+                />
                 <Text style={styles.scrubTime}>
                   {fmtDuration(elapsed * 1000) ?? '0:00'} / {fmtDuration(totalSec * 1000) ?? '--:--'}
                 </Text>
@@ -607,15 +787,20 @@ export default function ViewerModal({
                   <Icon name="trash" size={18} color={p.dangerText} />
                 </TouchableOpacity>
               </View>
-            </View>
+            </Animated.View>
           </>
         )}
 
         {/* ── info panel ────────────────────────────────────────────────── */}
         {infoOpen && (
-          <View style={styles.infoRoot}>
-            <TouchableOpacity style={styles.infoBackdrop} activeOpacity={1} onPress={() => setInfoOpen(false)} />
-            <View style={[styles.infoSheet, { paddingBottom: insets.bottom + 16 }]}>
+          <Animated.View style={styles.infoRoot} exiting={FadeOut.duration(DUR.fast)}>
+            <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={styles.infoBackdrop}>
+              <TouchableOpacity style={fill} activeOpacity={1} onPress={() => setInfoOpen(false)} accessibilityLabel="Close info" />
+            </Animated.View>
+            <Animated.View
+              entering={reduce ? fadeIn : SlideInDown.duration(DUR.base).easing(EASE_OUT)}
+              exiting={reduce ? FadeOut.duration(DUR.fast) : SlideOutDown.duration(DUR.fast)}
+              style={[styles.infoSheet, { paddingBottom: insets.bottom + 16 }]}>
               <View style={styles.infoHeader}>
                 <TouchableOpacity style={styles.circle} onPress={() => setInfoOpen(false)}>
                   <Glyph name="close" />
@@ -767,15 +952,20 @@ export default function ViewerModal({
                   </TouchableOpacity>
                 </View>
               </ScrollView>
-            </View>
-          </View>
+            </Animated.View>
+          </Animated.View>
         )}
 
         {/* ── actions sheet ─────────────────────────────────────────────── */}
         {menuOpen && (
-          <View style={styles.infoRoot}>
-            <TouchableOpacity style={styles.infoBackdrop} activeOpacity={1} onPress={() => setMenuOpen(false)} />
-            <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 12 }]}>
+          <Animated.View style={styles.infoRoot} exiting={FadeOut.duration(DUR.fast)}>
+            <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={styles.infoBackdrop}>
+              <TouchableOpacity style={fill} activeOpacity={1} onPress={() => setMenuOpen(false)} accessibilityLabel="Close menu" />
+            </Animated.View>
+            <Animated.View
+              entering={reduce ? fadeIn : SlideInDown.duration(DUR.base).easing(EASE_OUT)}
+              exiting={reduce ? FadeOut.duration(DUR.fast) : SlideOutDown.duration(DUR.fast)}
+              style={[styles.menuSheet, { paddingBottom: insets.bottom + 12 }]}>
               <View style={styles.grabber} />
               <Text style={styles.menuTitle} numberOfLines={1}>
                 {item.filename}
@@ -969,8 +1159,8 @@ export default function ViewerModal({
                   }}
                 />
               </ScrollView>
-            </View>
-          </View>
+            </Animated.View>
+          </Animated.View>
         )}
 
         {dateOpen && (
@@ -1064,7 +1254,93 @@ export default function ViewerModal({
             onClose={() => setNewAlbumOpen(false)}
           />
         )}
-      </View>
+    </View>
+  );
+}
+
+
+type ViewerProps = {
+  item: VaultItem;
+  actions: VaultScreenProps['actions'];
+  /** Albums this video can go into (private ones only for private videos). */
+  albums: UiAlbum[];
+  enableVideo: boolean;
+  /** Preview-only: open a panel on first render so it can be screenshotted. */
+  initialInfoOpen?: boolean;
+  initialMenuOpen?: boolean;
+  initialSmallerOpen?: boolean;
+  /** Preview only: open the editor on this tab. */
+  initialEditorTab?: 'trim' | 'crop' | 'size';
+  /** Play the current list as a slideshow, starting here. */
+  onSlideshow: (item: VaultItem) => void;
+  /** Show the videos filmed near this one. */
+  onNearby: (item: VaultItem) => void;
+  /** Simkl, for linking this video to a movie or episode and scrobbling it. */
+  simkl?: SimklBridge;
+  link?: VideoLink | null;
+  onLinkChanged?: () => void;
+  /** A saved "continue another time" point (ms), if there is one. */
+  resumeAt?: number | null;
+  prefs?: VaultPrefs;
+  onClose: () => void;
+};
+
+/**
+ * The viewer: stays open while you swipe between videos (each one gets a fresh
+ * page, so ratings, tags and the player belong to that video), and opens and
+ * closes with a short zoom.
+ */
+export default function ViewerModal({
+  items = [],
+  onChangeItem,
+  ...props
+}: ViewerProps & {
+  /** The list you opened it from, for swiping to the previous / next video. */
+  items?: VaultItem[];
+  onChangeItem?: (item: VaultItem) => void;
+}) {
+  const { item, onClose } = props;
+  const reduce = useReducedMotion();
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const dx = useSharedValue(0);
+  const out = useSharedValue(0);
+
+  const index = items.findIndex((v) => v.id === item.id);
+  const prev = index > 0 ? items[index - 1] : undefined;
+  const next = index >= 0 && index < items.length - 1 ? items[index + 1] : undefined;
+
+  // The new page starts centred; the swipe that brought it here is over.
+  useLayoutEffect(() => {
+    tx.value = 0;
+  }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const step = useCallback(
+    (dir: 1 | -1) => {
+      const target = dir === 1 ? next : prev;
+      if (target && onChangeItem) {
+        tick();
+        onChangeItem(target);
+      } else tx.value = withSpring(0, SPRING);
+    },
+    [next, prev, onChangeItem] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const dismiss = useCallback(() => {
+    out.value = withTiming(1, { duration: reduce ? DUR.fast : DUR.base, easing: EASE_OUT }, (done) => {
+      if (done) scheduleOnRN(onClose);
+    });
+  }, [onClose, reduce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shell = useAnimatedStyle(() => ({ opacity: 1 - out.value, transform: [{ scale: 1 - out.value * 0.06 }] }));
+
+  return (
+    <Modal visible transparent animationType="none" onRequestClose={dismiss} statusBarTranslucent>
+      <GestureHandlerRootView style={StyleSheet.absoluteFill}>
+        <Animated.View entering={reduce ? fadeIn : zoomIn} style={[StyleSheet.absoluteFill, shell]}>
+          <ViewerPage key={item.id} {...props} stage={{ tx, ty, dx }} prev={prev} next={next} onStep={step} onDismiss={dismiss} />
+        </Animated.View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -1104,19 +1380,27 @@ function MenuRow({
 
 const makeStyles = (p: Palette) =>
   sheet({
-    viewer: { flex: 1, backgroundColor: p.bg },
-    viewerBare: { backgroundColor: '#000' },
-    stage: { flex: 1 },
-    stageTouch: { flex: 1, justifyContent: 'center' },
+    viewer: { flex: 1 },
+    stage: { flex: 1, overflow: 'visible' },
+    stageTouch: { flex: 1 },
     video: { width: '100%', height: '100%' },
+    neighbour: { position: 'absolute', top: 0, bottom: 0 },
+    headerWrap: { position: 'absolute', top: 0, left: 0, right: 0, paddingBottom: 6 },
+    skipPill: {
+      position: 'absolute',
+      top: '45%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      borderRadius: 999,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
     videoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     videoPlaceholderText: { color: p.textMuted, fontSize: 13, fontWeight: '700', letterSpacing: 1 },
 
     header: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
       paddingBottom: 8,
       paddingHorizontal: 14,
       flexDirection: 'row',
@@ -1124,11 +1408,10 @@ const makeStyles = (p: Palette) =>
       justifyContent: 'space-between',
     },
     titleWrap: { alignItems: 'center', flex: 1, paddingHorizontal: 8 },
-    titleDate: { color: p.text, fontSize: 17, fontWeight: '700' },
-    titleTime: { color: p.textSecondary, fontSize: 13 },
+    titleDate: { color: '#fff', fontSize: 17, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 6 },
+    titleTime: { color: 'rgba(255,255,255,0.75)', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 6 },
     headerRight: { flexDirection: 'row', gap: 8 },
     linkPill: {
-      position: 'absolute',
       alignSelf: 'center',
       maxWidth: '80%',
       flexDirection: 'row',
@@ -1140,7 +1423,6 @@ const makeStyles = (p: Palette) =>
       paddingVertical: 6,
     },
     linkPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-    edge: { position: 'absolute', top: 90, bottom: 40, width: '22%' },
     fastPill: {
       position: 'absolute',
       alignSelf: 'center',

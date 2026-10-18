@@ -18,6 +18,7 @@ import { detailedStats, fmtChange, fmtDuration, fmtRating, periodOf, review, shi
 import { SIMKL_TYPES, watchHeatmap } from '../logic';
 import { BarChart, RankedBars } from './charts';
 import type { Meta, SimklActions, SimklItem, WatchEvent } from './types';
+import Heatmap from '@/features/vault/ui/Heatmap';
 import Glyph from '@/features/vault/ui/Glyph';
 
 type Tab = 'overview' | 'review';
@@ -76,11 +77,6 @@ export default function InsightsModal({
     await load();
   }
 
-  const shade = (n: number) => {
-    if (!heat || n === 0) return p.card;
-    const level = Math.min(4, Math.ceil((n / Math.max(1, heat.max)) * 4));
-    return ['', 'rgba(245,166,35,0.3)', 'rgba(245,166,35,0.5)', 'rgba(245,166,35,0.75)', p.rating][level];
-  };
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -122,17 +118,9 @@ export default function InsightsModal({
 
             {heat && (
               <Section title="Last 18 weeks">
-                <View style={styles.heat}>
-                  {heat.columns.map((col, i) => (
-                    <View key={i} style={styles.heatCol}>
-                      {col.map((d) => (
-                        <View key={d.day} style={[styles.heatCell, { backgroundColor: d.future ? 'transparent' : shade(d.count) }]} />
-                      ))}
-                    </View>
-                  ))}
-                </View>
+                <Heatmap columns={heat.columns} max={heat.max} unit={(n) => `${n} ${n === 1 ? 'episode or movie' : 'episodes and movies'}`} />
                 <Text style={styles.hint}>
-                  Streak {heat.current} {heat.current === 1 ? 'day' : 'days'} · longest {heat.longest} · darker = more watched that day
+                  Streak {heat.current} {heat.current === 1 ? 'day' : 'days'} · longest {heat.longest} {heat.longest === 1 ? 'day' : 'days'}
                 </Text>
               </Section>
             )}
@@ -318,9 +306,6 @@ const makeStyles = (p: Palette) =>
     typeRow: { gap: 2 },
     typeName: { color: p.text, fontSize: 15, fontWeight: '700' },
     typeFacts: { color: p.textSecondary, fontSize: 13 },
-    heat: { flexDirection: 'row', gap: 3 },
-    heatCol: { gap: 3 },
-    heatCell: { width: 14, height: 14, borderRadius: 3 },
     fill: { gap: 8, paddingHorizontal: 4 },
     fillBtn: { alignSelf: 'flex-start', backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
     fillText: { color: p.link, fontWeight: '700', fontSize: 14 },
