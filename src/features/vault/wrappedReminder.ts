@@ -53,7 +53,10 @@ const OTD_TAG = 'reelvault-otd';
 const YEAR_KEY = 'vault.yearWrappedReminder';
 const YEAR_TAG = 'reelvault-year';
 
-export type OpenRequest = 'yearWrapped' | 'onThisDay';
+export type OpenRequest = 'yearWrapped' | 'monthWrapped' | 'onThisDay';
+
+const MONTH_KEY = 'vault.monthWrappedReminder';
+const MONTH_TAG = 'reelvault-month';
 
 async function allowed(): Promise<boolean> {
   const current = await Notifications.getPermissionsAsync();
@@ -126,12 +129,45 @@ export async function setYearWrappedReminder(on: boolean): Promise<boolean> {
   return true;
 }
 
+export async function monthWrappedReminderOn(): Promise<boolean> {
+  return (await getSetting(MONTH_KEY)) !== '0';
+}
+
+/** The 1st of next month, 10:00: "Your <month> Wrapped is ready". Planned again on every app start. */
+export async function scheduleMonthWrapped(): Promise<void> {
+  await cancelTagged(MONTH_TAG);
+  if (!(await monthWrappedReminderOn())) return;
+  const perm = await Notifications.getPermissionsAsync();
+  if (!perm.granted) return;
+  const now = new Date();
+  const at = new Date(now.getFullYear(), now.getMonth() + 1, 1, 10, 0);
+  // December's 1st already has the yearly one; the month's goes out a day later then.
+  if (at.getMonth() === 11) at.setDate(2);
+  const month = new Date(at.getFullYear(), at.getMonth() - 1, 1).toLocaleDateString('en-GB', { month: 'long' });
+  await Notifications.scheduleNotificationAsync({
+    identifier: MONTH_TAG,
+    content: { title: `Your ${month} Wrapped is ready`, body: 'Your month in videos: what you watched most, your biggest day and more.', data: { tag: MONTH_TAG } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at },
+  }).catch((e) => console.log(`[MONTH] could not schedule: ${String(e)}`));
+}
+
+export async function setMonthWrappedReminder(on: boolean): Promise<boolean> {
+  if (on && !(await allowed())) {
+    await setSetting(MONTH_KEY, '0');
+    return false;
+  }
+  await setSetting(MONTH_KEY, on ? '1' : '0');
+  await scheduleMonthWrapped();
+  return true;
+}
+
 /** Tapping an On this day or yearly Wrapped notification. */
 export function onOpenRequestTap(open: (r: OpenRequest) => void): () => void {
   const handle = (r: Notifications.NotificationResponse | null) => {
     const tag = r?.notification.request.content.data?.tag;
     if (tag === OTD_TAG) open('onThisDay');
     else if (tag === YEAR_TAG) open('yearWrapped');
+    else if (tag === MONTH_TAG) open('monthWrapped');
   };
   Notifications.getLastNotificationResponseAsync()
     .then(handle)

@@ -11,6 +11,9 @@
  *   toolbar        (pick flag · reject flag · stars · more · delete)
  *
  * Tapping the video hides all of it (full screen) and brings it back. The
+ * viewer also turns with the phone: sideways, only the video and a slim
+ * playback bar show. The full-screen button turns a landscape video sideways
+ * without rotating the phone (and back upright). The
  * metadata lives in a SEPARATE panel opened by the info button.
  *
  * Gestures, like the iOS Photos app: swipe left or right for the next or
@@ -20,6 +23,13 @@
  *
  * A video linked to a Simkl movie or episode scrobbles while it plays: Simkl
  * shows it as "watching now", and finishing it marks it watched there.
+ *
+ * The stage: the video sits in a soft glow of its own colours (Ambient), with
+ * big play / 10-second buttons in the middle, a frame preview over the bar
+ * while you scrub, pinch to fill the screen (and back), a lock that ignores
+ * every touch until you unlock it, picture in picture, playback speed, loop,
+ * and Up Next: when a video ends the next one in the list starts after a
+ * short countdown. The sound keeps playing when you leave the app (setting).
  *
  * Also: hold the left or right edge for 2× speed, bookmarks (ticks on the
  * scrubber, chips to jump), "Continue another time" on long videos (it picks
@@ -33,6 +43,8 @@
 
 // The one native view the viewer uses besides the player: Apple's AirPlay button (renders nothing where missing).
 import { AirPlayButton, hasAirPlay } from '../../../../modules/reelvault-airplay';
+// Turning sideways (does nothing in builds before 1.9.1 and the browser preview).
+import { allowRotation, canRotate, lockSideways, lockUpright } from '../rotate';
 import { CoverPicker } from './coverPicker';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
@@ -53,6 +65,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Backdrop } from './frame';
 
 import { episodeCode } from '@/features/simkl/logic';
 import type { SimklBridge, VideoLink } from '@/features/simkl/ui/types';
@@ -84,6 +97,8 @@ import {
   type VaultItem,
   type VaultScreenProps,
   DEFAULT_VAULT_PREFS,
+  PLAYER_SPEEDS,
+  type PlayerOptions,
   type VaultPrefs,
 } from './types';
 import Glyph from './Glyph';
@@ -125,6 +140,7 @@ function ViewerPage({
   onLinkChanged,
   resumeAt = null,
   prefs = DEFAULT_VAULT_PREFS,
+  onPrefs,
   onClose,
 }: ViewerProps & {
   stage: Stage;
@@ -142,13 +158,43 @@ function ViewerPage({
   const reduce = useReducedMotion();
   const { tx, ty, dx } = stage;
 
+  // The player's own settings, kept for the next video and the next time.
+  const [opts, setOpts] = useState<PlayerOptions>(prefs.player ?? DEFAULT_VAULT_PREFS.player);
+  const setOpt = (patch: Partial<PlayerOptions>) => {
+    const next = { ...opts, ...patch };
+    setOpts(next);
+    onPrefs?.({ ...prefs, player: next });
+  };
+
   const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (pl) => {
-    pl.loop = false;
+    pl.loop = opts.loop;
     // AirPlay sends the video itself to the TV, not only the sound.
     pl.allowsExternalPlayback = true;
+    pl.playbackRate = opts.speed;
+    // Leave the app or lock the phone and the sound carries on, with controls on the lock screen.
+    pl.staysActiveInBackground = opts.background;
+    pl.showNowPlayingNotification = opts.background;
     if (enableVideo) pl.play();
     pl.timeUpdateEventInterval = 0.2;
   });
+  useEffect(() => {
+    player.loop = opts.loop;
+    player.playbackRate = opts.speed;
+    player.staysActiveInBackground = opts.background;
+    player.showNowPlayingNotification = opts.background;
+  }, [player, opts.loop, opts.speed, opts.background]);
+
+  const videoRef = useRef<VideoView>(null);
+  /** Pinch out to fill the screen (cropping the edges), pinch in to see it whole. */
+  const [fillScreen, setFillScreen] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [lockHint, setLockHint] = useState(false);
+  /** The video ended: the next one comes up after a countdown (or Replay when it is the last). */
+  const [ended, setEnded] = useState(false);
+  const [upNextLeft, setUpNextLeft] = useState<number | null>(null);
+  /** While dragging the bar: where (0..1), for the frame preview. */
+  const [scrubAt, setScrubAt] = useState<number | null>(null);
+  const [toast, setToast] = useState('');
 
   const [rating, setRating] = useState(item.rating);
   const [flag, setFlag] = useState<UiFlag>(item.flag);
@@ -165,6 +211,23 @@ function ViewerPage({
   const [infoOpen, setInfoOpen] = useState(initialInfoOpen);
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
   const [chrome, setChrome] = useState(true);
+  /** Sideways: the phone was turned, or the full-screen button turned it. */
+  const landscape = W > H;
+  const wide = !!item.width && !!item.height && item.width > item.height;
+  // Turning sideways hides everything but the video; turning back upright brings it back.
+  useEffect(() => {
+    setChrome(!landscape);
+  }, [landscape]);
+  function toggleFullScreen() {
+    tick();
+    if (landscape) {
+      lockUpright();
+      setChrome(true);
+    } else {
+      if (wide && canRotate) lockSideways();
+      setChrome(false);
+    }
+  }
   const [dateOpen, setDateOpen] = useState(false);
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
   const [smallerOpen, setSmallerOpen] = useState(initialSmallerOpen);
@@ -249,8 +312,8 @@ function ViewerPage({
 
   function holdFast(on: boolean) {
     if (!enableVideo || !prefs.holdForSpeed) return;
-    if (!on && player.playbackRate === 1) return;
-    player.playbackRate = on ? 2 : 1;
+    if (!on && player.playbackRate === opts.speed) return;
+    player.playbackRate = on ? Math.max(2, opts.speed * 2) : opts.speed;
     if (on && !player.playing) {
       player.play();
       setPlaying(true);
@@ -369,12 +432,14 @@ function ViewerPage({
     [albums]
   );
 
+  const ambientSource = frames.length ? frames[Math.min(frames.length - 1, Math.floor(progress * frames.length))] : item.thumbSource;
   const dt = fmtDateTime(item.createdAt);
   const imported = fmtDateTime(item.importedAt);
   const totalSec = player.duration || (item.durationMs ?? 0) / 1000;
   const elapsed = Math.round(progress * totalSec);
 
   function togglePlay() {
+    if (ended) return replay();
     if (!enableVideo) return;
     if (player.playing) player.pause();
     else player.play();
@@ -398,12 +463,15 @@ function ViewerPage({
 
   /* Scrubbing: pause under the finger, show the frame as it moves, carry on after. */
   function scrubStart() {
+    setEnded(false);
+    setUpNextLeft(null);
     scrubbing.current = true;
     wasPlaying.current = enableVideo ? player.playing : false;
     if (enableVideo && player.playing) player.pause();
   }
   function scrubMove(f: number) {
     setProgress(f);
+    setScrubAt(f);
     const now = Date.now();
     if (!enableVideo || now - lastSeek.current < 70) return;
     lastSeek.current = now;
@@ -412,6 +480,7 @@ function ViewerPage({
   }
   function scrubEnd(f: number) {
     setProgress(f);
+    setScrubAt(null);
     holdUntil.current = Date.now() + 500;
     scrubbing.current = false;
     if (!enableVideo) return;
@@ -438,6 +507,72 @@ function ViewerPage({
     return () => clearTimeout(t);
   }, [skip]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(''), 1400);
+    return () => clearTimeout(t);
+  }, [toast]);
+  useEffect(() => {
+    if (!lockHint) return;
+    const t = setTimeout(() => setLockHint(false), 2200);
+    return () => clearTimeout(t);
+  }, [lockHint]);
+
+  // The end: the next video comes up after 5 seconds, unless you cancel (or it loops).
+  useEffect(() => {
+    const sub = player.addListener('playToEnd', () => {
+      if (player.loop) return;
+      setEnded(true);
+      setChrome(true);
+      if (opts.autoplayNext && next) setUpNextLeft(5);
+    });
+    return () => sub.remove();
+  }, [player, opts.autoplayNext, next]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (upNextLeft === null) return;
+    if (upNextLeft <= 0) {
+      setUpNextLeft(null);
+      goNext();
+      return;
+    }
+    const t = setTimeout(() => setUpNextLeft((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [upNextLeft]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Slide to the next / previous video, the same way a swipe does. */
+  function goNext(dir: 1 | -1 = 1) {
+    if ((dir === 1 && !next) || (dir === -1 && !prev)) return;
+    tick();
+    setUpNextLeft(null);
+    tx.value = withTiming(-dir * (W + PAGE_GAP), { duration: DUR.base, easing: EASE_OUT }, (done) => {
+      if (done) scheduleOnRN(onStep, dir);
+    });
+  }
+  function replay() {
+    tick();
+    setEnded(false);
+    setUpNextLeft(null);
+    if (!enableVideo) return;
+    player.currentTime = 0;
+    player.play();
+  }
+  function cycleSpeed() {
+    tick();
+    const i = PLAYER_SPEEDS.indexOf(opts.speed as (typeof PLAYER_SPEEDS)[number]);
+    const speed = PLAYER_SPEEDS[(i + 1) % PLAYER_SPEEDS.length];
+    setOpt({ speed });
+    setToast(`Speed ${speed}×`);
+  }
+  function toggleLoop() {
+    tick();
+    setOpt({ loop: !opts.loop });
+    setToast(opts.loop ? 'Loop off' : 'Loops this video');
+  }
+  function startPip() {
+    tick();
+    videoRef.current?.startPictureInPicture().catch(() => setToast('Picture in picture is not available here'));
+  }
+
   /* ---------------------------------------------------------- gestures */
 
   const hasPrev = !!prev;
@@ -446,6 +581,7 @@ function ViewerPage({
 
   const pan = Gesture.Pan()
     .minDistance(12)
+    .maxPointers(1)
     .onStart(() => {
       'worklet';
       axis.value = 0;
@@ -503,7 +639,26 @@ function ViewerPage({
       if (e.x < W * 0.28 || e.x > W * 0.72) holdFast(true);
     })
     .onFinalize(() => holdFast(false));
-  const gestures = Gesture.Race(pan, hold, Gesture.Exclusive(doubleTap, singleTap));
+  const pinch = Gesture.Pinch()
+    .runOnJS(true)
+    .onEnd((e) => {
+      if (e.scale > 1.12 && !fillScreen) {
+        tick();
+        setFillScreen(true);
+        setToast('Zoomed to fill');
+      } else if (e.scale < 0.9 && fillScreen) {
+        tick();
+        setFillScreen(false);
+        setToast('Whole video');
+      }
+    });
+  // Locked: every touch only shows the unlock button.
+  const lockedTap = Gesture.Tap()
+    .runOnJS(true)
+    .onEnd((_e, ok) => {
+      if (ok) setLockHint(true);
+    });
+  const gestures = locked ? lockedTap : Gesture.Race(pinch, pan, hold, Gesture.Exclusive(doubleTap, singleTap));
 
   const rowStyle = useAnimatedStyle(() => {
     const pull = Math.min(1, ty.value / Math.max(1, H));
@@ -600,8 +755,18 @@ function ViewerPage({
             <View style={styles.stageTouch} collapsable={false}>
               <Animated.View style={[fill, rowStyle]}>
                 {prev && <Image source={prev.thumbSource} style={[styles.neighbour, { left: -(W + PAGE_GAP), width: W }]} contentFit="contain" />}
+                {/* Ambient: a soft glow of the video's own colours around it (it follows the film strip). */}
+                {opts.ambient && !fillScreen && <Backdrop source={ambientSource} dim={chrome ? 0.38 : 0.55} blur={70} style={{ backgroundColor: 'transparent' }} />}
                 {enableVideo ? (
-                  <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} />
+                  <VideoView
+                    ref={videoRef}
+                    player={player}
+                    style={[styles.video, { backgroundColor: 'transparent' }]}
+                    contentFit={fillScreen ? 'cover' : 'contain'}
+                    nativeControls={false}
+                    allowsPictureInPicture
+                    startsPictureInPictureAutomatically={opts.background}
+                  />
                 ) : (
                   <View style={styles.video} />
                 )}
@@ -614,6 +779,93 @@ function ViewerPage({
               </Animated.View>
             </View>
           </GestureDetector>
+          {/* ── the middle: big play and 10-second buttons, Replay or Up Next at the end ── */}
+          {chrome && !locked && !infoOpen && enableVideo && !ended && (
+            <Animated.View entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.fast)} style={styles.centre} pointerEvents="box-none">
+              <TouchableOpacity style={styles.centreSmall} onPress={() => jump(-1)} accessibilityLabel="Back 10 seconds">
+                <Icon name="back10" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.centreBig} onPress={togglePlay} accessibilityLabel={playing ? 'Pause' : 'Play'}>
+                <Icon name={playing ? 'pause' : 'play'} size={30} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.centreSmall} onPress={() => jump(1)} accessibilityLabel="Forward 10 seconds">
+                <Icon name="forward10" size={22} color="#fff" />
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+          {ended && !locked && (
+            <Animated.View entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)} style={styles.endWrap} pointerEvents="box-none">
+              {next && upNextLeft !== null ? (
+                <View style={styles.upNext}>
+                  <Text style={styles.upNextKicker}>UP NEXT IN {upNextLeft}</Text>
+                  <View style={styles.upNextRow}>
+                    <Image source={next.thumbSource} style={styles.upNextThumb} contentFit="cover" />
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.upNextTitle} numberOfLines={2}>
+                        {next.title || next.filename}
+                      </Text>
+                      <Text style={styles.upNextSub}>{fmtDuration(next.durationMs) ?? ''}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.upNextBar}>
+                    <Animated.View key={upNextLeft} entering={FadeIn} style={[styles.upNextFill, { width: `${((5 - upNextLeft) / 5) * 100}%` }]} />
+                  </View>
+                  <View style={styles.upNextButtons}>
+                    <TouchableOpacity style={styles.upNextGhost} onPress={() => setUpNextLeft(null)}>
+                      <Text style={styles.upNextGhostText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.upNextPlay} onPress={() => goNext(1)}>
+                      <Icon name="play" size={14} color="#000" />
+                      <Text style={styles.upNextPlayText}>Play now</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.endButtons}>
+                  <TouchableOpacity style={styles.endBtn} onPress={replay} accessibilityLabel="Replay">
+                    <Icon name="rewatch" size={22} color="#fff" />
+                    <Text style={styles.endBtnText}>Replay</Text>
+                  </TouchableOpacity>
+                  {next && (
+                    <TouchableOpacity style={styles.endBtn} onPress={() => goNext(1)} accessibilityLabel="Next video">
+                      <Icon name="nextVideo" size={22} color="#fff" />
+                      <Text style={styles.endBtnText}>Next</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+            </Animated.View>
+          )}
+          {/* ── scrubbing: the frame under your finger ── */}
+          {scrubAt !== null && frames.length > 0 && (
+            <Animated.View entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.fast)} style={styles.preview} pointerEvents="none">
+              <Image source={frames[Math.min(frames.length - 1, Math.floor(scrubAt * frames.length))]} style={styles.previewImg} contentFit="cover" />
+              <Text style={styles.previewTime}>
+                {fmtClock(scrubAt * totalSec * 1000)} / {fmtClock(totalSec * 1000)}
+              </Text>
+            </Animated.View>
+          )}
+          {!!toast && (
+            <Animated.View key={toast} entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.base)} style={[styles.fastPill, { top: insets.top + 60 }]} pointerEvents="none">
+              <Text style={styles.fastText}>{toast}</Text>
+            </Animated.View>
+          )}
+          {locked && (lockHint || !chrome) && (
+            <Animated.View entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.base)} style={[styles.lockWrap, { top: insets.top + 14 }]} pointerEvents="box-none">
+              <TouchableOpacity
+                style={[styles.lockBtn, !lockHint && { opacity: 0.35 }]}
+                onPress={() => {
+                  success();
+                  setLocked(false);
+                  setLockHint(false);
+                  setChrome(true);
+                }}
+                accessibilityLabel="Unlock the screen">
+                <Icon name="unlock" size={15} color="#fff" />
+                <Text style={styles.lockText}>{lockHint ? 'Tap to unlock' : 'Locked'}</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
           {fast && (
             <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.fastPill, { top: insets.top + 60 }]} pointerEvents="none">
               <Icon name="fast" size={13} color="#fff" />
@@ -636,12 +888,12 @@ function ViewerPage({
           )}
         </Animated.View>
 
-        {chrome && (
+        {chrome && !locked && (
           <>
             {/* ── header (over the video, with a soft shade so the buttons always show) ── */}
             <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.headerWrap, chromeFade]} pointerEvents="box-none">
               <Fade color="0,0,0" from={0} to={0.55} reverse style={[fill, { bottom: -30 }]} />
-              <View style={[styles.header, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+              <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: insets.left + 8, paddingRight: insets.right + 8 }]} pointerEvents="box-none">
                 <IconButton icon="back" label="Back" clear color="#fff" onPress={onDismiss} size={38} />
 
                 <View style={styles.titleWrap} pointerEvents="none">
@@ -657,7 +909,32 @@ function ViewerPage({
                       <AirPlayButton style={{ width: 26, height: 26 }} tint="#ffffff" activeTint={p.accent} />
                     </View>
                   )}
-                  <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
+                  {landscape && (
+                    <IconButton
+                      icon="lock"
+                      label="Lock the screen"
+                      clear
+                      color="#fff"
+                      size={38}
+                      onPress={() => {
+                        success();
+                        setLocked(true);
+                        setChrome(false);
+                        setLockHint(true);
+                      }}
+                    />
+                  )}
+                  <IconButton
+                    icon={landscape ? 'exitFullScreen' : 'fullScreen'}
+                    label={landscape ? 'Exit full screen' : 'Full screen'}
+                    clear
+                    color="#fff"
+                    size={38}
+                    onPress={toggleFullScreen}
+                  />
+                  {!landscape && (
+                    <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
+                  )}
                   <IconButton icon="more" label="More" clear color="#fff" size={38} onPress={() => setMenuOpen(true)} />
                 </View>
               </View>
@@ -677,7 +954,7 @@ function ViewerPage({
             <Animated.View
               entering={reduce ? fadeIn : SlideInDown.duration(DUR.base).easing(EASE_OUT)}
               exiting={reduce ? FadeOut.duration(DUR.fast) : SlideOutDown.duration(DUR.fast)}
-              style={[styles.bottom, chromeFade]}>
+              style={[styles.bottom, chromeFade, landscape && { paddingLeft: insets.left + 12, paddingRight: insets.right + 12, paddingBottom: insets.bottom + 10 }]}>
               {!!note && (
                 <TouchableOpacity onPress={() => setNote('')}>
                   <Text style={styles.note}>{note}</Text>
@@ -698,9 +975,17 @@ function ViewerPage({
                   onMove={scrubMove}
                   onEnd={scrubEnd}
                 />
-                <Text style={styles.scrubTime}>
-                  {fmtDuration(elapsed * 1000) ?? '0:00'} / {fmtDuration(totalSec * 1000) ?? '--:--'}
-                </Text>
+                <TouchableOpacity onPress={() => setOpt({ remaining: !opts.remaining })} hitSlop={6} accessibilityLabel="Show the time left or the length">
+                  <Text style={styles.scrubTime}>
+                    {fmtDuration(elapsed * 1000) ?? '0:00'} / {opts.remaining ? `−${fmtDuration(Math.max(0, totalSec - elapsed) * 1000) ?? '0:00'}` : (fmtDuration(totalSec * 1000) ?? '--:--')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={cycleSpeed} hitSlop={6} style={[styles.speedPill, opts.speed !== 1 && styles.speedPillOn]} accessibilityLabel={`Playback speed ${opts.speed}×`}>
+                  <Text style={[styles.speedText, opts.speed !== 1 && styles.speedTextOn]}>{opts.speed}×</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={toggleLoop} hitSlop={6} accessibilityLabel={opts.loop ? 'Loop on' : 'Loop off'}>
+                  <Icon name="repeatOne" size={16} color={opts.loop ? p.accent : p.textSecondary} />
+                </TouchableOpacity>
                 <TouchableOpacity onPress={addMark} hitSlop={8} accessibilityLabel="Bookmark this moment">
                   <Icon name="bookmarkAdd" size={17} color={p.text} />
                 </TouchableOpacity>
@@ -729,7 +1014,62 @@ function ViewerPage({
                 </View>
               )}
 
-              {marks.length > 0 && (
+              {/* Quick controls: previous / next video, picture in picture, fill, glow. */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickRow}>
+                <TouchableOpacity style={styles.quick} onPress={() => goNext(-1)} disabled={!prev} accessibilityLabel="Previous video">
+                  <Icon name="prevVideo" size={15} color={prev ? p.text : p.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.quick} onPress={() => goNext(1)} disabled={!next} accessibilityLabel="Next video">
+                  <Icon name="nextVideo" size={15} color={next ? p.text : p.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.quick, opts.autoplayNext && styles.quickOn]}
+                  onPress={() => {
+                    tick();
+                    setOpt({ autoplayNext: !opts.autoplayNext });
+                    setToast(opts.autoplayNext ? 'Stops at the end' : 'Plays the next one at the end');
+                  }}
+                  accessibilityLabel="Play the next video automatically">
+                  <Text style={[styles.quickText, opts.autoplayNext && styles.quickTextOn]}>Autoplay</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.quick, fillScreen && styles.quickOn]}
+                  onPress={() => {
+                    tick();
+                    setFillScreen(!fillScreen);
+                  }}
+                  accessibilityLabel="Fill the screen">
+                  <Icon name="fill" size={15} color={fillScreen ? p.accent : p.text} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.quick, opts.ambient && styles.quickOn]}
+                  onPress={() => {
+                    tick();
+                    setOpt({ ambient: !opts.ambient });
+                  }}
+                  accessibilityLabel="Ambient glow">
+                  <Icon name="glow" size={15} color={opts.ambient ? p.accent : p.text} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.quick}
+                  onPress={() => {
+                    tick();
+                    if (player.playing) player.pause();
+                    setCoverOpen(true);
+                  }}
+                  accessibilityLabel="Choose the cover (thumbnail)">
+                  <Icon name="frame" size={14} color={p.text} />
+                  <Text style={styles.quickText}>Cover</Text>
+                </TouchableOpacity>
+                {enableVideo && (
+                  <TouchableOpacity style={styles.quick} onPress={startPip} accessibilityLabel="Picture in picture">
+                    <Icon name="pip" size={15} color={p.text} />
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+
+              {/* Sideways, only the playback bar: the rest is in the upright view. */}
+              {!landscape && marks.length > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.markRow}>
                   {marks.map((m) => (
                     <TouchableOpacity
@@ -747,6 +1087,8 @@ function ViewerPage({
                 </ScrollView>
               )}
 
+              {!landscape && (
+              <>
               <ScrollView ref={stripRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
                 {frames.map((src, i) => (
                   <TouchableOpacity key={i} onPress={() => seek((i + 0.5) / frames.length)}>
@@ -799,6 +1141,8 @@ function ViewerPage({
                   <Icon name="trash" size={18} color={p.dangerText} />
                 </TouchableOpacity>
               </View>
+                </>
+              )}
             </Animated.View>
           </>
         )}
@@ -1013,6 +1357,72 @@ function ViewerPage({
                   onPress={() => {
                     setMenuOpen(false);
                     setInfoOpen(true);
+                  }}
+                />
+                {!item.isPrivate && (
+                  <MenuRow
+                    label={(prefs.pinned ?? []).includes(item.id) ? 'Unpin from the Top' : 'Pin to the Top'}
+                    hint={(prefs.pinned ?? []).includes(item.id) ? 'Pinned' : 'Library shelf'}
+                    onPress={() => {
+                      setMenuOpen(false);
+                      const on = (prefs.pinned ?? []).includes(item.id);
+                      success();
+                      onPrefs?.({ ...prefs, player: opts, pinned: on ? prefs.pinned.filter((x) => x !== item.id) : [item.id, ...(prefs.pinned ?? [])].slice(0, 60) });
+                      setToast(on ? 'Unpinned' : 'Pinned to the top of the library');
+                    }}
+                  />
+                )}
+                <MenuRow
+                  label="Playback Speed"
+                  hint={`${opts.speed}×`}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    cycleSpeed();
+                  }}
+                />
+                <MenuRow
+                  label="Loop This Video"
+                  hint={opts.loop ? 'On' : 'Off'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    toggleLoop();
+                  }}
+                />
+                <MenuRow
+                  label="Play Next Automatically"
+                  hint={opts.autoplayNext ? 'On' : 'Off'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setOpt({ autoplayNext: !opts.autoplayNext });
+                  }}
+                />
+                <MenuRow
+                  label="Keep Playing in the Background"
+                  hint={opts.background ? 'On' : 'Off'}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setOpt({ background: !opts.background });
+                    setToast(opts.background ? 'Stops when you leave the app' : 'Keeps playing when you leave the app');
+                  }}
+                />
+                {enableVideo && (
+                  <MenuRow
+                    label="Picture in Picture"
+                    hint=""
+                    onPress={() => {
+                      setMenuOpen(false);
+                      startPip();
+                    }}
+                  />
+                )}
+                <MenuRow
+                  label="Lock the Screen"
+                  hint="Ignores touches"
+                  onPress={() => {
+                    setMenuOpen(false);
+                    setLocked(true);
+                    setChrome(false);
+                    setLockHint(true);
                   }}
                 />
                 <MenuRow
@@ -1318,6 +1728,8 @@ type ViewerProps = {
   /** A saved "continue another time" point (ms), if there is one. */
   resumeAt?: number | null;
   prefs?: VaultPrefs;
+  /** Save changed settings (the player's speed, loop, Up Next…). */
+  onPrefs?: (p: VaultPrefs) => void;
   onClose: () => void;
 };
 
@@ -1362,6 +1774,12 @@ export default function ViewerModal({
     [next, prev, onChangeItem] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // The viewer turns with the phone; everywhere else stays upright.
+  useEffect(() => {
+    allowRotation();
+    return lockUpright;
+  }, []);
+
   const dismiss = useCallback(() => {
     out.value = withTiming(1, { duration: reduce ? DUR.fast : DUR.base, easing: EASE_OUT }, (done) => {
       if (done) scheduleOnRN(onClose);
@@ -1371,7 +1789,7 @@ export default function ViewerModal({
   const shell = useAnimatedStyle(() => ({ opacity: 1 - out.value, transform: [{ scale: 1 - out.value * 0.06 }] }));
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={dismiss} statusBarTranslucent>
+    <Modal visible transparent animationType="none" onRequestClose={dismiss} statusBarTranslucent supportedOrientations={['portrait', 'landscape']}>
       <GestureHandlerRootView style={StyleSheet.absoluteFill}>
         <Animated.View entering={reduce ? fadeIn : zoomIn} style={[StyleSheet.absoluteFill, shell]}>
           <ViewerPage key={item.id} {...props} stage={{ tx, ty, dx }} prev={prev} next={next} onStep={step} onDismiss={dismiss} />
@@ -1421,6 +1839,41 @@ const makeStyles = (p: Palette) =>
     stageTouch: { flex: 1 },
     video: { width: '100%', height: '100%' },
     neighbour: { position: 'absolute', top: 0, bottom: 0 },
+    centre: { position: 'absolute', left: 0, right: 0, top: '50%', marginTop: -36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 34 },
+    centreBig: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(0,0,0,0.42)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+    centreSmall: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.32)', alignItems: 'center', justifyContent: 'center' },
+    endWrap: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+    endButtons: { flexDirection: 'row', gap: 28 },
+    endBtn: { alignItems: 'center', gap: 6, width: 86, paddingVertical: 14, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)' },
+    endBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    upNext: { width: '100%', maxWidth: 380, gap: 10, padding: 14, borderRadius: 22, backgroundColor: 'rgba(18,18,22,0.88)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+    upNextKicker: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    upNextRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    upNextThumb: { width: 112, height: 64, borderRadius: 10, backgroundColor: '#222' },
+    upNextTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    upNextSub: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '600' },
+    upNextBar: { height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
+    upNextFill: { height: 3, backgroundColor: '#fff' },
+    upNextButtons: { flexDirection: 'row', gap: 10 },
+    upNextGhost: { flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.12)' },
+    upNextGhostText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+    upNextPlay: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 999, backgroundColor: '#fff' },
+    upNextPlayText: { color: '#000', fontSize: 14, fontWeight: '900' },
+    preview: { position: 'absolute', alignSelf: 'center', bottom: 24, alignItems: 'center', gap: 6 },
+    previewImg: { width: 176, height: 100, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: '#111' },
+    previewTime: { color: '#fff', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'], backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
+    lockWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+    lockBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 },
+    lockText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+    speedPill: { borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: p.border },
+    speedPillOn: { backgroundColor: p.accent, borderColor: p.accent },
+    speedText: { color: p.textSecondary, fontSize: 12, fontWeight: '900', fontVariant: ['tabular-nums'] },
+    speedTextOn: { color: '#fff' },
+    quickRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingBottom: 6 },
+    quick: { height: 30, minWidth: 38, paddingHorizontal: 10, borderRadius: 999, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 },
+    quickOn: { backgroundColor: `${p.accent}2E` },
+    quickText: { color: p.text, fontSize: 12, fontWeight: '800' },
+    quickTextOn: { color: p.accent },
     headerWrap: { position: 'absolute', top: 0, left: 0, right: 0, paddingBottom: 6 },
     skipPill: {
       position: 'absolute',

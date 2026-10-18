@@ -39,6 +39,7 @@ import type { IconName } from './icons';
 import { Bars, Card, gradient, Ring, StatTile } from './insightParts';
 import { DUR, enterUp, PressableScale, SPRING } from './motion';
 import { MemoriesTab, MemoryPlayer } from './MemoriesUI';
+import { settleFreezes } from '../streakFreeze';
 import { Aurora, CountUp, GrowBar } from './storyKit';
 import { toOvVideo } from './overviewParts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
@@ -113,6 +114,7 @@ export default function VideoInsightsModal({
   initialMemory,
   initialMemoryKind,
   initialYear,
+  initialMonth,
   initialHistoryStats,
   onOpenVideo,
   onMakeSmaller,
@@ -144,6 +146,8 @@ export default function VideoInsightsModal({
   initialMemoryKind?: 'onThisDay';
   /** Open this year's Wrapped (the 1 December notification). */
   initialYear?: boolean;
+  /** Open last month's Wrapped (the monthly notification was tapped). */
+  initialMonth?: boolean;
   /** Open History on Stats (the browser preview). */
   initialHistoryStats?: boolean;
   onOpenVideo: (id: string) => void;
@@ -157,6 +161,13 @@ export default function VideoInsightsModal({
   const p = usePalette();
   const [tab, setTab] = useState<InsightsTab>(initialTab);
   const [plays, setPlays] = useState<VaultPlay[] | null>(null);
+  // Streak freezes: earned for good weeks, spent on a missed day (settled once the plays are in).
+  useEffect(() => {
+    if (!plays) return;
+    const known = new Set(items.map((v) => v.id));
+    const next = settleFreezes(plays.filter((x) => known.has(x.videoId)).map((x) => x.startedAt), prefsRef.current.freezes, Date.now());
+    if (next !== prefsRef.current.freezes) savePrefs({ freezes: next });
+  }, [plays]); // eslint-disable-line react-hooks/exhaustive-deps
   const [bookmarks, setBookmarks] = useState(0);
   const [sk, setSk] = useState<SimklNumbers | null>(null);
   const [story, setStory] = useState<StoryInput | null>(null);
@@ -316,7 +327,9 @@ export default function VideoInsightsModal({
       const [, last] = recentWeeks(Date.now(), 2);
       // The browser preview can ask for the year instead (`&range=year`).
       const year = initialYear || (Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('range') === 'year');
-      openStory(year ? yearRange(new Date().getFullYear(), Date.now()) : last, sk ? 'everything' : 'videos');
+      const n = new Date();
+      const lastMonth = { start: new Date(n.getFullYear(), n.getMonth() - 1, 1).getTime(), end: new Date(n.getFullYear(), n.getMonth(), 1).getTime(), label: new Date(n.getFullYear(), n.getMonth() - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) };
+      openStory(year ? yearRange(new Date().getFullYear(), Date.now()) : initialMonth ? lastMonth : last, sk ? 'everything' : 'videos');
     }
   }, [initialWrapped, plays]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -348,6 +361,7 @@ export default function VideoInsightsModal({
             <Animated.View entering={FadeIn.duration(DUR.fast)} style={{ gap: 14 }}>
               {tab === 'dashboard' && (
                 <Dashboard
+                  freezes={prefs.freezes}
                   items={items}
                   plays={plays}
                   labels={ratingLabels}
@@ -362,6 +376,7 @@ export default function VideoInsightsModal({
               )}
               {tab === 'history' && (
                 <HistoryTab
+                  frozenDays={prefs.freezes.used}
                   items={items}
                   plays={plays}
                   thumbs={thumbs}
@@ -430,6 +445,7 @@ export default function VideoInsightsModal({
       </View>
       {memory && (
         <MemoryPlayer
+          key={memory.id}
           memory={memory}
           items={byId}
           thumbs={thumbs}
@@ -444,6 +460,12 @@ export default function VideoInsightsModal({
             setMemory(null);
             onOpenVideo(id);
           }}
+          next={(() => {
+            const shown = memoryList.filter((m) => !prefs.memoryHidden.includes(m.id) && m.kind !== 'custom');
+            const at = shown.findIndex((m) => m.id === memory.id);
+            return shown.length > 1 ? shown[(at + 1) % shown.length] : null;
+          })()}
+          onNext={(m) => openMemory(m)}
           onClose={() => setMemory(null)}
         />
       )}

@@ -23,6 +23,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
+import { Backdrop } from './frame';
 import { gradient } from './insightParts';
 import { EASE_IN_OUT, EASE_OUT, useReducedMotion } from './motion';
 import type { ThumbSource } from './types';
@@ -314,8 +315,11 @@ export function Letterbox({ on, size = 64 }: { on: boolean; size?: number }) {
   );
 }
 
-/** A slow Ken Burns move over a still: zoom in or out, drifting a little. */
-export function KenBurns({ source, ms, seed = 0, style }: { source: ThumbSource | undefined; ms: number; seed?: number; style?: StyleProp<ViewStyle> }) {
+/**
+ * A slow Ken Burns move over a still: zoom in or out, drifting a little. The
+ * whole picture shows (over a blurred copy of itself) unless `fill` is set.
+ */
+export function KenBurns({ source, ms, seed = 0, style, fill = false }: { source: ThumbSource | undefined; ms: number; seed?: number; style?: StyleProp<ViewStyle>; fill?: boolean }) {
   const reduce = useReducedMotion();
   const k = useSharedValue(0);
   const dir = useMemo(() => ({ zoomIn: rand(seed) > 0.4, dx: (rand(seed + 1) - 0.5) * 40, dy: (rand(seed + 2) - 0.5) * 30 }), [seed]);
@@ -323,14 +327,20 @@ export function KenBurns({ source, ms, seed = 0, style }: { source: ThumbSource 
     k.value = 0;
     if (!reduce) k.value = withTiming(1, { duration: ms, easing: Easing.linear });
   }, [source, ms, reduce]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Framed, the move is gentler: the picture is whole, so it only breathes a little.
+  const amount = fill ? 0.14 : 0.06;
   const anim = useAnimatedStyle(() => {
-    const s = dir.zoomIn ? 1.04 + k.value * 0.14 : 1.18 - k.value * 0.14;
-    return { transform: [{ scale: s }, { translateX: dir.dx * k.value }, { translateY: dir.dy * k.value }] };
+    const s = dir.zoomIn ? 1 + k.value * amount : 1 + amount - k.value * amount;
+    const drift = fill ? 1 : 0.3;
+    return { transform: [{ scale: s }, { translateX: dir.dx * drift * k.value }, { translateY: dir.dy * drift * k.value }] };
   });
   if (!source) return null;
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, anim, style]}>
-      <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />
-    </Animated.View>
+    <View style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, style]} pointerEvents="none">
+      {!fill && <Backdrop source={source} />}
+      <Animated.View style={[StyleSheet.absoluteFill, anim]}>
+        <Image source={source} style={StyleSheet.absoluteFill} contentFit={fill ? 'cover' : 'contain'} />
+      </Animated.View>
+    </View>
   );
 }

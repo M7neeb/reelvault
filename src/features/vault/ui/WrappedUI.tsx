@@ -6,7 +6,10 @@
  * card (with sound; the speaker button mutes it): a montage to open, a top
  * five counted down to your #1, your comfort video, your biggest day, a
  * throwback, a hidden gem, your taste, your habits, the badges you earned and
- * who that makes you. Each card moves on by itself; hold to pause, tap right
+ * who that makes you, the age of what you watched and the club you belong
+ * to. The video is the star: cards with a video show it whole, with the words
+ * at the bottom and the name of what is playing at the top (tap it to watch
+ * it). Each card moves on by itself; hold to pause, tap right
  * for the next card and left to go back, drag down to close. The last card
  * sums it up and can be shared.
  * Presentational only.
@@ -30,7 +33,9 @@ import type { Memory } from '../memories';
 import { highlightAt, monthRanges, storyFacts, yearRange, type RRange, type StoryFacts } from '../recap';
 import { fmtBytes, fmtDay, fmtMs, presetRange, recentWeeks, wrapped as buildWrapped, type Range, type VaultPlay, type Wrapped } from '../stats';
 import { friendlyName } from '../names';
+import { CLUBS, clubOf, rewatchMeter, videoAge } from '../wrappedExtras';
 import Fade from './Fade';
+import { aspectOf, Backdrop, fitFor } from './frame';
 import { success, tick, warn } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
@@ -94,6 +99,7 @@ export function WrappedPicker({
   const [thisWeek, ...past] = weeks;
   const top = (w: Wrapped) => (w.videos.topVideos[0] ? thumbs.get(w.videos.topVideos[0].key) : undefined);
   const yearTop = yearW.videos.topVideos[0] ? items.find((v) => v.id === yearW.videos.topVideos[0].key) : undefined;
+  const weekTop = thisWeek.w.videos.topVideos[0] ? items.find((v) => v.id === thisWeek.w.videos.topVideos[0].key) : undefined;
   const maxMonth = Math.max(1, ...months.map((m) => m.w.totalMinutes));
 
   /** 7 little bars, one per day, for a week card. */
@@ -137,8 +143,10 @@ export function WrappedPicker({
             priority={2}
             style={StyleSheet.absoluteFill}
             soundStyle={{ top: 74, right: 18 }}
+            video={yearTop}
           />
-          <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient('linear-gradient(160deg, rgba(255,55,95,0.62) 0%, rgba(94,92,230,0.72) 50%, rgba(16,8,48,0.95) 100%)')]} />
+          {/* Light at the top so the video shows; dark at the bottom for the numbers. */}
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(255,55,95,0.28) 0%, rgba(94,92,230,0.12) 38%, rgba(30,14,80,0.72) 68%, rgba(12,6,36,0.96) 100%)', 'rgba(30,14,80,0.45)')]} />
           <View style={[styles.yearTicker, { top: '38%' }]}>
             <Marquee ms={16000}>
               <Text style={styles.yearTickerText}>{year.label} WRAPPED · </Text>
@@ -179,9 +187,19 @@ export function WrappedPicker({
 
       {/* ── this week ────────────────────────────────────────── */}
       <Animated.View entering={enterUp(2)}>
-        <PressableScale onPress={() => open(thisWeek.r)} style={styles.heroCard} accessibilityLabel="Play this week's Wrapped">
-          {top(thisWeek.w) ? <Image source={top(thisWeek.w)} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={18} /> : null}
-          <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(150deg, rgba(94,92,230,0.92) 0%, rgba(191,90,242,0.8) 55%, rgba(255,55,95,0.78) 100%)')]} />
+        <PressableScale onPress={() => open(thisWeek.r)} style={[styles.heroCard, { minHeight: 210 }]} accessibilityLabel="Play this week's Wrapped">
+          <LiveCard
+            id="wrapped-week"
+            uri={weekTop?.uri}
+            durationMs={weekTop?.durationMs}
+            cover={top(thisWeek.w)}
+            radius={0}
+            priority={1}
+            style={StyleSheet.absoluteFill}
+            soundStyle={{ top: 60, right: 16 }}
+            video={weekTop}
+          />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(94,92,230,0.35) 0%, rgba(191,90,242,0.1) 40%, rgba(120,30,90,0.75) 75%, rgba(40,8,40,0.95) 100%)', 'rgba(94,92,230,0.5)')]} />
           <View style={styles.heroTop}>
             <Text style={styles.heroKicker}>THIS WEEK · {fmtDay(thisWeek.r.start).toUpperCase()} – {fmtDay(thisWeek.r.end - 1).toUpperCase()}</Text>
             <View style={styles.heroPlaySmall}>
@@ -209,7 +227,7 @@ export function WrappedPicker({
             <Animated.View key={r.start} entering={enterUp(4 + i)}>
               <PressableScale style={styles.month} onPress={() => open(r)} accessibilityLabel={`${r.label} Wrapped`}>
                 {t ? <Image source={t} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
-                <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, hsla(${(330 + i * 29) % 360},70%,45%,0.55) 0%, hsla(${(330 + i * 29) % 360},60%,18%,0.95) 100%)`, `hsl(${(330 + i * 29) % 360},55%,28%)`)]} />
+                <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, hsla(${(330 + i * 29) % 360},70%,45%,${t ? 0.15 : 0.7}) 0%, hsla(${(330 + i * 29) % 360},60%,18%,0.95) 100%)`, `hsl(${(330 + i * 29) % 360},55%,28%)`)]} />
                 <Text style={styles.monthName}>{new Date(r.start).toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</Text>
                 <Text style={styles.monthValue}>{minutesText(w.totalMinutes)}</Text>
                 <Text style={styles.weekSub}>
@@ -232,8 +250,8 @@ export function WrappedPicker({
           return (
             <Animated.View key={r.start} entering={enterUp(6 + i)}>
               <PressableScale style={styles.week} onPress={() => open(r)} accessibilityLabel={`${r.label} Wrapped`}>
-                {t ? <Image source={t} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={14} /> : null}
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: `hsla(${(255 + i * 31) % 360}, 55%, 30%, ${t ? 0.82 : 1})` }]} />
+                {t ? <Image source={t} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
+                <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(180deg, hsla(${(255 + i * 31) % 360},55%,30%,${t ? 0.55 : 1}) 0%, hsla(${(255 + i * 31) % 360},55%,14%,0.96) 100%)`, `hsl(${(255 + i * 31) % 360},55%,26%)`)]} />
                 {spark(r)}
                 <Text style={styles.weekLabel}>{r.label}</Text>
                 <Text style={styles.weekValue}>{minutesText(w.totalMinutes)}</Text>
@@ -357,6 +375,8 @@ type StoryCard = {
   backdrop?: ReactNode;
   /** Has buttons: only the far edges of the screen move to another card. */
   interactive?: boolean;
+  /** 'words' cards carry their own pictures (lists, grids): the video behind them stays dim. */
+  focus?: 'words';
 };
 
 export type StoryInput = {
@@ -381,6 +401,7 @@ function StoryMedia({
   enableVideo,
   muted,
   paused,
+  onCurrent,
 }: {
   card: StoryCard;
   items: Map<string, VaultItem>;
@@ -388,6 +409,8 @@ function StoryMedia({
   enableVideo: boolean;
   muted: boolean;
   paused: boolean;
+  /** The video playing now (for the label at the top). */
+  onCurrent?: (id: string | null) => void;
 }) {
   const reduce = useReducedMotion();
   const player = useVideoPlayer(null, (pl) => {
@@ -400,6 +423,7 @@ function StoryMedia({
   const item = current ? items.get(current) : undefined;
 
   useEffect(() => setClip(0), [card.key]);
+  useEffect(() => onCurrent?.(current), [current]); // eslint-disable-line react-hooks/exhaustive-deps
   // A montage changes clip every 2.6 s.
   useEffect(() => {
     if (ids.length < 2 || paused) return;
@@ -450,17 +474,25 @@ function StoryMedia({
   const zoom = useSharedValue(1);
   useEffect(() => {
     zoom.value = 1;
-    if (!reduce) zoom.value = withTiming(1.14, { duration: card.ms, easing: EASE_OUT });
+    if (!reduce) zoom.value = withTiming(1.06, { duration: card.ms, easing: EASE_OUT });
   }, [card.key, current]); // eslint-disable-line react-hooks/exhaustive-deps
   const zoomStyle = useAnimatedStyle(() => ({ transform: [{ scale: zoom.value }] }));
+  const { width: sw, height: sh } = useWindowDimensions();
+  const fit = fitFor(aspectOf(item), sw / sh);
 
   return (
     <View style={[StyleSheet.absoluteFill, !item && { opacity: 0 }]} pointerEvents="none">
+      {/* The whole video shows, over a blurred copy of itself where it doesn't fill the screen. */}
+      {item && (
+        <Animated.View key={`b${current}`} entering={FadeIn.duration(DUR.slow)} exiting={FadeOut.duration(DUR.base)} style={StyleSheet.absoluteFill}>
+          <Backdrop source={item.thumbSource} dim={0.15} />
+        </Animated.View>
+      )}
       {enableVideo ? (
-        <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+        <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
       ) : item ? (
         <Animated.View key={current} entering={FadeIn.duration(DUR.slow)} exiting={FadeOut.duration(DUR.base)} style={[StyleSheet.absoluteFill, zoomStyle]}>
-          <Image source={item.thumbSource} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <Image source={item.thumbSource} style={StyleSheet.absoluteFill} contentFit={fit} />
         </Animated.View>
       ) : null}
     </View>
@@ -761,6 +793,7 @@ export function WrappedStory({
       if (f.range.start % 2) opts.reverse();
       out.push({
         key: 'quiz',
+        focus: 'words',
         colors: ['#FF375F', '#30051A'],
         media: [],
         ms: 20000,
@@ -815,6 +848,7 @@ export function WrappedStory({
       if (top.length >= 3)
         out.push({
           key: 'top5',
+        focus: 'words',
           colors: ['#FF9F0A', '#2E1200'],
           media: top.map((y) => y.id),
           ms: 9000,
@@ -847,6 +881,7 @@ export function WrappedStory({
     if (sprint.length >= 3) {
       out.push({
         key: 'sprint',
+        focus: 'words',
         colors: ['#30D158', '#022814'],
         media: [...new Set(sprint.map((x) => x.videoId!))].slice(0, 6),
         ms: 9500,
@@ -1094,6 +1129,7 @@ export function WrappedStory({
     if (earned.length) {
       out.push({
         key: 'badges',
+        focus: 'words',
         colors: ['#FFD60A', '#3A2600'],
         media: [],
         ms: 7500,
@@ -1177,6 +1213,112 @@ export function WrappedStory({
       });
     }
 
+    // 18b · the age of what you watched
+    const age = videoAge(
+      top.map((x) => ({ ms: x.ms, createdAt: items.get(x.id)?.createdAt })),
+      Math.min(Date.now(), f.range.end)
+    );
+    if (age && top.length >= 2) {
+      const byAge = [...top].filter((x) => items.get(x.id)).sort((a, b) => items.get(a.id)!.createdAt - items.get(b.id)!.createdAt);
+      out.push({
+        key: 'age',
+        colors: ['#AC8E68', '#1A1108'],
+        media: byAge.slice(0, 3).map((x) => x.id),
+        ms: 8000,
+        body: (
+          <>
+            {kicker('YOUR VIDEO AGE', 0)}
+            {big(age.years < 1 ? `${Math.max(1, Math.round(age.years * 12))} months` : `${age.years} years`, 1)}
+            {line(`${age.label}. ${age.blurb}`, 2)}
+            <Animated.View entering={t(3)} style={styles.sAgeRow}>
+              {byAge.slice(0, 5).map((x) => (
+                <View key={x.id} style={styles.sAgeCell}>
+                  <View style={styles.sAgeThumb}>
+                    <Image source={thumbs.get(x.id)} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  </View>
+                  <Text style={styles.sAgeYear}>{new Date(items.get(x.id)!.createdAt).getFullYear()}</Text>
+                </View>
+              ))}
+            </Animated.View>
+          </>
+        ),
+      });
+    }
+
+    // 18c · the rewatch meter
+    const meter = rewatchMeter(f.plays, f.videos);
+    if (meter) {
+      const filled = Math.min(10, Math.round(meter.perVideo * 2));
+      out.push({
+        key: 'rewatch',
+        colors: ['#FF375F', '#1F0410'],
+        media: f.comfort ? [f.comfort.id] : top[0] ? [top[0].id] : [],
+        ms: 6500,
+        body: (
+          <>
+            {kicker('THE REWATCH METER', 0)}
+            {big(`${meter.perVideo}× each`, 1)}
+            <Animated.View entering={t(2)} style={styles.sMeter}>
+              {Array.from({ length: 10 }, (_, n) => (
+                <Animated.View
+                  key={n}
+                  entering={reduce ? undefined : ZoomIn.delay(400 + n * 70)}
+                  style={[styles.sMeterCell, n < filled && { backgroundColor: n >= 7 ? '#FFD60A' : '#fff' }]}
+                />
+              ))}
+            </Animated.View>
+            {line(`${meter.label}. ${f.plays} plays of ${f.videos} ${f.videos === 1 ? 'video' : 'videos'}.`, 3)}
+          </>
+        ),
+      });
+    }
+
+    // 18d · your club
+    const club = clubOf({
+      plays: f.plays,
+      firsts: f.firsts,
+      returns: f.returns,
+      dayparts: f.dayparts,
+      completion: f.completion,
+      longestMs: f.longest?.ms ?? null,
+      biggestDayMs: f.biggestDay?.ms ?? null,
+    });
+    if (club) {
+      out.push({
+        key: 'club',
+        colors: [club.club.color, '#07060F'],
+        media: [],
+        ms: 9000,
+        focus: 'words',
+        body: (
+          <>
+            {kicker('YOU’RE IN THE', 0)}
+            {big(club.club.name, 1)}
+            {line(club.club.blurb, 2)}
+            <View style={styles.sClubs}>
+              {CLUBS.map((c, n) => {
+                const mine = c.key === club.club.key;
+                return (
+                  <Animated.View
+                    key={c.key}
+                    entering={reduce ? FadeIn : ZoomIn.delay(350 + n * 90)}
+                    style={[styles.sClub, mine && { backgroundColor: hexA(c.color, 0.85), borderColor: '#fff' }]}>
+                    <Icon name={iconOr(c.icon)} size={16} color="#fff" />
+                    <Text style={styles.sClubName} numberOfLines={1}>
+                      {c.name}
+                    </Text>
+                    <View style={styles.sClubTrack}>
+                      <View style={[styles.sClubFill, { width: `${Math.round(club.fit[c.key] * 100)}%`, backgroundColor: mine ? '#fff' : hexA(c.color, 0.9) }]} />
+                    </View>
+                  </Animated.View>
+                );
+              })}
+            </View>
+          </>
+        ),
+      });
+    }
+
     // 19 · persona
     out.push({
       key: 'persona',
@@ -1208,6 +1350,7 @@ export function WrappedStory({
     // 20 · summary
     out.push({
       key: 'summary',
+        focus: 'words',
       colors: ['#2C1A4D', '#000000'],
       media: [],
       ms: 14000,
@@ -1371,6 +1514,10 @@ export function WrappedStory({
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }, { scale: 1 - Math.min(0.1, ty.value / 3000) }], borderRadius: Math.min(30, ty.value / 4) }));
 
   const hasMedia = card.media.some((id) => items.has(id));
+  // A card with a video shows it: light scrims only, the words at the bottom.
+  const videoFirst = hasMedia && card.focus !== 'words';
+  const [nowId, setNowId] = useState<string | null>(null);
+  const nowItem = nowId ? items.get(nowId) : undefined;
   return (
     <Modal visible animationType="fade" transparent onRequestClose={onClose} statusBarTranslucent>
       <GestureHandlerRootView style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
@@ -1379,16 +1526,43 @@ export function WrappedStory({
             <Animated.View key={`bg${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill}>
               <Aurora colors={card.colors} width={width} height={height} />
             </Animated.View>
-            <StoryMedia card={card} items={items} starts={starts} enableVideo={enableVideo} muted={muted} paused={paused} />
-            {hasMedia && (
-              <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(170deg, ${hexA(card.colors[0], 0.45)} 0%, ${hexA(card.colors[1], 0.72)} 55%, rgba(0,0,0,0.88) 100%)`, hexA(card.colors[1], 0.6))]} />
+            <StoryMedia card={card} items={items} starts={starts} enableVideo={enableVideo} muted={muted} paused={paused} onCurrent={setNowId} />
+            {videoFirst && (
+              <View
+                pointerEvents="none"
+                style={[
+                  StyleSheet.absoluteFill,
+                  gradient(
+                    `linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 18%, ${hexA(card.colors[0], 0.06)} 42%, ${hexA(card.colors[1], 0.78)} 72%, ${hexA(card.colors[1], 0.96)} 100%)`,
+                    'rgba(0,0,0,0.25)'
+                  ),
+                ]}
+              />
+            )}
+            {hasMedia && !videoFirst && (
+              <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(170deg, ${hexA(card.colors[0], 0.4)} 0%, ${hexA(card.colors[1], 0.7)} 55%, rgba(0,0,0,0.88) 100%)`, hexA(card.colors[1], 0.6))]} />
             )}
             {card.backdrop && (
               <Animated.View key={`bd${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
                 {card.backdrop}
               </Animated.View>
             )}
-            <Fade color="0,0,0" from={0} to={0.35} style={StyleSheet.absoluteFill} />
+            {!videoFirst && <Fade color="0,0,0" from={0} to={0.35} style={StyleSheet.absoluteFill} />}
+            {videoFirst && nowItem && (
+              <Animated.View key={`now${nowId}`} entering={FadeIn.duration(DUR.slow)} style={[styles.nowWrap, { top: insets.top + 22 }]}>
+                <TouchableOpacity
+                  style={styles.nowChip}
+                  disabled={!onOpenVideo}
+                  onPress={() => onOpenVideo?.(nowItem.id)}
+                  accessibilityLabel={`Playing ${friendlyName(nowItem)}${onOpenVideo ? '. Tap to watch it' : ''}`}>
+                  <View style={styles.nowDot} />
+                  <Text style={styles.nowText} numberOfLines={1}>
+                    {friendlyName(nowItem)}
+                  </Text>
+                  {onOpenVideo && <Icon name="forward" size={11} color="rgba(255,255,255,0.8)" />}
+                </TouchableOpacity>
+              </Animated.View>
+            )}
             <View style={[styles.bars, { top: insets.top + 8 }]}>
               {cards.map((c, n) => (
                 <View key={c.key} style={styles.bar}>
@@ -1402,7 +1576,10 @@ export function WrappedStory({
               )}
               <IconButton icon="close" label="Close" clear color="#fff" onPress={onClose} size={36} />
             </View>
-            <Animated.View key={`b${i}`} entering={reduce ? undefined : bodyIn} style={[styles.storyBody, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 40 }]}>
+            <Animated.View
+              key={`b${i}`}
+              entering={reduce ? undefined : bodyIn}
+              style={[styles.storyBody, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + (videoFirst ? 64 : 40) }, videoFirst && { justifyContent: 'flex-end' }]}>
               {card.body}
             </Animated.View>
             {paused && (
@@ -1504,6 +1681,21 @@ const makeStyles = (p: Palette) =>
     bar: { flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', overflow: 'hidden' },
     barFill: { height: 3, backgroundColor: '#fff' },
     storyTop: { position: 'absolute', right: 12, zIndex: 3, flexDirection: 'row', gap: 8 },
+    nowWrap: { position: 'absolute', left: 14, right: 100, zIndex: 3, alignItems: 'flex-start' },
+    nowChip: { flexDirection: 'row', alignItems: 'center', gap: 7, maxWidth: '100%', backgroundColor: 'rgba(0,0,0,0.42)', borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
+    nowDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#30D158' },
+    nowText: { color: '#fff', fontSize: 13, fontWeight: '800', flexShrink: 1 },
+    sAgeRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+    sAgeCell: { flex: 1, alignItems: 'center', gap: 5 },
+    sAgeThumb: { width: '100%', aspectRatio: 0.8, borderRadius: 10, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.75)' },
+    sAgeYear: { color: '#fff', fontSize: 13, fontWeight: '900', fontVariant: ['tabular-nums'] },
+    sMeter: { flexDirection: 'row', gap: 5, marginTop: 6 },
+    sMeterCell: { flex: 1, height: 34, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.16)' },
+    sClubs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+    sClub: { width: '48%', flexGrow: 1, gap: 6, padding: 11, borderRadius: 16, borderWidth: 2, borderColor: 'transparent', backgroundColor: 'rgba(255,255,255,0.09)' },
+    sClubName: { color: '#fff', fontSize: 14, fontWeight: '900' },
+    sClubTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.18)', overflow: 'hidden' },
+    sClubFill: { height: 4, borderRadius: 2 },
     storyBody: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', paddingHorizontal: 28, gap: 12 },
     sKicker: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '900', letterSpacing: 1.4 },
     sHint: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700', marginTop: 20 },

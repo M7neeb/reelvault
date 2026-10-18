@@ -9,15 +9,19 @@ import { File, Paths } from 'expo-file-system';
 
 import { getDb } from '@/db';
 
+
 import { addToAlbums, createAlbum, createFolder, listAlbums, listFolders } from './albums';
-import { BACKUP_KIND, BACKUP_VERSION, matchBackup, parseBackup, seriesEpisodes, type Backup, type BackupSeries } from './backupFormat';
-import { saveSmartFilter, setTagPinned } from './library';
+import { BACKUP_KIND, BACKUP_VERSION, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupSeries } from './backupFormat';
+import { getSetting, saveSmartFilter, setSetting, setTagPinned } from './library';
 import { addToSeries, createSeries, listSeries, setEpisodeLabel, updateSeries } from './overviewStore';
 import type { OvStatus } from './overview';
 import { shareFile } from './share';
 import { addTagToVideo, listTags } from './tags';
 
+const PREFS_KEY = 'vault.prefs';
+
 type VideoRow = {
+  in_tray: number;
   id: string;
   content_key: string | null;
   filename: string;
@@ -33,9 +37,29 @@ type VideoRow = {
 export async function exportLibraryInfo(): Promise<number> {
   const db = await getDb();
   const videos = await db.getAllAsync<VideoRow>(
-    `SELECT id, content_key, filename, size, title, notes, rating, status, flag, created_at
+    `SELECT id, content_key, filename, size, title, notes, rating, status, flag, created_at, in_tray
        FROM videos WHERE deleted_at IS NULL AND is_private = 0;`
   );
+  // v2: history, bookmarks, where to continue, Simkl links, settings.
+  const playRows = await db.getAllAsync<{ video_id: string; started_at: number; watched_ms: number }>('SELECT video_id, started_at, watched_ms FROM vault_plays ORDER BY started_at;');
+  const markRows = await db.getAllAsync<{ video_id: string; at_ms: number; label: string | null; created_at: number }>('SELECT video_id, at_ms, label, created_at FROM vault_bookmarks;');
+  const resumeRows = await db.getAllAsync<{ video_id: string; position_ms: number; saved_at: number }>('SELECT video_id, position_ms, saved_at FROM vault_resume;');
+  const linkRows = await db.getAllAsync<Record<string, unknown> & { video_id: string }>('SELECT * FROM vault_simkl_links;');
+  const by = <T extends { video_id: string }>(rows: T[]) => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) m.set(r.video_id, [...(m.get(r.video_id) ?? []), r]);
+    return m;
+  };
+  const playsBy = by(playRows);
+  const marksBy = by(markRows);
+  const resumeBy = new Map(resumeRows.map((r) => [r.video_id, r]));
+  const linkBy = new Map(linkRows.map((r) => [r.video_id, r]));
+  let prefs: Record<string, unknown> | null = null;
+  try {
+    prefs = JSON.parse((await getSetting(PREFS_KEY)) ?? 'null');
+  } catch {
+    prefs = null;
+  }
   const tagRows = await db.getAllAsync<{ video_id: string; name: string }>(
     'SELECT vt.video_id, t.name FROM video_tags vt JOIN tags t ON t.id = vt.tag_id;'
   );
@@ -104,7 +128,14 @@ export async function exportLibraryInfo(): Promise<number> {
       createdAt: v.created_at,
       keywords: tagsBy.get(v.id) ?? [],
       albums: albumsBy.get(v.id) ?? [],
+      id: v.id,
+      inTray: v.in_tray === 1,
+      plays: (playsBy.get(v.id) ?? []).map((x): [number, number] => [x.started_at, x.watched_ms]),
+      bookmarks: (marksBy.get(v.id) ?? []).map((m) => ({ atMs: m.at_ms, label: m.label, createdAt: m.created_at })),
+      resume: resumeBy.has(v.id) ? { positionMs: resumeBy.get(v.id)!.position_ms, savedAt: resumeBy.get(v.id)!.saved_at } : null,
+      link: linkBy.has(v.id) ? (({ video_id: _drop, ...rest }) => rest)(linkBy.get(v.id)!) : null,
     })),
+    prefs,
     albums: albums.map((a) => ({ name: a.name, folder: folderName(a.folder_id), pinned: a.pinned === 1 })),
     folders: folders.map((f) => f.name),
     smartFilters: smart.map((s) => ({
@@ -155,7 +186,7 @@ export async function exportLibraryInfo(): Promise<number> {
 }
 
 /** Applies a backup on top of the library. Nothing is deleted; matching videos get the saved info. */
-export async function importLibraryInfo(): Promise<{ matched: number; total: number } | null> {
+export async function importLibraryInfo(): Promise<{ matched: number; total: number; plays: number } | null> {
   const picked = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
   if (picked.canceled || !picked.assets?.length) return null;
   const backup = parseBackup(await new File(picked.assets[0].uri).text());
@@ -180,6 +211,8 @@ export async function importLibraryInfo(): Promise<{ matched: number; total: num
     }
   }
 
+  let playsAdded = 0;
+  const idMap = new Map<string, string>();
   for (const [index, videoId] of matches) {
     const v = backup.videos[index];
     await db.runAsync(
@@ -189,6 +222,47 @@ export async function importLibraryInfo(): Promise<{ matched: number; total: num
     for (const k of v.keywords ?? []) await addTagToVideo(videoId, k);
     const ids = (v.albums ?? []).map((n) => albumIds.get(n)).filter((id): id is number => id !== undefined);
     if (ids.length) await addToAlbums([videoId], ids);
+    if (v.inTray) await db.runAsync('UPDATE videos SET in_tray = 1 WHERE id = ?;', [videoId]);
+
+    // v2: plays and bookmarks that aren't here yet, the newer continue point, the Simkl link.
+    const havePlays = new Set((await db.getAllAsync<{ started_at: number }>('SELECT started_at FROM vault_plays WHERE video_id = ?;', [videoId])).map((r) => r.started_at));
+    for (const [at, ms] of v.plays ?? []) {
+      if (typeof at !== 'number' || havePlays.has(at)) continue;
+      await db.runAsync('INSERT INTO vault_plays (video_id, started_at, watched_ms) VALUES (?, ?, ?);', [videoId, at, Math.max(0, Math.round(ms ?? 0))]);
+      playsAdded++;
+    }
+    const haveMarks = new Set((await db.getAllAsync<{ at_ms: number }>('SELECT at_ms FROM vault_bookmarks WHERE video_id = ?;', [videoId])).map((r) => r.at_ms));
+    for (const b of v.bookmarks ?? []) {
+      if (typeof b?.atMs !== 'number' || haveMarks.has(b.atMs)) continue;
+      await db.runAsync('INSERT INTO vault_bookmarks (video_id, at_ms, label, created_at) VALUES (?, ?, ?, ?);', [videoId, b.atMs, b.label ?? null, b.createdAt ?? Date.now()]);
+    }
+    if (v.resume && typeof v.resume.positionMs === 'number') {
+      await db.runAsync(
+        `INSERT INTO vault_resume (video_id, position_ms, saved_at) VALUES (?, ?, ?)
+           ON CONFLICT(video_id) DO UPDATE SET position_ms = excluded.position_ms, saved_at = excluded.saved_at WHERE excluded.saved_at > vault_resume.saved_at;`,
+        [videoId, v.resume.positionMs, v.resume.savedAt ?? Date.now()]
+      );
+    }
+    const l = v.link as { simkl_id?: unknown; type?: unknown; title?: unknown; year?: unknown; poster?: unknown; season?: unknown; episode?: unknown; linked_at?: unknown; logged_at?: unknown } | null | undefined;
+    if (l && typeof l.simkl_id === 'number' && typeof l.type === 'string' && typeof l.title === 'string') {
+      await db.runAsync(
+        `INSERT OR IGNORE INTO vault_simkl_links (video_id, simkl_id, type, title, year, poster, season, episode, linked_at, logged_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?);`,
+        [videoId, l.simkl_id, l.type, l.title, (l.year as number) ?? null, (l.poster as string) ?? null, (l.season as number) ?? null, (l.episode as number) ?? null, (l.linked_at as string) ?? new Date().toISOString(), (l.logged_at as string) ?? null]
+      );
+    }
+    if (v.id) idMap.set(v.id, videoId);
+  }
+
+  // v2: settings, joined with what is on the phone.
+  if (backup.prefs) {
+    let current: Record<string, unknown> = {};
+    try {
+      current = JSON.parse((await getSetting(PREFS_KEY)) ?? '{}') ?? {};
+    } catch {
+      current = {};
+    }
+    await setSetting(PREFS_KEY, JSON.stringify(mergePrefs(current, backup.prefs, idMap)));
   }
 
   const existingFilters = new Set(
@@ -222,5 +296,5 @@ export async function importLibraryInfo(): Promise<{ matched: number; total: num
     for (const e of episodes) if (e.label) await setEpisodeLabel(e.videoId, e.label);
   }
 
-  return { matched: matches.size, total: backup.videos.length };
+  return { matched: matches.size, total: backup.videos.length, plays: playsAdded };
 }

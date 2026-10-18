@@ -30,6 +30,7 @@ import {
   updateAlbum,
 } from '@/features/vault/albums';
 import { exportLibraryInfo, importLibraryInfo } from '@/features/vault/backup';
+import { incomingName, onIncoming } from '@/features/vault/incoming';
 import { contentKeyOf } from '@/features/vault/contentKey';
 import { probeDurationMs } from '@/features/vault/duration';
 import { ensureFilmstrip } from '@/features/vault/filmstrip';
@@ -116,6 +117,9 @@ import {
   onWrappedTap,
   scheduleOnThisDay,
   scheduleYearWrapped,
+  scheduleMonthWrapped,
+  monthWrappedReminderOn,
+  setMonthWrappedReminder,
   setOnThisDayReminder,
   setWrappedReminder,
   setYearWrappedReminder,
@@ -124,7 +128,7 @@ import {
   type OpenRequest,
 } from '@/features/vault/wrappedReminder';
 import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
-import { DEFAULT_SLIDESHOW, DEFAULT_VAULT_PREFS, WATCH_SORTS, type SlideshowOptions, type VaultPrefs } from '@/features/vault/ui/types';
+import { DEFAULT_PLAYER, DEFAULT_SLIDESHOW, DEFAULT_VAULT_PREFS, PLAYER_SPEEDS, WATCH_SORTS, type PlayerOptions, type SlideshowOptions, type VaultPrefs } from '@/features/vault/ui/types';
 import { onThisDayPlan } from '@/features/vault/recap';
 import { applyMetadata, pickMetadataFile } from '@/features/vault/metaImport';
 import { clearPasscodeLog, logPasscodeAttempt, passcodeLog } from '@/features/vault/passcodeLog';
@@ -284,6 +288,20 @@ function parseSlideshow(r: unknown): SlideshowOptions {
   };
 }
 
+function parsePlayer(r: unknown): PlayerOptions {
+  const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+  const d = DEFAULT_PLAYER;
+  const bool = (v: unknown, def: boolean) => (typeof v === 'boolean' ? v : def);
+  return {
+    autoplayNext: bool(o.autoplayNext, d.autoplayNext),
+    loop: bool(o.loop, d.loop),
+    speed: typeof o.speed === 'number' && (PLAYER_SPEEDS as readonly number[]).includes(o.speed) ? o.speed : d.speed,
+    ambient: bool(o.ambient, d.ambient),
+    remaining: bool(o.remaining, d.remaining),
+    background: bool(o.background, d.background),
+  };
+}
+
 function parsePrefs(json: string | null): VaultPrefs {
   try {
     const r = json ? JSON.parse(json) : {};
@@ -308,6 +326,13 @@ function parsePrefs(json: string | null): VaultPrefs {
       liveSound: typeof r?.liveSound === 'boolean' ? r.liveSound : DEFAULT_VAULT_PREFS.liveSound,
       slideshow: parseSlideshow(r?.slideshow),
       albumSort: r?.albumSort === 'watched' || r?.albumSort === 'recent' ? r.albumSort : 'name',
+      player: parsePlayer(r?.player),
+      pinned: Array.isArray(r?.pinned) ? [...new Set<string>(r.pinned.filter((x: unknown) => typeof x === 'string'))].slice(0, 60) : [],
+      freezes: {
+        banked: typeof r?.freezes?.banked === 'number' ? Math.max(0, Math.min(3, Math.round(r.freezes.banked))) : DEFAULT_VAULT_PREFS.freezes.banked,
+        used: Array.isArray(r?.freezes?.used) ? r.freezes.used.filter((x: unknown) => typeof x === 'number').slice(-120) : [],
+        lastEarnedWeek: typeof r?.freezes?.lastEarnedWeek === 'number' ? r.freezes.lastEarnedWeek : null,
+      },
     };
   } catch {
     return DEFAULT_VAULT_PREFS;
@@ -422,6 +447,7 @@ export function useVaultData(): VaultData {
     planned.current = true;
     scheduleOnThisDay(onThisDayPlan(videos.filter((v) => !v.isPrivate).map(asRVideo), Date.now())).catch((e) => console.log(`[OTD] ${String(e)}`));
     scheduleYearWrapped().catch((e) => console.log(`[YEAR] ${String(e)}`));
+    scheduleMonthWrapped().catch((e) => console.log(`[MONTH] ${String(e)}`));
   }, [videos]);
 
   // On start: empty what has been in Recently Deleted for 30 days, then backfill
@@ -507,6 +533,19 @@ export function useVaultData(): VaultData {
       return summary;
     },
     [refresh]
+  );
+
+  // Videos sent from another app ("Open in ReelVault"): imported as they arrive.
+  useEffect(
+    () =>
+      onIncoming((uris) => {
+        setStatus(uris.length === 1 ? 'Adding the video you sent…' : `Adding ${uris.length} videos you sent…`);
+        runImport(
+          uris.map((uri) => ({ uri, name: incomingName(uri) })),
+          false
+        ).catch((e) => setStatus(`Could not add it: ${String(e)}`));
+      }),
+    [runImport]
   );
 
   const onImport = useCallback(
@@ -765,7 +804,10 @@ export function useVaultData(): VaultData {
           const res = await importLibraryInfo();
           if (!res) return;
           await refresh();
-          setStatus(`Library info restored for ${res.matched} of ${res.total} videos`);
+          // Settings may have come back too: read them again so nothing saves over them.
+          setPrefsState(parsePrefs(await getSetting(PREFS_KEY)));
+          setResume(await resumePoints());
+          setStatus(`Info restored for ${res.matched} of ${res.total} videos${res.plays ? `, with ${res.plays} plays of history` : ''}`);
         } catch (e) {
           Alert.alert('Could not import', e instanceof Error ? e.message : String(e));
         }
@@ -814,6 +856,8 @@ export function useVaultData(): VaultData {
       setOnThisDayReminder: (on) => setOnThisDayReminder(on, onThisDayPlan(videosRef.current.filter((v) => !v.isPrivate).map(asRVideo), Date.now())),
       getYearWrappedReminder: yearWrappedReminderOn,
       setYearWrappedReminder,
+      getMonthWrappedReminder: monthWrappedReminderOn,
+      setMonthWrappedReminder,
       onRemoveTagMany: andRefresh(removeTagMany),
       deletePlays,
       pickMetadataFile,

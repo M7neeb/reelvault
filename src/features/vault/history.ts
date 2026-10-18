@@ -128,7 +128,7 @@ function streaks(days: number[], now: number): { current: number; longest: numbe
   return { current, longest };
 }
 
-export function watchStats(videos: HVideo[], plays: HPlay[], now: number): WatchStats {
+export function watchStats(videos: HVideo[], plays: HPlay[], now: number, frozenDays: number[] = []): WatchStats {
   const byId = new Map(videos.map((v) => [v.id, v]));
   const mine = plays.filter((p) => byId.has(p.videoId));
   const totalMs = mine.reduce((a, p) => a + p.watchedMs, 0);
@@ -150,7 +150,8 @@ export function watchStats(videos: HVideo[], plays: HPlay[], now: number): Watch
   const peak = (arr: number[]) => (arr.some((x) => x > 0) ? arr.indexOf(Math.max(...arr)) : null);
   const biggest = [...perDay.entries()].sort((a, b) => b[1] - a[1])[0];
   const longest = [...sittingList].sort((a, b) => b.ms - a.ms)[0];
-  const st = streaks([...perDay.keys()], now);
+  // Days a streak freeze covered count for the streak, nothing else.
+  const st = streaks([...new Set([...perDay.keys(), ...frozenDays.map(sod)])], now);
   const ratios = sittingList
     .map((s) => ({ s, d: byId.get(s.videoId)?.durationMs ?? 0 }))
     .filter((x) => x.d > 0)
@@ -286,3 +287,56 @@ export function albumsByWatching<A extends { id: number }>(albums: A[], members:
 }
 
 export const videoName = (v: Pick<HVideo, 'title' | 'filename' | 'createdAt'>) => friendlyName(v);
+
+/**
+ * Videos you started and did not finish, newest first: the furthest you got
+ * (as a share of the video) in your last sitting with it, between 5 % and 90 %.
+ */
+export function unfinished<T extends HVideo>(videos: T[], plays: HPlay[], max = 12): { video: T; share: number; at: number }[] {
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  const last = new Map<string, { at: number; ms: number }>();
+  for (const x of [...plays].sort((a, b) => a.startedAt - b.startedAt)) {
+    const prev = last.get(x.videoId);
+    // Plays close together are one sitting: add them up.
+    if (prev && x.startedAt - prev.at < GAP + prev.ms) last.set(x.videoId, { at: x.startedAt, ms: prev.ms + x.watchedMs });
+    else last.set(x.videoId, { at: x.startedAt, ms: x.watchedMs });
+  }
+  const out: { video: T; share: number; at: number }[] = [];
+  for (const [id, s] of last) {
+    const v = byId.get(id);
+    if (!v?.durationMs) continue;
+    const share = Math.min(1, s.ms / v.durationMs);
+    if (share >= 0.05 && share < 0.9) out.push({ video: v, share, at: s.at });
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, max);
+}
+
+/** Watch time by weekday (Mon = 0) and hour: a 7 × 24 grid, plus its biggest cell. */
+export function punchCard(plays: HPlay[], known?: Set<string>): { grid: number[][]; max: number } {
+  const grid = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  for (const x of plays) {
+    if (known && !known.has(x.videoId)) continue;
+    const d = new Date(x.startedAt);
+    grid[(d.getDay() + 6) % 7][d.getHours()] += x.watchedMs;
+  }
+  return { grid, max: Math.max(0, ...grid.flat()) };
+}
+
+/** A month as a calendar: Monday-first weeks of day cells (null = padding) with the watch time of each day. */
+export function monthGrid(year: number, month: number, plays: HPlay[], known?: Set<string>): ({ day: number; key: number; ms: number } | null)[] {
+  const first = new Date(year, month, 1);
+  const days = new Date(year, month + 1, 0).getDate();
+  const totals = new Map<number, number>();
+  for (const x of plays) {
+    if (known && !known.has(x.videoId)) continue;
+    const k = sod(x.startedAt);
+    totals.set(k, (totals.get(k) ?? 0) + x.watchedMs);
+  }
+  const pad = (first.getDay() + 6) % 7;
+  const cells: ({ day: number; key: number; ms: number } | null)[] = Array(pad).fill(null);
+  for (let d = 1; d <= days; d++) {
+    const key = new Date(year, month, d).getTime();
+    cells.push({ day: d, key, ms: totals.get(key) ?? 0 });
+  }
+  return cells;
+}

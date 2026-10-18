@@ -577,6 +577,18 @@ export function ViewOptionsSheet({
 /* ------------------------------------------------------------ filter editor */
 
 const MIN_RATINGS = [5, 6, 7, 8, 9, 10];
+
+/** One tap to start a smart album that fills itself. */
+const SMART_TEMPLATES: { name: string; rule: SmartRule }[] = [
+  { name: 'Never watched, over 5 min', rule: { watched: 'never', minDurationSec: 300 } },
+  { name: 'Rated 9+ from the last year', rule: { minRating: 9, filmedWithinDays: 365 } },
+  { name: 'Forgotten favourites', rule: { minRating: 8, notWatchedDays: 180 } },
+  { name: 'Not watched in a year', rule: { watched: 'watched', notWatchedDays: 365 } },
+  { name: 'On repeat', rule: { minPlays: 5 } },
+  { name: 'Added this month', rule: { addedWithinDays: 30 } },
+  { name: 'Watched this week', rule: { watchedWithinDays: 7 } },
+  { name: 'Long ones', rule: { minDurationSec: 1200 } },
+];
 const ORIENTATIONS: { key: Orientation; label: string }[] = [
   { key: 'landscape', label: 'Landscape' },
   { key: 'portrait', label: 'Portrait' },
@@ -622,6 +634,12 @@ export function SmartFilterSheet({
   );
   const set = (patch: Partial<SmartRule>) => setRule((r) => ({ ...r, ...patch }));
 
+  function toggleAny(t: string) {
+    const current = rule.anyTags ?? [];
+    const next = current.includes(t) ? current.filter((x) => x !== t) : [...current, t];
+    set({ anyTags: next.length ? next : undefined, untagged: undefined });
+  }
+
   function toggleTag(t: string) {
     const current = rule.tags ?? [];
     const next = current.includes(t) ? current.filter((x) => x !== t) : [...current, t];
@@ -654,6 +672,25 @@ export function SmartFilterSheet({
       <Text style={styles.done}>
         Matches {matches} video{matches === 1 ? '' : 's'} right now
       </Text>
+
+      {!searching && initial.id === undefined && (
+        <Section label="Start from">
+          <Wrap>
+            {SMART_TEMPLATES.map((t) => (
+              <Chip
+                key={t.name}
+                label={t.name}
+                on={name === t.name}
+                onPress={() => {
+                  setName(t.name);
+                  setRule(t.rule);
+                }}
+              />
+            ))}
+          </Wrap>
+          <Text style={styles.muted}>A smart album fills itself: new videos that match join it on their own, and ones that stop matching leave.</Text>
+        </Section>
+      )}
 
       <Section label={searching ? 'Save as Smart Filter (optional)' : 'Name'}>
         <View style={styles.inputRow}>
@@ -735,6 +772,79 @@ export function SmartFilterSheet({
           <NumberBox label="min albums" value={rule.minAlbums} onChange={(v) => set({ minAlbums: v })} />
           <NumberBox label="max albums" value={rule.maxAlbums} onChange={(v) => set({ maxAlbums: v })} />
         </View>
+      </Section>
+
+      {tags.length > 1 && (
+        <Section label="Keywords (any of them)">
+          <Wrap>
+            {tags.map((t) => (
+              <Chip key={t.id} label={`# ${t.name}`} on={rule.anyTags?.includes(t.name)} onPress={() => toggleAny(t.name)} />
+            ))}
+          </Wrap>
+        </Section>
+      )}
+
+      <Section label="Watching">
+        <Wrap>
+          <Chip label="Any" on={!rule.watched} onPress={() => set({ watched: undefined })} />
+          <Chip label="Never watched" on={rule.watched === 'never'} onPress={() => set({ watched: 'never', minPlays: undefined, watchedWithinDays: undefined })} />
+          <Chip label="Watched" on={rule.watched === 'watched'} onPress={() => set({ watched: 'watched' })} />
+        </Wrap>
+        <Text style={styles.muted}>Played at least</Text>
+        <Wrap>
+          <Chip label="Any" on={!rule.minPlays} onPress={() => set({ minPlays: undefined })} />
+          {[2, 3, 5, 10].map((n) => (
+            <Chip key={n} label={`${n} times`} on={rule.minPlays === n} onPress={() => set({ minPlays: n, watched: undefined })} />
+          ))}
+        </Wrap>
+        <Text style={styles.muted}>Not watched in</Text>
+        <Wrap>
+          <Chip label="Any" on={!rule.notWatchedDays} onPress={() => set({ notWatchedDays: undefined })} />
+          {[
+            [30, 'a month'],
+            [90, '3 months'],
+            [180, '6 months'],
+            [365, 'a year'],
+          ].map(([n, l]) => (
+            <Chip key={n} label={String(l)} on={rule.notWatchedDays === n} onPress={() => set({ notWatchedDays: Number(n), watchedWithinDays: undefined })} />
+          ))}
+        </Wrap>
+        <Text style={styles.muted}>Watched in the last</Text>
+        <Wrap>
+          <Chip label="Any" on={!rule.watchedWithinDays} onPress={() => set({ watchedWithinDays: undefined })} />
+          {[
+            [7, 'week'],
+            [30, 'month'],
+            [365, 'year'],
+          ].map(([n, l]) => (
+            <Chip key={n} label={String(l)} on={rule.watchedWithinDays === n} onPress={() => set({ watchedWithinDays: Number(n), notWatchedDays: undefined, watched: undefined })} />
+          ))}
+        </Wrap>
+      </Section>
+
+      <Section label="Recently">
+        <Text style={styles.muted}>Added in the last</Text>
+        <Wrap>
+          <Chip label="Any" on={!rule.addedWithinDays} onPress={() => set({ addedWithinDays: undefined })} />
+          {[
+            [7, 'week'],
+            [30, 'month'],
+            [90, '3 months'],
+          ].map(([n, l]) => (
+            <Chip key={n} label={String(l)} on={rule.addedWithinDays === n} onPress={() => set({ addedWithinDays: Number(n) })} />
+          ))}
+        </Wrap>
+        <Text style={styles.muted}>Filmed in the last</Text>
+        <Wrap>
+          <Chip label="Any" on={!rule.filmedWithinDays} onPress={() => set({ filmedWithinDays: undefined })} />
+          {[
+            [30, 'month'],
+            [365, 'year'],
+            [1095, '3 years'],
+          ].map(([n, l]) => (
+            <Chip key={n} label={String(l)} on={rule.filmedWithinDays === n} onPress={() => set({ filmedWithinDays: Number(n) })} />
+          ))}
+        </Wrap>
       </Section>
 
       <Section label="Filmed between">

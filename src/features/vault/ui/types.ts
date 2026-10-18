@@ -201,6 +201,20 @@ export type SmartRule = {
   /** Only videos that have / don't have GPS in their file. */
   hasLocation?: boolean;
   inTray?: boolean;
+  /** The video carries ANY of these keywords. */
+  anyTags?: string[];
+  /** Never played in ReelVault, or played at least once. */
+  watched?: 'never' | 'watched';
+  /** Played at least this many times. */
+  minPlays?: number;
+  /** Not played in the last N days (never played counts too). */
+  notWatchedDays?: number;
+  /** Played in the last N days. */
+  watchedWithinDays?: number;
+  /** Imported in the last N days. */
+  addedWithinDays?: number;
+  /** Filmed in the last N days. */
+  filmedWithinDays?: number;
 };
 
 export type SmartFilter = { id: number; name: string; rule: SmartRule; folderId: number | null };
@@ -439,6 +453,8 @@ export type VaultActions = {
   /** 1 December: "Your year's Wrapped is ready". */
   getYearWrappedReminder: () => Promise<boolean>;
   setYearWrappedReminder: (on: boolean) => Promise<boolean>;
+  getMonthWrappedReminder: () => Promise<boolean>;
+  setMonthWrappedReminder: (on: boolean) => Promise<boolean>;
   /** Take one keyword off many videos. */
   onRemoveTagMany: (videoIds: string[], name: string) => Promise<void>;
   /** Remove one sitting from the watch history. */
@@ -521,7 +537,32 @@ export type VaultPrefs = {
   slideshow: SlideshowOptions;
   /** Albums in the sidebar: A to Z, most watched, or recently used. */
   albumSort: 'name' | 'watched' | 'recent';
+  /** How the video player behaves (remembered). */
+  player: PlayerOptions;
+  /** Videos pinned to the shelf at the top of the library (their ids, in order). */
+  pinned: string[];
+  /** Streak freezes: banked ones, and the days they covered (start of day, ms). */
+  freezes: { banked: number; used: number[]; lastEarnedWeek: number | null };
 };
+
+export type PlayerOptions = {
+  /** When a video ends, play the next one in the list (after a short countdown). */
+  autoplayNext: boolean;
+  /** Start the video again when it ends. */
+  loop: boolean;
+  /** Playback speed (1 = normal). */
+  speed: number;
+  /** A soft glow of the video's own colours around it. */
+  ambient: boolean;
+  /** Show the time left instead of the length. */
+  remaining: boolean;
+  /** Keep the sound playing when you leave the app or lock the phone. */
+  background: boolean;
+};
+
+export const PLAYER_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
+export const DEFAULT_PLAYER: PlayerOptions = { autoplayNext: true, loop: false, speed: 1, ambient: true, remaining: false, background: true };
 
 export type SlideshowOptions = {
   order: 'shown' | 'shuffle' | 'oldest' | 'best';
@@ -553,6 +594,9 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   liveSound: true,
   slideshow: DEFAULT_SLIDESHOW,
   albumSort: 'name',
+  player: DEFAULT_PLAYER,
+  pinned: [],
+  freezes: { banked: 1, used: [], lastEarnedWeek: null },
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */
@@ -572,7 +616,7 @@ export type VaultScreenProps = {
   wrappedRequest?: boolean;
   onWrappedHandled?: () => void;
   /** An On this day or yearly Wrapped notification was tapped. */
-  openRequest?: 'yearWrapped' | 'onThisDay' | null;
+  openRequest?: 'yearWrapped' | 'monthWrapped' | 'onThisDay' | null;
   onOpenRequestHandled?: () => void;
   /** Simkl, for linking videos to a movie or episode and scrobbling them. */
   simkl?: import('@/features/simkl/ui/types').SimklBridge;

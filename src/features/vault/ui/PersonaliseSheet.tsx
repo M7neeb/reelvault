@@ -127,12 +127,14 @@ export default function PersonaliseSheet({
   const [weekly, setWeekly] = useState<boolean | null>(null);
   const [otd, setOtd] = useState<boolean | null>(null);
   const [yearly, setYearly] = useState<boolean | null>(null);
+  const [monthly, setMonthly] = useState<boolean | null>(null);
   const [note, setNote] = useState('');
 
   useEffect(() => {
     actions.getWrappedReminder().then(setWeekly).catch(() => setWeekly(false));
     actions.getOnThisDayReminder().then(setOtd).catch(() => setOtd(false));
     actions.getYearWrappedReminder().then(setYearly).catch(() => setYearly(false));
+    actions.getMonthWrappedReminder().then(setMonthly).catch(() => setMonthly(false));
   }, [actions]);
 
   /** Turns a notification on or off; a refusal from iOS turns the switch back off with a note. */
@@ -278,6 +280,7 @@ export default function PersonaliseSheet({
         </Text>
         {weekly !== null && <ToggleRow label="Weekly Wrapped notification (Monday 10:00)" value={weekly} onChange={(v) => toggle(v, setWeekly, actions.setWrappedReminder)} />}
         {otd !== null && <ToggleRow label="On this day (9:00, on days with old videos)" value={otd} onChange={(v) => toggle(v, setOtd, actions.setOnThisDayReminder)} />}
+        {monthly !== null && <ToggleRow label="Last month's Wrapped is ready (the 1st)" value={monthly} onChange={(v) => toggle(v, setMonthly, actions.setMonthWrappedReminder)} />}
         {yearly !== null && <ToggleRow label="Your year's Wrapped is ready (1 December)" value={yearly} onChange={(v) => toggle(v, setYearly, actions.setYearWrappedReminder)} />}
         <Text style={styles.hint}>On this day only fires on days you have videos from that date in earlier years; tapping it plays the memory.</Text>
       </Section>

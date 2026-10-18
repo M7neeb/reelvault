@@ -2,8 +2,8 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.9.0",
-    "orientation": "portrait",
+    "version": "1.9.1",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
     "userInterfaceStyle": "automatic",
@@ -12,7 +12,16 @@
       "bundleIdentifier": "com.muneeb.reelvault",
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "ReelVault receives videos you send from your computer over Wi-Fi."
+        "NSLocalNetworkUsageDescription": "ReelVault receives videos you send from your computer over Wi-Fi.",
+        "LSSupportsOpeningDocumentsInPlace": false,
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Video",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["public.movie", "public.mpeg-4", "com.apple.quicktime-movie", "public.avi", "com.apple.m4v-video", "public.3gpp"]
+          }
+        ]
       }
     },
     "android": {
@@ -38,7 +47,19 @@
           "imageWidth": 76
         }
       ],
-      "expo-video",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT_UP"
+        }
+      ],
       "expo-sqlite",
       "expo-secure-store",
       "expo-web-browser",
@@ -172,7 +193,7 @@
         ]
       ]
     ],
-    "runtimeVersion": "1.9.0",
+    "runtimeVersion": "1.9.1",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {

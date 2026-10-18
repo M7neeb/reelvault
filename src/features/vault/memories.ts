@@ -15,6 +15,7 @@ export type MVideo = RVideo & { location?: { lat: number; lon: number } | null; 
 
 export type MemoryKind =
   | 'custom'
+  | 'mix'
   | 'onThisDay'
   | 'yearAgo'
   | 'first'
@@ -411,10 +412,11 @@ export function memorySections(list: Memory[], hidden: string[], favs: string[])
   const shown = list.filter((m) => !hidden.includes(m.id));
   const of = (...k: MemoryKind[]) => shown.filter((m) => k.includes(m.kind));
   return {
-    featured: shown.filter((m) => m.kind !== 'custom').slice(0, 6),
+    featured: shown.filter((m) => m.kind !== 'custom' && m.kind !== 'mix').slice(0, 6),
     favourites: shown.filter((m) => favs.includes(m.id)),
     mine: of('custom'),
     onThisDay: of('onThisDay'),
+    lookingBack: of('yearAgo', 'first', 'milestone', 'night'),
     moments: of('trip', 'day', 'recent').sort((a, b) => b.start - a.start),
     themes: of('theme', 'favourites', 'gems', 'repeat'),
     months: of('month', 'season').sort((a, b) => b.start - a.start),
@@ -477,4 +479,61 @@ export function customMemory(c: CustomMemory, videos: MVideo[], plays: RPlay[]):
     tone: 4,
     score: 0,
   };
+}
+
+/**
+ * Quick mixes for the Memories tab, made on the spot: the memories you saved
+ * played as one, your best-rated videos, this month through the years, and a
+ * random handful (`rand` picks; pass Math.random). Each is an ordinary memory
+ * (kind 'mix'), so it plays like any other.
+ */
+export function memoryMixes(
+  list: Memory[],
+  videos: Pick<MVideo, 'id' | 'createdAt' | 'rating'>[],
+  favs: string[],
+  now: number,
+  rand: () => number
+): Memory[] {
+  const out: Memory[] = [];
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  const chrono = (ids: string[]) => [...new Set(ids)].filter((id) => byId.has(id)).sort((a, b) => byId.get(a)!.createdAt - byId.get(b)!.createdAt);
+  const make = (id: string, kicker: string, title: string, ids: string[], mood: Mood, tone: number) => {
+    const v = chrono(ids);
+    if (v.length < 3) return;
+    const cover = [...v].sort((a, b) => (byId.get(b)!.rating ?? 0) - (byId.get(a)!.rating ?? 0))[0];
+    out.push({
+      id,
+      kind: 'mix',
+      kicker,
+      title,
+      subtitle: `${v.length} videos`,
+      videoIds: v,
+      coverId: cover,
+      total: v.length,
+      start: byId.get(v[0])!.createdAt,
+      end: byId.get(v[v.length - 1])!.createdAt,
+      mood,
+      tone,
+      score: 0,
+    });
+  };
+  const saved = list.filter((m) => favs.includes(m.id));
+  make('mix:saved', 'MIX', 'Your saved memories', saved.flatMap((m) => m.videoIds).slice(0, 24), 'gentle', 2);
+  const best = [...videos].filter((v) => (v.rating ?? 0) >= 8).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 16);
+  make('mix:best', 'MIX', 'Only the best', best.map((v) => v.id), 'epic', 8);
+  const month = new Date(now).getMonth();
+  const thisMonth = videos.filter((v) => new Date(v.createdAt).getMonth() === month && new Date(v.createdAt).getFullYear() < new Date(now).getFullYear());
+  make(
+    'mix:month',
+    'MIX',
+    `${new Date(now).toLocaleDateString('en', { month: 'long' })} through the years`,
+    thisMonth.map((v) => v.id).slice(0, 20),
+    'gentle',
+    5
+  );
+  const pool = [...videos];
+  const pick: string[] = [];
+  while (pool.length && pick.length < 12) pick.push(pool.splice(Math.floor(rand() * pool.length), 1)[0].id);
+  make('mix:random', 'MIX', 'A random handful', pick, 'upbeat', 9);
+  return out;
 }
