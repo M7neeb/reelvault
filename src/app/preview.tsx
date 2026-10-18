@@ -271,6 +271,7 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   memory: { insightsTab: 'memories', memoryOpen: true },
   wrapped: { insightsTab: 'wrapped' },
   badges: { insightsTab: 'badges' },
+  'badges-new': { insightsTab: 'badges' },
   storage: { insightsTab: 'storage' },
   personalise: { personaliseOpen: true },
   // Overview mode (rate and track your videos like shows).
@@ -320,6 +321,13 @@ export default function PreviewRoute() {
     ...DEFAULT_VAULT_PREFS,
     ratingLabels: SUGGESTED_LABELS,
     videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : 'watch',
+    // `badges-new` shows the reveal of newly earned badges.
+    badgesSeen: view === 'badges-new' ? [] : null,
+    events: [
+      { k: 'memory', at: Date.now() - 3 * 86_400_000, v: 'onThisDay' },
+      { k: 'mood', at: Date.now() - 3 * 86_400_000, v: 'gentle' },
+      { k: 'quiz-right', at: Date.now() - 2 * 86_400_000 },
+    ],
   });
   const [security, setSecurity] = useState<SecurityState>({
     passcodeKind: null,

@@ -12,6 +12,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Paths } from 'expo-file-system';
 
 import { purgeExpired, purgeVideos, restore, trashVideos } from '@/features/vault/actions';
+import { isCustomMemory } from '@/features/vault/memories';
 import {
   addToAlbums,
   albumMembership,
@@ -251,6 +252,12 @@ function parsePrefs(json: string | null): VaultPrefs {
         typeof r?.weeklyGoalMin === 'number' && r.weeklyGoalMin >= 10 && r.weeklyGoalMin <= 6000 ? Math.round(r.weeklyGoalMin) : DEFAULT_VAULT_PREFS.weeklyGoalMin,
       memoryFavs: Array.isArray(r?.memoryFavs) ? r.memoryFavs.filter((x: unknown) => typeof x === 'string').slice(0, 500) : [],
       memoryHidden: Array.isArray(r?.memoryHidden) ? r.memoryHidden.filter((x: unknown) => typeof x === 'string').slice(0, 500) : [],
+      memoriesSeen: Array.isArray(r?.memoriesSeen) ? r.memoriesSeen.filter((x: unknown) => typeof x === 'string').slice(-1000) : [],
+      customMemories: Array.isArray(r?.customMemories) ? r.customMemories.filter(isCustomMemory).slice(0, 100) : [],
+      events: Array.isArray(r?.events)
+        ? r.events.filter((e: { k?: unknown; at?: unknown }) => e && typeof e.k === 'string' && typeof e.at === 'number').slice(-3000)
+        : [],
+      badgesSeen: Array.isArray(r?.badgesSeen) ? r.badgesSeen.filter((x: unknown) => typeof x === 'string') : null,
     };
   } catch {
     return DEFAULT_VAULT_PREFS;

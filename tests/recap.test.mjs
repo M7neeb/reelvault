@@ -164,3 +164,19 @@ test('story facts: your era is the filming year you watched most', () => {
   const one = storyFacts({ start: at(2026, 9, 1, 0), end: at(2026, 10, 1, 0), label: 'October' }, videos, [plays[0]], NOW);
   assert.equal(one.era, null);
 });
+
+test('storage extras: grade, forecast and a treemap that fills the box', async () => {
+  const { spaceGrade, spaceForecast, treemap } = await import('../src/features/vault/recap.ts');
+  assert.equal(spaceGrade(100, 2).grade, 'A');
+  assert.equal(spaceGrade(100, 30).grade, 'D');
+  assert.equal(spaceGrade(0, 0).grade, 'A');
+  assert.deepEqual(spaceForecast([{ bytes: 1 }, { bytes: 2 }, { bytes: 3 }, { bytes: 6 }], 44), { perMonth: 11 / 3, months: 12 });
+  assert.equal(spaceForecast([{ bytes: 0 }], 10).months, null);
+  const tiles = treemap([{ id: 'a', value: 6 }, { id: 'b', value: 6 }, { id: 'c', value: 4 }, { id: 'd', value: 3 }, { id: 'e', value: 2 }, { id: 'f', value: 2 }, { id: 'g', value: 1 }], 600, 400);
+  assert.equal(tiles.length, 7);
+  const area = tiles.reduce((a, t) => a + t.w * t.h, 0);
+  assert.ok(Math.abs(area - 240000) < 1);
+  const a = tiles.find((t) => t.id === 'a');
+  assert.ok(Math.abs(a.w * a.h - 60000) < 1);
+  for (const t of tiles) assert.ok(t.x >= -0.01 && t.y >= -0.01 && t.x + t.w <= 600.01 && t.y + t.h <= 400.01);
+});

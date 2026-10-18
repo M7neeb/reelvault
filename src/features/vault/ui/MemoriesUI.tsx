@@ -8,12 +8,14 @@
  * filmed, and an end card to replay, favourite, share or hide it. Three moods
  * change how it plays: Gentle (long clips, slow fades, warm), Upbeat (quick
  * cuts with a punch) and Epic (cinema bars, big titles).
+ * You can make your own (a keyword, an album, dates, a lowest rating), shuffle
+ * to a random one, and new memories carry a dot until you open them.
  * Hold to pause, tap the sides to skip, drag down to close.
  * Presentational only.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Platform, ScrollView, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -21,7 +23,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { memoryClips, memoryLength, memorySections, MOODS, type Clip, type Memory, type Mood } from '../memories';
+import { customMatches, memoryClips, memoryLength, memorySections, MOODS, type Clip, type CustomMemory, type Memory, type Mood } from '../memories';
 import { friendlyName } from '../names';
 import Fade from './Fade';
 import { success, tick } from './haptics';
@@ -30,6 +32,7 @@ import IconButton from './IconButton';
 import { gradient, SectionTitle } from './insightParts';
 import { DUR, EASE_OUT, enterUp, PressableScale, SPRING, useReducedMotion } from './motion';
 import { Aurora, CoverWall, Float, hexA, KenBurns, Letterbox, Pulse, Tilt, Words } from './storyKit';
+import { Segment, SheetFrame } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 
@@ -79,25 +82,56 @@ export function MemoriesTab({
   thumbs,
   favs,
   hidden,
+  seen = [],
+  tags = [],
+  albums = [],
   onPlay,
   onFav,
   onUnhideAll,
+  onCreate,
+  onDeleteCustom,
 }: {
   list: Memory[];
   items: Map<string, VaultItem>;
   thumbs: Thumbs;
   favs: string[];
   hidden: string[];
+  /** Opened before (the rest show a New dot). */
+  seen?: string[];
+  tags?: string[];
+  albums?: { id: number; name: string }[];
   onPlay: (m: Memory) => void;
   onFav: (id: string) => void;
   onUnhideAll: () => void;
+  onCreate?: (c: CustomMemory) => void;
+  onDeleteCustom?: (id: string) => void;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const { width } = useWindowDimensions();
   const s = useMemo(() => memorySections(list, hidden, favs), [list, hidden, favs]);
   const [page, setPage] = useState(0);
+  const [building, setBuilding] = useState(false);
   const cardW = width - 32;
+  const isNew = (m: Memory) => m.kind !== 'custom' && !seen.includes(m.id);
+  const shuffle = () => {
+    const pool = list.filter((m) => !hidden.includes(m.id));
+    if (pool.length) onPlay(pool[Math.floor(Math.random() * pool.length)]);
+  };
+  const builder = building && onCreate && (
+    <MemoryBuilder
+      items={items}
+      thumbs={thumbs}
+      tags={tags}
+      albums={albums}
+      onCreate={(c) => {
+        setBuilding(false);
+        success();
+        onCreate(c);
+      }}
+      onClose={() => setBuilding(false)}
+    />
+  );
 
   if (!s.featured.length)
     return (
@@ -109,11 +143,18 @@ export function MemoriesTab({
         </Float>
         <Text style={styles.emptyTitle}>Your memories will show up here</Text>
         <Text style={styles.emptyText}>As your library grows, ReelVault turns your videos into little films: trips, big days, on this day, the best of each month and season, and more.</Text>
+        {onCreate && items.size > 0 && (
+          <TouchableOpacity style={styles.makeBtn} onPress={() => setBuilding(true)}>
+            <Icon name="plus" size={14} color="#fff" />
+            <Text style={styles.makeText}>Make one yourself</Text>
+          </TouchableOpacity>
+        )}
         {hidden.length > 0 && (
           <TouchableOpacity onPress={onUnhideAll}>
             <Text style={[styles.link, { color: p.accent }]}>Show {hidden.length} hidden</Text>
           </TouchableOpacity>
         )}
+        {builder}
       </Animated.View>
     );
 
@@ -123,7 +164,7 @@ export function MemoriesTab({
         <SectionTitle title={title} detail={detail} />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bleed} contentContainerStyle={styles.row} decelerationRate="fast" snapToInterval={kind === 'tall' ? 162 : 232}>
           {ms.map((m, n) => (
-            <MemoryTile key={m.id} m={m} kind={kind} index={n} thumbs={thumbs} fav={favs.includes(m.id)} onPress={() => onPlay(m)} />
+            <MemoryTile key={m.id} m={m} kind={kind} index={n} thumbs={thumbs} fav={favs.includes(m.id)} fresh={isNew(m)} onPress={() => onPlay(m)} />
           ))}
         </ScrollView>
       </Animated.View>
@@ -133,8 +174,22 @@ export function MemoriesTab({
     <>
       <Animated.View entering={enterUp(0)} style={{ gap: 10 }}>
         <View style={styles.forYouHead}>
-          <Text style={styles.forYou}>For you</Text>
-          <Text style={styles.forYouSub}>{list.length - hidden.filter((h) => list.some((m) => m.id === h)).length} memories</Text>
+          <View>
+            <Text style={styles.forYou}>For you</Text>
+            <Text style={styles.forYouSub}>{list.length - hidden.filter((h) => list.some((m) => m.id === h)).length} memories</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <PressableScale style={styles.pill} onPress={shuffle} accessibilityLabel="Play a random memory">
+              <Icon name="shuffle" size={14} color={p.text} />
+              <Text style={styles.pillText}>Shuffle</Text>
+            </PressableScale>
+            {onCreate && (
+              <PressableScale style={[styles.pill, { backgroundColor: p.accent }]} onPress={() => setBuilding(true)} accessibilityLabel="Make a memory">
+                <Icon name="plus" size={14} color="#fff" />
+                <Text style={[styles.pillText, { color: '#fff' }]}>Make</Text>
+              </PressableScale>
+            )}
+          </View>
         </View>
         <ScrollView
           horizontal
@@ -147,7 +202,7 @@ export function MemoriesTab({
           onScroll={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / (cardW + 10)))}
           scrollEventThrottle={32}>
           {s.featured.map((m, n) => (
-            <FeaturedCard key={m.id} m={m} width={cardW} thumbs={thumbs} items={items} fav={favs.includes(m.id)} active={n === page} onPress={() => onPlay(m)} onFav={() => onFav(m.id)} />
+            <FeaturedCard key={m.id} m={m} width={cardW} thumbs={thumbs} items={items} fav={favs.includes(m.id)} fresh={isNew(m)} active={n === page} onPress={() => onPlay(m)} onFav={() => onFav(m.id)} />
           ))}
         </ScrollView>
         <View style={styles.dots}>
@@ -156,6 +211,7 @@ export function MemoriesTab({
           ))}
         </View>
       </Animated.View>
+      {row('Made by you', 'Your own memories', s.mine, 'wide', 1)}
       {row('Favourite memories', 'The ones you saved', s.favourites, 'wide', 1)}
       {row('On this day', 'From earlier years', s.onThisDay, 'wide', 2)}
       {row('Moments', 'Trips and big days', s.moments, 'tall', 3)}
@@ -171,9 +227,101 @@ export function MemoriesTab({
           <Text style={[styles.link, { color: p.accent }]}>Show {hidden.length} hidden {hidden.length === 1 ? 'memory' : 'memories'}</Text>
         </TouchableOpacity>
       )}
+      {builder}
     </>
   );
 }
+
+const DATE_PRESETS: { key: string; label: string; range: (now: Date) => [number | null, number | null] }[] = [
+  { key: 'any', label: 'Any time', range: () => [null, null] },
+  { key: '30', label: 'Last 30 days', range: (n) => [n.getTime() - 30 * 86_400_000, null] },
+  { key: 'year', label: 'This year', range: (n) => [new Date(n.getFullYear(), 0, 1).getTime(), null] },
+  { key: 'last', label: 'Last year', range: (n) => [new Date(n.getFullYear() - 1, 0, 1).getTime(), new Date(n.getFullYear(), 0, 1).getTime() - 86_400_000] },
+  { key: 'summer', label: 'Last summer', range: (n) => {
+    const y = n.getMonth() >= 8 ? n.getFullYear() : n.getFullYear() - 1;
+    return [new Date(y, 5, 1).getTime(), new Date(y, 8, 1).getTime() - 86_400_000];
+  } },
+];
+
+/** Make a memory: name it, pick what goes in, see it fill up, pick a mood. */
+function MemoryBuilder({ items, thumbs, tags, albums, onCreate, onClose }: { items: Map<string, VaultItem>; thumbs: Thumbs; tags: string[]; albums: { id: number; name: string }[]; onCreate: (c: CustomMemory) => void; onClose: () => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const [title, setTitle] = useState('');
+  const [tag, setTag] = useState<string | null>(null);
+  const [albumId, setAlbumId] = useState<number | null>(null);
+  const [when, setWhen] = useState('any');
+  const [minRating, setMinRating] = useState(0);
+  const [mood, setMood] = useState<Mood>('gentle');
+  const [from, to] = DATE_PRESETS.find((d) => d.key === when)!.range(new Date());
+  const videos = useMemo(() => [...items.values()], [items]);
+  const matches = useMemo(() => customMatches({ tag, albumId, from, to, minRating }, videos), [tag, albumId, from, to, minRating, videos]);
+  const suggested = tag ? `${tag.charAt(0).toUpperCase()}${tag.slice(1)}` : albumId !== null ? (albums.find((a) => a.id === albumId)?.name ?? 'My memory') : DATE_PRESETS.find((d) => d.key === when)!.label;
+  const name = title.trim() || (when === 'any' && !tag && albumId === null ? 'My memory' : suggested);
+  const chip = (label: string, on: boolean, onPress: () => void) => (
+    <TouchableOpacity
+      key={label}
+      onPress={() => {
+        tick();
+        onPress();
+      }}
+      style={[styles.chip, on && { backgroundColor: p.accent, borderColor: p.accent }]}>
+      <Text style={[styles.chipText, on && { color: '#fff' }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+  return (
+    <SheetFrame
+      title="New memory"
+      onClose={onClose}
+      action={{
+        label: 'Make',
+        disabled: matches.length === 0,
+        onPress: () => onCreate({ id: `custom:${Date.now()}`, title: name, tag, albumId, from, to, minRating, mood, createdAt: Date.now() }),
+      }}>
+      <View style={styles.buildPreview}>
+        {matches.slice(0, 8).map((v, i) => (
+          <Animated.View key={v.id} entering={ZoomInSoft(i)} style={[styles.buildThumb, { transform: [{ rotate: `${((i % 3) - 1) * 4}deg` }] }]}>
+            <Image source={thumbs.get(v.id)} style={StyleSheet.absoluteFill} contentFit="cover" />
+          </Animated.View>
+        ))}
+        {matches.length === 0 && <Text style={styles.muted}>Nothing matches yet. Try fewer filters.</Text>}
+      </View>
+      <Text style={styles.buildCount}>
+        {matches.length} {matches.length === 1 ? 'video' : 'videos'} · {name}
+      </Text>
+      <TextInput value={title} onChangeText={setTitle} placeholder={name} placeholderTextColor={p.textMuted} style={styles.input} maxLength={60} />
+      {tags.length > 0 && (
+        <>
+          <Text style={styles.buildLabel}>KEYWORD</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {chip('Any', tag === null, () => setTag(null))}
+            {tags.slice(0, 40).map((t) => chip(`#${t}`, tag === t, () => setTag(tag === t ? null : t)))}
+          </ScrollView>
+        </>
+      )}
+      {albums.length > 0 && (
+        <>
+          <Text style={styles.buildLabel}>ALBUM</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {chip('Any', albumId === null, () => setAlbumId(null))}
+            {albums.map((a) => chip(a.name, albumId === a.id, () => setAlbumId(albumId === a.id ? null : a.id)))}
+          </ScrollView>
+        </>
+      )}
+      <Text style={styles.buildLabel}>FILMED</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+        {DATE_PRESETS.map((d) => chip(d.label, when === d.key, () => setWhen(d.key)))}
+      </ScrollView>
+      <Text style={styles.buildLabel}>RATED AT LEAST</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>{[0, 5, 7, 9].map((r) => chip(r ? `★ ${r}+` : 'Any', minRating === r, () => setMinRating(r)))}</View>
+      <Text style={styles.buildLabel}>MOOD</Text>
+      <Segment options={(['gentle', 'upbeat', 'epic'] as const).map((k) => ({ key: k, label: MOODS[k].label }))} value={mood} onChange={setMood} />
+      <Text style={styles.muted}>{MOODS[mood].blurb}. You can change the mood while it plays.</Text>
+    </SheetFrame>
+  );
+}
+
+const ZoomInSoft = (i: number) => FadeInDown.delay(i * 40).duration(DUR.base).easing(EASE_OUT);
 
 function Dot({ on }: { on: boolean }) {
   const p = usePalette();
@@ -186,7 +334,7 @@ function Dot({ on }: { on: boolean }) {
 }
 
 /** The big carousel card: the cover moving slowly, its title, a play button. */
-function FeaturedCard({ m, width, thumbs, items, fav, active, onPress, onFav }: { m: Memory; width: number; thumbs: Thumbs; items: Map<string, VaultItem>; fav: boolean; active: boolean; onPress: () => void; onFav: () => void }) {
+function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, onFav }: { m: Memory; width: number; thumbs: Thumbs; items: Map<string, VaultItem>; fav: boolean; fresh: boolean; active: boolean; onPress: () => void; onFav: () => void }) {
   const styles = useStyles(makeStyles);
   const [a, b] = toneOf(m);
   const h = Math.min(480, width * 1.22);
@@ -202,8 +350,15 @@ function FeaturedCard({ m, width, thumbs, items, fav, active, onPress, onFav }: 
         </Text>
       )}
       <View style={styles.featuredTop}>
-        <View style={[styles.kickerChip, { backgroundColor: hexA(a, 0.92) }]}>
-          <Text style={styles.kickerChipText}>{m.kicker}</Text>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <View style={[styles.kickerChip, { backgroundColor: hexA(a, 0.92) }]}>
+            <Text style={styles.kickerChipText}>{m.kicker}</Text>
+          </View>
+          {fresh && (
+            <View style={styles.newChip}>
+              <Text style={styles.newChipText}>NEW</Text>
+            </View>
+          )}
         </View>
         <TouchableOpacity onPress={onFav} hitSlop={10} accessibilityLabel={fav ? 'Remove from favourites' : 'Add to favourites'} style={styles.heart}>
           <Icon name={fav ? 'heart' : 'heartOff'} size={18} color={fav ? '#FF375F' : '#fff'} />
@@ -240,7 +395,7 @@ function FeaturedCard({ m, width, thumbs, items, fav, active, onPress, onFav }: 
 }
 
 /** A card in a row: tall (one cover), wide, or a mosaic of four covers. */
-function MemoryTile({ m, kind, index, thumbs, fav, onPress }: { m: Memory; kind: 'tall' | 'wide' | 'mosaic'; index: number; thumbs: Thumbs; fav: boolean; onPress: () => void }) {
+function MemoryTile({ m, kind, index, thumbs, fav, fresh = false, onPress }: { m: Memory; kind: 'tall' | 'wide' | 'mosaic'; index: number; thumbs: Thumbs; fav: boolean; fresh?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const [a, b] = toneOf(m);
   const size = kind === 'tall' ? { width: 152, height: 214 } : { width: 222, height: 160 };
@@ -265,6 +420,7 @@ function MemoryTile({ m, kind, index, thumbs, fav, onPress }: { m: Memory; kind:
             <Icon name="heart" size={12} color="#FF375F" />
           </View>
         )}
+        {fresh && <View style={styles.tileNew} />}
         <View style={styles.tileText}>
           <View style={styles.tileKickerRow}>
             <View style={[styles.tileDot, { backgroundColor: a }]} />
@@ -368,6 +524,8 @@ export function MemoryPlayer({
   loadBookmarks,
   onFav,
   onHide,
+  onDelete,
+  onEvent,
   onOpenVideo,
   onClose,
 }: {
@@ -379,6 +537,10 @@ export function MemoryPlayer({
   loadBookmarks: (videoId: string) => Promise<number[]>;
   onFav: () => void;
   onHide: () => void;
+  /** Your own memories can be deleted. */
+  onDelete?: () => void;
+  /** For badges: "memory" (with its kind) when it starts, "mood" for each mood it plays in. */
+  onEvent?: (k: string, v?: string) => void;
   onOpenVideo: (id: string) => void;
   onClose: () => void;
 }) {
@@ -394,6 +556,12 @@ export function MemoryPlayer({
       .catch(() => undefined);
   }, [m.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const clips = useMemo(() => memoryClips(m, items, mood, marks), [m, items, mood, marks]);
+  useEffect(() => {
+    onEvent?.('memory', m.kind);
+  }, [m.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onEvent?.('mood', mood);
+  }, [mood]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -1 = the title card, clips.length = the end card. The preview can open a step: `&card=2`.
   const previewCard = Platform.OS === 'web' && typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('card') : null;
@@ -546,10 +714,11 @@ export function MemoryPlayer({
                       onPress={() => void Share.share({ message: `A memory from ReelVault: ${m.title} (${spanText(m)}), ${m.total} ${m.total === 1 ? 'video' : 'videos'}.` })}
                     />
                     <EndButton
-                      icon="eyeOff"
-                      label="Hide"
+                      icon={onDelete ? 'trash' : 'eyeOff'}
+                      label={onDelete ? 'Delete' : 'Hide'}
                       onPress={() => {
-                        onHide();
+                        if (onDelete) onDelete();
+                        else onHide();
                         onClose();
                       }}
                     />
@@ -587,7 +756,7 @@ export function MemoryPlayer({
   );
 }
 
-function EndButton({ icon, label, tint, onPress }: { icon: 'rewatch' | 'heart' | 'heartOff' | 'share' | 'eyeOff'; label: string; tint?: string; onPress: () => void }) {
+function EndButton({ icon, label, tint, onPress }: { icon: 'rewatch' | 'heart' | 'heartOff' | 'share' | 'eyeOff' | 'trash'; label: string; tint?: string; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   return (
     <PressableScale onPress={onPress} style={styles.endBtn} accessibilityRole="button" accessibilityLabel={label}>
@@ -606,6 +775,21 @@ const makeStyles = (p: Palette) =>
     forYouHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
     forYou: { color: p.text, fontSize: 28, fontWeight: '900', letterSpacing: -0.8 },
     forYouSub: { color: p.textSecondary, fontSize: 13, fontWeight: '700' },
+    pill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 9 },
+    pillText: { color: p.text, fontSize: 13, fontWeight: '800' },
+    newChip: { backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
+    newChipText: { color: '#FF375F', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    tileNew: { position: 'absolute', top: 10, right: 10, width: 10, height: 10, borderRadius: 5, backgroundColor: '#FF375F', borderWidth: 2, borderColor: '#fff' },
+    makeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 12, marginTop: 6 },
+    makeText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    muted: { color: p.textSecondary, fontSize: 13, lineHeight: 18 },
+    chip: { borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8, backgroundColor: p.card, borderWidth: 1, borderColor: p.border },
+    chipText: { color: p.text, fontSize: 13, fontWeight: '700' },
+    buildPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, minHeight: 74, alignItems: 'center', justifyContent: 'center' },
+    buildThumb: { width: 56, height: 74, borderRadius: 10, overflow: 'hidden', backgroundColor: p.card, borderWidth: 2, borderColor: '#fff' },
+    buildCount: { color: p.text, fontSize: 17, fontWeight: '900', textAlign: 'center' },
+    buildLabel: { color: p.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1, marginTop: 6 },
+    input: { backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: p.text, fontSize: 16, fontWeight: '600' },
     dots: { flexDirection: 'row', gap: 5, alignSelf: 'center', alignItems: 'center' },
     foot: { color: p.textMuted, fontSize: 12, textAlign: 'center', paddingHorizontal: 20, lineHeight: 17, marginTop: 6 },
     link: { fontSize: 14, fontWeight: '700', paddingVertical: 8 },

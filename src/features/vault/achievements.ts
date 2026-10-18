@@ -7,20 +7,27 @@
  * - ladders: the same goal in bigger steps (10 → 100 → 500 videos), each step
  *   a tier from bronze to diamond;
  * - one-offs: a thing done once (a 3-hour day, rating something 10);
- * - monthly challenges: a new goal each month, kept once earned.
+ * - monthly and weekly challenges: a new goal each month and week, kept once earned;
+ * - a few that look at the others (a badge in every group, a platinum step).
+ *
+ * Things you do that leave no other trace (playing a memory, guessing your #1
+ * in Wrapped) come in as dated events.
  *
  * Where the data has a date, `earnedAt` says when it was earned. Pure, so it
  * is tested in Node.
  */
 
-export type AchGroup = 'Library' | 'Watching' | 'Habits' | 'Organising' | 'Monthly' | 'Simkl';
+export type AchGroup = 'Library' | 'Watching' | 'Habits' | 'Organising' | 'Memories' | 'Monthly' | 'Simkl';
+
+/** Something you did in the app that leaves no other trace, and when ("memory", "quiz-right"…). */
+export type AchEvent = { k: string; at: number; v?: string };
 
 export type Achievement = {
   /** Stable: the old badge ids ("library-100") are kept. */
   id: string;
   /** The ladder or one-off it belongs to ("library"). */
   family: string;
-  kind: 'ladder' | 'once' | 'monthly';
+  kind: 'ladder' | 'once' | 'monthly' | 'weekly';
   group: AchGroup;
   /** An icon name the UI knows (see ui/icons.ts). */
   icon: string;
@@ -57,6 +64,8 @@ export type AchVideo = {
   location?: { lat: number; lon: number } | null;
   title?: string | null;
   notes?: string | null;
+  /** Overview status ("completed", "plantowatch"…). */
+  status?: string | null;
 };
 
 export type AchPlay = { videoId: string; startedAt: number; watchedMs: number };
@@ -81,6 +90,11 @@ export type AchInput = {
     /** When each Simkl watch happened (counts for streaks and active days). */
     times: number[];
   } | null;
+  /** Memories made from the library, and how many are trips. */
+  memories?: { total: number; trips: number } | null;
+  /** Where most videos were filmed. */
+  home?: { lat: number; lon: number } | null;
+  events?: AchEvent[];
   now: number;
 };
 
@@ -165,6 +179,16 @@ type Ladder = {
   /** When `target` was reached (and by which video), if the data says. */
   when?: (i: AchInput, target: number) => Hit;
 };
+
+/** Events of one kind, oldest first. */
+const ev = (i: AchInput, k: string, v?: string) => (i.events ?? []).filter((e) => e.k === k && (v === undefined || e.v === v)).sort((a, b) => a.at - b.at);
+const nthEvent = (i: AchInput, k: string, n: number, v?: string): Hit => dated(ev(i, k, v)[n - 1]?.at);
+
+function km(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const r = (x: number) => (x * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lon - a.lon) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
 
 const watchTimes = (i: AchInput) => i.plays.map((p) => p.startedAt);
 const allTimes = (i: AchInput) => [...watchTimes(i), ...(i.simkl?.times ?? [])];
@@ -367,6 +391,83 @@ const LADDERS: Ladder[] = [
     title: (n) => `Storyteller · ${n}`,
     detail: (n) => `Give ${n} videos a title or a caption`,
     value: (i) => i.videos.filter((v) => (v.title ?? '').trim() || (v.notes ?? '').trim()).length,
+  },
+  {
+    family: 'completed',
+    group: 'Organising',
+    icon: 'checkCircle',
+    tiers: [5, 25, 100, 500],
+    title: (n) => `${n} completed`,
+    detail: (n) => `Mark ${n} videos Completed in Overview`,
+    value: (i) => i.videos.filter((v) => v.status === 'completed').length,
+  },
+  {
+    family: 'memories-played',
+    group: 'Memories',
+    icon: 'memories',
+    tiers: [1, 10, 50, 200],
+    title: (n) => (n === 1 ? 'First memory' : `${n} memories watched`),
+    detail: (n) => (n === 1 ? 'Play a memory' : `Play ${n} memories`),
+    value: (i) => ev(i, 'memory').length,
+    when: (i, n) => nthEvent(i, 'memory', n),
+  },
+  {
+    family: 'memory-collection',
+    group: 'Memories',
+    icon: 'photo',
+    tiers: [5, 25, 100],
+    title: (n) => `${n} memories`,
+    detail: (n) => `Have ${n} memories made from your videos`,
+    value: (i) => i.memories?.total ?? 0,
+  },
+  {
+    family: 'trips',
+    group: 'Memories',
+    icon: 'mapPin',
+    tiers: [1, 5, 20],
+    title: (n) => (n === 1 ? 'First trip' : `${n} trips`),
+    detail: (n) => (n === 1 ? 'Film a few videos far from home (a trip memory)' : `Have ${n} trip memories`),
+    value: (i) => i.memories?.trips ?? 0,
+  },
+  {
+    family: 'director',
+    group: 'Memories',
+    icon: 'film',
+    tiers: [1, 5, 20],
+    title: (n) => (n === 1 ? 'Director' : `Director · ${n}`),
+    detail: (n) => (n === 1 ? 'Make a memory of your own' : `Make ${n} memories of your own`),
+    value: (i) => ev(i, 'custom-memory').length,
+    when: (i, n) => nthEvent(i, 'custom-memory', n),
+  },
+  {
+    family: 'wraps',
+    group: 'Memories',
+    icon: 'sparkle',
+    tiers: [1, 10, 52],
+    title: (n) => (n === 1 ? 'That’s a wrap' : `${n} Wrapped stories`),
+    detail: (n) => (n === 1 ? 'Watch a Wrapped story to the end' : `Watch ${n} Wrapped stories to the end`),
+    value: (i) => ev(i, 'wrapped-end').length,
+    when: (i, n) => nthEvent(i, 'wrapped-end', n),
+  },
+  {
+    family: 'spot-on',
+    group: 'Memories',
+    icon: 'target',
+    tiers: [1, 5, 20],
+    title: (n) => (n === 1 ? 'Spot on' : `Spot on ×${n}`),
+    detail: (n) => (n === 1 ? 'Guess your #1 right in Wrapped' : `Guess your #1 right ${n} times`),
+    value: (i) => ev(i, 'quiz-right').length,
+    when: (i, n) => nthEvent(i, 'quiz-right', n),
+  },
+  {
+    family: 'weekly-wins',
+    group: 'Habits',
+    icon: 'target',
+    tiers: [1, 4, 12, 52],
+    title: (n) => (n === 1 ? 'Challenge accepted' : `${n} weekly wins`),
+    detail: (n) => (n === 1 ? 'Win a weekly challenge' : `Win ${n} weekly challenges`),
+    value: (i) => weeklyWins(i).length,
+    when: (i, n) => dated(weeklyWins(i)[n - 1]),
   },
   {
     family: 'episodes',
@@ -665,6 +766,132 @@ const ONCE: Once[] = [
     check: (i) => nthPlay(i, 1, (p) => new Date(p.startedAt).getHours() === 3),
   },
   {
+    family: 'mood-explorer',
+    group: 'Memories',
+    icon: 'wand',
+    title: 'Mood explorer',
+    detail: 'Play a memory in all three moods: Gentle, Upbeat and Epic',
+    target: 3,
+    check: (i) => {
+      const seen = new Set<string>();
+      let at: number | null = null;
+      for (const e of ev(i, 'mood')) {
+        seen.add(e.v ?? '');
+        if (at === null && seen.size >= 3) at = e.at;
+      }
+      return { current: seen.size, at };
+    },
+  },
+  {
+    family: 'heartfelt',
+    group: 'Memories',
+    icon: 'heart',
+    title: 'Heartfelt',
+    detail: 'Save a memory to your favourites',
+    target: 1,
+    check: (i) => ({ current: ev(i, 'memory-fav').length, at: ev(i, 'memory-fav')[0]?.at ?? null }),
+  },
+  {
+    family: 'nostalgic',
+    group: 'Memories',
+    icon: 'calendar',
+    title: 'Nostalgic',
+    detail: 'Play an On this day memory',
+    target: 1,
+    check: (i) => ({ current: ev(i, 'memory', 'onThisDay').length, at: ev(i, 'memory', 'onThisDay')[0]?.at ?? null }),
+  },
+  {
+    family: 'wanderlust',
+    group: 'Memories',
+    icon: 'mapPin',
+    title: 'Wanderlust',
+    detail: 'Play a trip memory',
+    target: 1,
+    check: (i) => ({ current: ev(i, 'memory', 'trip').length, at: ev(i, 'memory', 'trip')[0]?.at ?? null }),
+  },
+  {
+    family: 'far-away',
+    group: 'Library',
+    icon: 'globe',
+    title: 'Far, far away',
+    detail: 'Have a video filmed 1,000 km or more from home',
+    target: 1,
+    check: (i) => {
+      const far = i.home ? i.videos.find((v) => v.location && km(i.home!, v.location) >= 1000) : undefined;
+      return { current: far ? 1 : 0, at: far?.createdAt ?? null, videoId: far?.id ?? null };
+    },
+  },
+  {
+    family: 'anniversary-watch',
+    group: 'Watching',
+    icon: 'rewatch',
+    title: 'Same day, years later',
+    detail: 'Watch a video on the date it was filmed, a year or more later',
+    target: 1,
+    check: (i) => {
+      const byId = new Map(i.videos.map((v) => [v.id, v]));
+      return nthPlay(i, 1, (p) => {
+        const v = byId.get(p.videoId);
+        if (!v) return false;
+        const a = new Date(p.startedAt);
+        const b = new Date(v.createdAt);
+        return a.getFullYear() > b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+      });
+    },
+  },
+  {
+    family: 'planner',
+    group: 'Organising',
+    icon: 'bookmark',
+    title: 'Planner',
+    detail: 'Put 10 videos on Plan to watch in Overview',
+    target: 10,
+    check: (i) => ({ current: i.videos.filter((v) => v.status === 'plantowatch').length, at: null }),
+  },
+  {
+    family: 'tough-crowd',
+    group: 'Library',
+    icon: 'starOff',
+    title: 'Tough crowd',
+    detail: 'Give 5 videos a rating of 3 or less',
+    target: 5,
+    check: (i) => ({ current: i.videos.filter((v) => v.rating > 0 && v.rating <= 3).length, at: null }),
+  },
+  {
+    family: 'new-year',
+    group: 'Habits',
+    icon: 'sparkle',
+    title: 'Happy new year',
+    detail: 'Press play in the first hour of the new year',
+    target: 1,
+    secret: true,
+    check: (i) =>
+      nthPlay(i, 1, (p) => {
+        const d = new Date(p.startedAt);
+        return d.getMonth() === 0 && d.getDate() === 1 && d.getHours() === 0;
+      }),
+  },
+  {
+    family: 'leap-day',
+    group: 'Habits',
+    icon: 'calendar',
+    title: 'Leap of faith',
+    detail: 'Watch something on 29 February',
+    target: 1,
+    secret: true,
+    check: (i) => nthPlay(i, 1, (p) => new Date(p.startedAt).getMonth() === 1 && new Date(p.startedAt).getDate() === 29),
+  },
+  {
+    family: 'friday-13',
+    group: 'Habits',
+    icon: 'moon',
+    title: 'Unlucky for some',
+    detail: 'Watch something on a Friday the 13th',
+    target: 1,
+    secret: true,
+    check: (i) => nthPlay(i, 1, (p) => new Date(p.startedAt).getDay() === 5 && new Date(p.startedAt).getDate() === 13),
+  },
+  {
     family: 'holidays',
     group: 'Habits',
     icon: 'sparkle',
@@ -746,6 +973,96 @@ function monthlies(i: AchInput, monthsBack = 6): Achievement[] {
   return out;
 }
 
+/* ------------------------------------------------------------- weekly */
+
+type Weekly = { key: 'new' | 'days' | 'hours' | 'memories' | 'old'; target: number; unit?: string; title: string; detail: string };
+
+const WEEKLIES: Weekly[] = [
+  { key: 'new', target: 3, title: 'Something new', detail: 'Watch 3 videos you have never watched before' },
+  { key: 'days', target: 4, unit: 'days', title: 'Four-day week', detail: 'Watch on 4 different days' },
+  { key: 'hours', target: 2, unit: 'h', title: 'Two-hour week', detail: 'Watch 2 hours of your videos' },
+  { key: 'memories', target: 2, title: 'Look back', detail: 'Play 2 memories' },
+  { key: 'old', target: 2, title: 'Blast from the past', detail: 'Watch 2 videos filmed more than a year earlier' },
+];
+
+/** Each week (from Monday) has its own goal, picked from the week itself. */
+export function weeklyFor(weekStart: number): Weekly {
+  return WEEKLIES[Math.floor((weekStart + 3 * DAY) / (7 * DAY)) % WEEKLIES.length];
+}
+
+function weeklyProgress(i: AchInput, start: number, c: Weekly): { current: number; at: number | null; videoId: string | null } {
+  const s = new Date(start);
+  const end = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 7).getTime();
+  const ps = i.plays.filter((p) => p.startedAt >= start && p.startedAt < end).sort((a, b) => a.startedAt - b.startedAt);
+  if (c.key === 'memories') {
+    const es = ev(i, 'memory').filter((e) => e.at >= start && e.at < end);
+    return { current: es.length, at: es[c.target - 1]?.at ?? null, videoId: null };
+  }
+  if (c.key === 'hours') {
+    const hit = whenReached(ps.map((p) => ({ at: p.startedAt, add: p.watchedMs, videoId: p.videoId })), c.target * HOUR);
+    return { current: Math.round((ps.reduce((a, p) => a + p.watchedMs, 0) / HOUR) * 10) / 10, at: hit?.at ?? null, videoId: hit?.videoId ?? null };
+  }
+  const byId = new Map(i.videos.map((v) => [v.id, v]));
+  const before = new Set(i.plays.filter((p) => p.startedAt < start).map((p) => p.videoId));
+  const seen = new Set<string>();
+  let at: number | null = null;
+  let videoId: string | null = null;
+  for (const p of ps) {
+    const v = byId.get(p.videoId);
+    if (c.key === 'new' && before.has(p.videoId)) continue;
+    if (c.key === 'old' && (!v || p.startedAt - v.createdAt < 365 * DAY)) continue;
+    seen.add(c.key === 'days' ? dayKey(p.startedAt) : p.videoId);
+    if (at === null && seen.size >= c.target) {
+      at = p.startedAt;
+      videoId = p.videoId;
+    }
+  }
+  return { current: seen.size, at, videoId };
+}
+
+/** When each weekly challenge you won was won, oldest first. */
+export function weeklyWins(i: AchInput): number[] {
+  const times = [...i.plays.map((p) => p.startedAt), ...ev(i, 'memory').map((e) => e.at)];
+  if (!times.length) return [];
+  const out: number[] = [];
+  for (let w = monday(Math.min(...times)); w <= i.now; w = monday(w + 8 * DAY)) {
+    const r = weeklyProgress(i, w, weeklyFor(w));
+    if (r.current >= weeklyFor(w).target && r.at !== null) out.push(r.at);
+  }
+  return out;
+}
+
+function weeklies(i: AchInput, weeksBack = 8): Achievement[] {
+  const out: Achievement[] = [];
+  const now = monday(i.now);
+  for (let k = 0; k < weeksBack; k++) {
+    const d = new Date(now);
+    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7 * k).getTime();
+    const c = weeklyFor(start);
+    const r = weeklyProgress(i, start, c);
+    const unlocked = r.current >= c.target;
+    if (k > 0 && !unlocked) continue;
+    const label = new Date(start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    out.push({
+      id: `week-${new Date(start).getFullYear()}-${new Date(start).getMonth() + 1}-${new Date(start).getDate()}`,
+      family: 'weekly',
+      kind: 'weekly',
+      group: 'Monthly',
+      icon: 'target',
+      title: k === 0 ? `This week: ${c.title}` : `Week of ${label}: ${c.title}`,
+      detail: c.detail + (k === 0 ? ' this week' : ` in the week of ${label}`),
+      current: Math.round(r.current * 10) / 10,
+      target: c.target,
+      unlocked,
+      tier: 2,
+      earnedAt: unlocked ? r.at : null,
+      videoId: unlocked ? r.videoId : null,
+      unit: c.unit,
+    });
+  }
+  return out;
+}
+
 /* --------------------------------------------------------------- build */
 
 /**
@@ -801,7 +1118,21 @@ export function achievements(i: AchInput, opts: { everyStep?: boolean } = {}): A
       unit: o.unit,
     });
   }
-  if (i.plays.length || i.videos.length) out.push(...monthlies(i));
+  if (i.plays.length || i.videos.length) out.push(...monthlies(i), ...weeklies(i));
+
+  // Badges about badges.
+  const got = out.filter((a) => a.unlocked && a.kind !== 'monthly' && a.kind !== 'weekly');
+  const firstAt = (list: Achievement[]) => list.map((a) => a.earnedAt).filter((t): t is number => t !== null).sort((a, b) => a - b)[0] ?? null;
+  const groups: AchGroup[] = ['Watching', 'Habits', 'Library', 'Organising', 'Memories'];
+  const groupsDone = groups.filter((g) => got.some((a) => a.group === g));
+  const meta = (family: string, icon: string, title: string, detail: string, current: number, target: number, list: Achievement[], secret?: boolean) =>
+    out.push({ id: family, family, kind: 'once', group: 'Library', icon, title, detail, current, target, unlocked: current >= target, tier: 3, earnedAt: current >= target ? firstAt(list) : null, videoId: null, secret });
+  meta('all-rounder', 'medal', 'All-rounder', 'Earn a badge in Watching, Habits, Library, Organising and Memories', groupsDone.length, groups.length, []);
+  const plat = got.filter((a) => a.kind === 'ladder' && a.tier >= 4);
+  meta('platinum-club', 'trophy', 'Platinum club', 'Reach a platinum step on any ladder', plat.length ? 1 : 0, 1, plat);
+  const dia = got.filter((a) => a.kind === 'ladder' && a.tier >= 5);
+  meta('diamond', 'sparkle', 'Diamond hands', 'Reach a diamond step on any ladder', dia.length ? 1 : 0, 1, dia, true);
+  meta('fifty', 'medal', 'Half a hundred', 'Earn 50 badges', got.length, 50, got.length >= 50 ? [got.sort((a, b) => (a.earnedAt ?? 0) - (b.earnedAt ?? 0))[49]] : []);
   return out;
 }
 

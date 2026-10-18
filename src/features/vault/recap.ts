@@ -487,3 +487,76 @@ export function growth(videos: RVideo[], now: number, months = 12): { key: numbe
     return { key: m.getTime(), label: m.toLocaleDateString(undefined, { month: 'narrow' }), bytes: sum(list, (v) => v.sizeBytes), count: list.length };
   });
 }
+
+/* ------------------------------------------------------- storage extras */
+
+/** How tidy the library is: a letter from how much of it could be freed. */
+export function spaceGrade(totalBytes: number, savableBytes: number): { grade: 'A' | 'B' | 'C' | 'D' | 'E'; line: string } {
+  const r = totalBytes ? savableBytes / totalBytes : 0;
+  if (r < 0.05) return { grade: 'A', line: 'Spotless. Hardly anything to clear.' };
+  if (r < 0.12) return { grade: 'B', line: 'Tidy, with a little to gain.' };
+  if (r < 0.25) return { grade: 'C', line: 'Some room to win back.' };
+  if (r < 0.4) return { grade: 'D', line: 'Lots you could clear.' };
+  return { grade: 'E', line: 'Much of it could go. Have a look below.' };
+}
+
+/** How long the phone's free space lasts at the pace of the last three months (null if not growing). */
+export function spaceForecast(months: { bytes: number }[], freeBytes: number | null): { perMonth: number; months: number | null } {
+  const last = months.slice(-3);
+  const perMonth = last.length ? last.reduce((a, m) => a + m.bytes, 0) / last.length : 0;
+  return { perMonth, months: freeBytes !== null && perMonth > 0 ? Math.floor(freeBytes / perMonth) : null };
+}
+
+export type Tile = { id: string; x: number; y: number; w: number; h: number };
+
+/** A squarified treemap: boxes with areas in proportion to the values, as square as can be. */
+export function treemap(items: { id: string; value: number }[], width: number, height: number): Tile[] {
+  const list = items.filter((i) => i.value > 0).sort((a, b) => b.value - a.value);
+  const total = list.reduce((a, i) => a + i.value, 0);
+  if (!total || width <= 0 || height <= 0) return [];
+  const scale = (width * height) / total;
+  const out: Tile[] = [];
+  let x = 0;
+  let y = 0;
+  let w = width;
+  let h = height;
+  let row: { id: string; a: number }[] = [];
+  const worst = (r: { a: number }[], side: number) => {
+    const s = r.reduce((a, i) => a + i.a, 0);
+    const max = Math.max(...r.map((i) => i.a));
+    const min = Math.min(...r.map((i) => i.a));
+    return Math.max((side * side * max) / (s * s), (s * s) / (side * side * min));
+  };
+  const lay = (r: { id: string; a: number }[]) => {
+    const s = r.reduce((a, i) => a + i.a, 0);
+    if (w >= h) {
+      const cw = s / h;
+      let cy = y;
+      for (const i of r) {
+        out.push({ id: i.id, x, y: cy, w: cw, h: i.a / cw });
+        cy += i.a / cw;
+      }
+      x += cw;
+      w -= cw;
+    } else {
+      const ch = s / w;
+      let cx = x;
+      for (const i of r) {
+        out.push({ id: i.id, x: cx, y, w: i.a / ch, h: ch });
+        cx += i.a / ch;
+      }
+      y += ch;
+      h -= ch;
+    }
+  };
+  for (const it of list.map((i) => ({ id: i.id, a: i.value * scale }))) {
+    const side = Math.min(w, h);
+    if (!row.length || worst([...row, it], side) <= worst(row, side)) row.push(it);
+    else {
+      lay(row);
+      row = [it];
+    }
+  }
+  if (row.length) lay(row);
+  return out;
+}

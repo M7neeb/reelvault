@@ -211,9 +211,16 @@ export function Medallion({ icon, tier, unlocked, size = 64, progress }: { icon:
         style={[
           { width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', borderWidth: ring },
           unlocked
-            ? ({ ...gradient(`linear-gradient(145deg, ${light} 0%, ${dark} 100%)`), borderColor: `${light}AA`, shadowColor: dark, shadowOpacity: 0.45, shadowRadius: size / 6, shadowOffset: { width: 0, height: size / 16 } } as ViewStyle)
+            ? ({ ...gradient(`linear-gradient(145deg, ${light} 0%, ${dark} 55%, ${light} 100%)`), borderColor: `${light}AA`, shadowColor: dark, shadowOpacity: 0.45, shadowRadius: size / 6, shadowOffset: { width: 0, height: size / 16 } } as ViewStyle)
             : { backgroundColor: p.card, borderColor: p.border },
         ]}>
+        {unlocked && (
+          <>
+            {/* the inner rim and a highlight, so it reads as metal */}
+            <View pointerEvents="none" style={{ position: 'absolute', top: ring, left: ring, right: ring, bottom: ring, borderRadius: size, borderWidth: Math.max(1, ring / 2), borderColor: 'rgba(255,255,255,0.35)' }} />
+            <View pointerEvents="none" style={[{ position: 'absolute', top: size * 0.08, left: size * 0.2, right: size * 0.2, height: size * 0.34, borderRadius: size }, gradient('linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 100%)', 'transparent')]} />
+          </>
+        )}
         <Icon name={iconOr(icon)} size={size * 0.42} color={unlocked ? '#fff' : p.textMuted} weight="bold" />
       </View>
       {!unlocked && progress !== undefined && progress > 0 && (

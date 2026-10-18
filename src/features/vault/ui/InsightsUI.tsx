@@ -12,19 +12,19 @@
  * Presentational only: plays and Simkl numbers come in through callbacks.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
-import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RankedBars } from '@/features/simkl/ui/charts';
 import type { SimklBridge } from '@/features/simkl/ui/types';
 
-import { achievements, summarize, type AchInput } from '../achievements';
+import { achievements, summarize, type AchEvent, type AchInput } from '../achievements';
 import { buildOverview } from '../overview';
-import { memories as buildMemories, type Memory } from '../memories';
-import { growth, journey, levelFor, personalRecords, spaceIdeas, storyFacts } from '../recap';
+import { customMemory, homeOf, memories as buildMemories, type CustomMemory, type Memory } from '../memories';
+import { growth, journey, levelFor, monthRanges, personalRecords, spaceForecast, spaceGrade, spaceIdeas, storyFacts, treemap, yearRange } from '../recap';
 import { fmtBytes, fmtMs, recentWeeks, storageStats, wrapped as buildWrapped, type Range, type RatingLabels, type VaultPlay } from '../stats';
 import Badges from './BadgesUI';
 import Dashboard from './DashboardUI';
@@ -36,6 +36,7 @@ import type { IconName } from './icons';
 import { Bars, Card, gradient, Ring, StatTile } from './insightParts';
 import { DUR, enterUp, PressableScale, SPRING } from './motion';
 import { MemoriesTab, MemoryPlayer } from './MemoriesUI';
+import { Aurora, CountUp, GrowBar } from './storyKit';
 import { toOvVideo } from './overviewParts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
@@ -54,7 +55,7 @@ const TABS: { key: InsightsTab; label: string; icon: IconName; color: string }[]
 ];
 
 /** The tab bar: icons in coloured squares, a pill that slides to the chosen one. */
-function TabStrip({ value, onChange }: { value: InsightsTab; onChange: (t: InsightsTab) => void }) {
+function TabStrip({ value, onChange, dots = {} }: { value: InsightsTab; onChange: (t: InsightsTab) => void; dots?: Partial<Record<InsightsTab, number>> }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const [w, setW] = useState(0);
@@ -73,6 +74,11 @@ function TabStrip({ value, onChange }: { value: InsightsTab; onChange: (t: Insig
           <TouchableOpacity key={t.key} style={styles.tab} onPress={() => onChange(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
             <View style={[styles.tabIcon, { backgroundColor: on ? t.color : `${t.color}22` }]}>
               <Icon name={t.icon} size={14} color={on ? '#fff' : t.color} />
+              {!!dots[t.key] && (
+                <Animated.View entering={ZoomIn.springify()} style={styles.tabDot}>
+                  <Text style={styles.tabDotText}>{dots[t.key]! > 9 ? '9+' : dots[t.key]}</Text>
+                </Animated.View>
+              )}
             </View>
             <Text style={[styles.tabText, on && { color: p.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
               {t.label}
@@ -89,6 +95,7 @@ export default function VideoInsightsModal({
   items,
   deleted,
   albums,
+  albumList = [],
   smartFilters = 0,
   overview,
   prefs = DEFAULT_VAULT_PREFS,
@@ -109,6 +116,8 @@ export default function VideoInsightsModal({
   items: VaultItem[];
   deleted: VaultItem[];
   albums: number;
+  /** Album names, for making a memory from one. */
+  albumList?: { id: number; name: string }[];
   smartFilters?: number;
   /** Series and removed videos, for their badges and Wrapped. */
   overview?: OverviewData;
@@ -139,6 +148,18 @@ export default function VideoInsightsModal({
   const [sk, setSk] = useState<SimklNumbers | null>(null);
   const [story, setStory] = useState<StoryInput | null>(null);
   const [memory, setMemory] = useState<Memory | null>(null);
+  // Changes go through one ref so two quick changes (a favourite and its badge event) never undo each other.
+  const prefsRef = useRef(prefs);
+  useEffect(() => {
+    prefsRef.current = prefs;
+  }, [prefs]);
+  const savePrefs = (patch: Partial<VaultPrefs> | ((p: VaultPrefs) => Partial<VaultPrefs>)) => {
+    const cur = prefsRef.current;
+    const next = { ...cur, ...(typeof patch === 'function' ? patch(cur) : patch) };
+    prefsRef.current = next;
+    void actions.setPrefs(next);
+  };
+  const logEvent = (k: string, v?: string) => savePrefs((cur) => ({ events: [...cur.events, { k, at: Date.now(), ...(v ? { v } : {}) } as AchEvent].slice(-3000) }));
 
   useEffect(() => {
     actions.loadPlays().then(setPlays).catch(() => setPlays([]));
@@ -154,10 +175,17 @@ export default function VideoInsightsModal({
     [overview, items, plays]
   );
 
+  const located = useMemo(() => items.map((v) => ({ ...v, location: v.meta?.location ?? null })), [items]);
+  const memoryList = useMemo(() => {
+    if (!plays) return [];
+    const mine = prefs.customMemories.map((c) => customMemory(c, located, plays)).filter((m): m is Memory => !!m);
+    return [...mine, ...buildMemories(located, plays, Date.now())];
+  }, [located, plays, prefs.customMemories]);
+  const home = useMemo(() => homeOf(located), [located]);
   const achInput = useMemo<AchInput | null>(() => {
     if (!plays) return null;
     return {
-      videos: items.map((v) => ({ ...v, location: v.meta?.location ?? null })),
+      videos: located,
       plays,
       bookmarks,
       albums,
@@ -175,11 +203,22 @@ export default function VideoInsightsModal({
             times: sk.events.map((e) => e.at),
           }
         : null,
+      memories: { total: memoryList.filter((m) => m.kind !== 'custom').length, trips: memoryList.filter((m) => m.kind === 'trip').length },
+      home,
+      events: prefs.events,
       now: Date.now(),
     };
-  }, [plays, items, bookmarks, albums, smartFilters, overview, sk, entries]);
+  }, [plays, located, bookmarks, albums, smartFilters, overview, sk, entries, memoryList, home, prefs.events]);
   const badgeList = useMemo(() => (achInput ? achievements(achInput) : []), [achInput]);
   const badgeAll = useMemo(() => (achInput ? achievements(achInput, { everyStep: true }) : []), [achInput]);
+  // Badges earned since you last looked. The very first time, everything already earned counts as seen.
+  const fresh = useMemo(() => (prefs.badgesSeen === null ? [] : badgeList.filter((a) => a.unlocked && !prefs.badgesSeen!.includes(a.id))), [badgeList, prefs.badgesSeen]);
+  useEffect(() => {
+    if (plays && prefs.badgesSeen === null && badgeList.length) savePrefs({ badgesSeen: badgeList.filter((a) => a.unlocked).map((a) => a.id) });
+  }, [plays, badgeList]); // eslint-disable-line react-hooks/exhaustive-deps
+  const markBadgesSeen = () => savePrefs((cur) => ({ badgesSeen: [...new Set([...(cur.badgesSeen ?? []), ...badgeList.filter((a) => a.unlocked).map((a) => a.id)])] }));
+  const newMemories = memoryList.filter((m) => !prefs.memoriesSeen.includes(m.id) && !prefs.memoryHidden.includes(m.id) && m.kind !== 'custom').length;
+  const tags = useMemo(() => [...new Set(items.flatMap((v) => v.tagNames))].sort((a, b) => a.localeCompare(b)), [items]);
   const level = useMemo(() => {
     const s = summarize(badgeList);
     const watched = (plays ?? []).filter((x) => byId.has(x.videoId)).reduce((a, x) => a + x.watchedMs, 0);
@@ -196,15 +235,20 @@ export default function VideoInsightsModal({
     [items, plays, badgeList]
   );
 
-  const memoryList = useMemo(() => (plays ? buildMemories(items.map((v) => ({ ...v, location: v.meta?.location ?? null })), plays, Date.now()) : []), [items, plays]);
   // The browser preview can open a memory straight away (`/preview?view=memory`).
   useEffect(() => {
-    if (initialMemory && memoryList.length && !memory) setMemory(memoryList[0]);
+    if (initialMemory && memoryList.length && !memory) setMemory(memoryList.find((m) => m.kind !== 'custom') ?? memoryList[0]);
   }, [initialMemory, memoryList]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleIn = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   const favMemory = (id: string) => {
     tick();
-    void actions.setPrefs({ ...prefs, memoryFavs: toggleIn(prefs.memoryFavs, id) });
+    const adding = !prefsRef.current.memoryFavs.includes(id);
+    savePrefs((cur) => ({ memoryFavs: toggleIn(cur.memoryFavs, id) }));
+    if (adding) logEvent('memory-fav');
+  };
+  const openMemory = (m: Memory) => {
+    setMemory(m);
+    if (!prefsRef.current.memoriesSeen.includes(m.id)) savePrefs((cur) => ({ memoriesSeen: [...cur.memoriesSeen, m.id].slice(-1000) }));
   };
 
   /** Everything the story needs for a range. */
@@ -222,7 +266,19 @@ export default function VideoInsightsModal({
       .filter((s) => s.episodes > 0)
       .sort((a, b) => b.episodes - a.episodes);
     const prevR = previous(r);
+    // Year-long ranges: the #1 of each month, oldest first.
+    const sprint =
+      r.end - r.start > 62 * 86_400_000
+        ? monthRanges(Math.min(Date.now(), r.end - 1), 12)
+            .filter((m) => m.start >= r.start - 86_400_000 && m.start < r.end)
+            .reverse()
+            .map((m) => {
+              const f = storyFacts(m, items, plays, now);
+              return { label: new Date(m.start).toLocaleDateString(undefined, { month: 'short' }).toUpperCase(), videoId: f.top[0]?.id ?? null, ms: f.watchedMs };
+            })
+        : undefined;
     setStory({
+      sprint,
       range: r,
       facts: storyFacts(r, items, plays, now),
       prev: prevR.start >= 0 ? storyFacts(prevR, items, plays, now) : null,
@@ -235,7 +291,9 @@ export default function VideoInsightsModal({
   useEffect(() => {
     if (initialWrapped && plays) {
       const [, last] = recentWeeks(Date.now(), 2);
-      openStory(last, sk ? 'everything' : 'videos');
+      // The browser preview can ask for the year instead (`&range=year`).
+      const year = Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('range') === 'year';
+      openStory(year ? yearRange(new Date().getFullYear(), Date.now()) : last, sk ? 'everything' : 'videos');
     }
   }, [initialWrapped, plays]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -252,6 +310,7 @@ export default function VideoInsightsModal({
         <View style={styles.tabsWrap}>
           <TabStrip
             value={tab}
+            dots={{ badges: fresh.length, memories: Math.min(newMemories, 9) }}
             onChange={(k) => {
               tick();
               setTab(k);
@@ -270,10 +329,10 @@ export default function VideoInsightsModal({
                   labels={ratingLabels}
                   thumbs={thumbs}
                   goalMin={prefs.weeklyGoalMin}
-                  memory={memoryList.find((m) => !prefs.memoryHidden.includes(m.id)) ?? null}
-                  onMemory={setMemory}
+                  memory={memoryList.find((m) => !prefs.memoryHidden.includes(m.id) && m.kind !== 'custom') ?? null}
+                  onMemory={openMemory}
                   onAllMemories={() => setTab('memories')}
-                  onGoal={(min) => void actions.setPrefs({ ...prefs, weeklyGoalMin: min })}
+                  onGoal={(min) => savePrefs({ weeklyGoalMin: min })}
                   onOpen={onOpenVideo}
                 />
               )}
@@ -284,9 +343,17 @@ export default function VideoInsightsModal({
                   thumbs={thumbs}
                   favs={prefs.memoryFavs}
                   hidden={prefs.memoryHidden}
-                  onPlay={setMemory}
+                  seen={prefs.memoriesSeen}
+                  tags={tags}
+                  albums={albumList}
+                  onPlay={openMemory}
                   onFav={favMemory}
-                  onUnhideAll={() => void actions.setPrefs({ ...prefs, memoryHidden: [] })}
+                  onUnhideAll={() => savePrefs({ memoryHidden: [] })}
+                  onCreate={(c: CustomMemory) => {
+                    savePrefs((cur) => ({ customMemories: [c, ...cur.customMemories] }));
+                    logEvent('custom-memory');
+                  }}
+                  onDeleteCustom={(id) => savePrefs((cur) => ({ customMemories: cur.customMemories.filter((c) => c.id !== id) }))}
                 />
               )}
               {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} thumbs={thumbs} onOpen={openStory} />}
@@ -300,7 +367,9 @@ export default function VideoInsightsModal({
                   milestones={milestones}
                   thumbs={thumbs}
                   showcase={prefs.showcase}
-                  onShowcase={(ids) => void actions.setPrefs({ ...prefs, showcase: ids })}
+                  fresh={fresh}
+                  onSeen={markBadgesSeen}
+                  onShowcase={(ids) => savePrefs({ showcase: ids })}
                   onOpenVideo={onOpenVideo}
                 />
               )}
@@ -330,7 +399,9 @@ export default function VideoInsightsModal({
           fav={prefs.memoryFavs.includes(memory.id)}
           loadBookmarks={(id) => actions.loadBookmarks(id).then((list) => list.map((b) => b.atMs))}
           onFav={() => favMemory(memory.id)}
-          onHide={() => void actions.setPrefs({ ...prefs, memoryHidden: [...prefs.memoryHidden, memory.id] })}
+          onHide={() => savePrefs((cur) => ({ memoryHidden: [...cur.memoryHidden, memory.id] }))}
+          onDelete={memory.kind === 'custom' ? () => savePrefs((cur) => ({ customMemories: cur.customMemories.filter((c) => c.id !== memory.id) })) : undefined}
+          onEvent={logEvent}
           onOpenVideo={(id) => {
             setMemory(null);
             onOpenVideo(id);
@@ -345,6 +416,12 @@ export default function VideoInsightsModal({
           thumbs={thumbs}
           enableVideo={enableVideo}
           loadBookmarks={(id) => actions.loadBookmarks(id).then((list) => list.map((b) => b.atMs))}
+          onEvent={logEvent}
+          memories={memoryList.filter((m) => m.kind !== 'custom' && m.end >= story.range.start && m.start < story.range.end).slice(0, 1)}
+          onOpenMemory={(m) => {
+            setStory(null);
+            openMemory(m);
+          }}
           onOpenVideo={(id) => {
             setStory(null);
             onOpenVideo(id);
@@ -397,6 +474,13 @@ function Storage({
   const appGb = (s.totalBytes + s.deletedBytes) / GB;
   const phoneGb = freeGb !== null ? freeGb + appGb : null;
   const savable = ideas.reduce((a, i) => a + i.bytes, 0);
+  const { width } = useWindowDimensions();
+  const grade = spaceGrade(s.totalBytes + s.deletedBytes, savable);
+  const forecast = spaceForecast(grow, freeGb !== null ? freeGb * GB : null);
+  const mapW = width - 32 - 32;
+  const mapH = Math.round(mapW * 0.72);
+  const tiles = useMemo(() => treemap(s.biggest.slice(0, 9).map((b) => ({ id: b.key, value: b.value })), mapW, mapH), [s.biggest, mapW, mapH]);
+  const GRADE_COLORS: Record<string, string> = { A: '#30D158', B: '#7ED957', C: '#FFD60A', D: '#FF9F0A', E: '#FF453A' };
 
   const act = (i: (typeof ideas)[number]) => {
     if (i.action === 'smaller' || i.action === 'unwatched') return onMakeSmaller(i.ids);
@@ -409,24 +493,74 @@ function Storage({
     <>
       {/* ── the phone ─────────────────────────────────────────── */}
       <Animated.View entering={enterUp(0)} style={[styles.storeHero, gradient('linear-gradient(135deg, #1F6F3F 0%, #0B3B2A 60%, #06201A 100%)')]}>
-        <Ring size={110} stroke={11} progress={phoneGb ? appGb / phoneGb : 0} color="#30D158" track="rgba(255,255,255,0.18)">
-          <Text style={styles.storePct}>{phoneGb ? `${Math.round((appGb / phoneGb) * 100)}%` : '–'}</Text>
-          <Text style={styles.storePctLabel}>of room left</Text>
-        </Ring>
-        <View style={{ flex: 1, gap: 3 }}>
-          <Text style={styles.storeKicker}>REELVAULT USES</Text>
-          <Text style={styles.storeValue}>{fmtBytes(s.totalBytes + s.deletedBytes)}</Text>
-          <Text style={styles.storeSub}>
-            {s.count} videos{s.count ? ` · ${fmtBytes(s.totalBytes / s.count)} each on average` : ''}
-          </Text>
-          {freeGb !== null && <Text style={styles.storeSub}>{freeGb} GB still free on the phone</Text>}
+        <Aurora colors={['#1F6F3F', '#06201A']} accent="#64D2FF" width={width - 32} height={220} />
+        <View style={styles.storeRow}>
+          <Ring size={110} stroke={11} progress={phoneGb ? appGb / phoneGb : 0} color="#30D158" track="rgba(255,255,255,0.18)">
+            <Text style={styles.storePct}>{phoneGb ? `${Math.round((appGb / phoneGb) * 100)}%` : '–'}</Text>
+            <Text style={styles.storePctLabel}>of your room</Text>
+          </Ring>
+          <View style={{ flex: 1, gap: 3 }}>
+            <Text style={styles.storeKicker}>REELVAULT USES</Text>
+            <CountUp to={s.totalBytes + s.deletedBytes} format={fmtBytes} style={styles.storeValue} />
+            <Text style={styles.storeSub}>
+              {s.count} videos{s.count ? ` · ${fmtBytes(s.totalBytes / s.count)} each on average` : ''}
+            </Text>
+            {freeGb !== null && <Text style={styles.storeSub}>{freeGb} GB still free on the phone</Text>}
+          </View>
+        </View>
+        <View style={styles.storeFoot}>
+          <View style={[styles.grade, { backgroundColor: GRADE_COLORS[grade.grade] }]}>
+            <Text style={styles.gradeText}>{grade.grade}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.storeFootTitle}>{grade.line}</Text>
+            <Text style={styles.storeSub} numberOfLines={2}>
+              {forecast.months !== null
+                ? `At ${fmtBytes(forecast.perMonth)} a month, the free space lasts about ${forecast.months >= 24 ? `${Math.round(forecast.months / 12)} years` : `${forecast.months} months`}.`
+                : forecast.perMonth > 0
+                  ? `About ${fmtBytes(forecast.perMonth)} added a month lately.`
+                  : 'Nothing added lately.'}
+            </Text>
+          </View>
         </View>
       </Animated.View>
 
+      {tiles.length > 1 && (
+        <Card index={1} title="Your space, as a map" sub="Each box is a video, as big as the space it takes. Tap one to open it.">
+          <View style={{ width: mapW, height: mapH, alignSelf: 'center' }}>
+            {tiles.map((t, i) => {
+              const b = s.biggest.find((x) => x.key === t.id)!;
+              return (
+                <Animated.View key={t.id} entering={FadeIn.delay(120 + i * 70).duration(DUR.slow)} style={{ position: 'absolute', left: t.x, top: t.y, width: t.w, height: t.h, padding: 1.5 }}>
+                  <PressableScale style={styles.tile} onPress={() => onOpen(t.id)} accessibilityLabel={`${b.label}, ${fmtBytes(b.value)}`}>
+                    <Image source={thumbs.get(t.id)} style={StyleSheet.absoluteFill} contentFit="cover" />
+                    <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.75) 100%)', 'rgba(0,0,0,0.3)')]} />
+                    {t.w > 56 && t.h > 40 && (
+                      <View style={styles.tileText}>
+                        <Text style={styles.tileValue} numberOfLines={1}>
+                          {fmtBytes(b.value)}
+                        </Text>
+                        {t.w > 110 && t.h > 70 && (
+                          <Text style={styles.tileLabel} numberOfLines={1}>
+                            {b.label}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </PressableScale>
+                </Animated.View>
+              );
+            })}
+          </View>
+        </Card>
+      )}
+
       <Card index={1} title="What takes the space">
         <View style={styles.stack}>
-          {s.byQuality.map((g) => (
-            <View key={g.key} style={{ flex: Math.max(0.02, g.value / Math.max(1, s.totalBytes)), backgroundColor: QUALITY_COLORS[g.key] ?? '#8E8E93' }} />
+          {s.byQuality.map((g, i) => (
+            <View key={g.key} style={{ flex: Math.max(0.02, g.value / Math.max(1, s.totalBytes)) }}>
+              <GrowBar share={1} color={QUALITY_COLORS[g.key] ?? '#8E8E93'} track="transparent" height={14} delay={150 + i * 120} />
+            </View>
           ))}
         </View>
         <View style={styles.legend}>
@@ -493,9 +627,7 @@ function Storage({
                   </Text>
                   <Text style={styles.vvalue}>{fmtBytes(r.value)}</Text>
                 </View>
-                <View style={styles.sizeTrack}>
-                  <View style={[styles.sizeFill, { width: `${(r.value / maxBig) * 100}%` }]} />
-                </View>
+                <GrowBar share={r.value / maxBig} color="#FF9F0A" track={p.card} height={5} />
                 <Text style={styles.vsub}>{r.sub}</Text>
               </View>
             </TouchableOpacity>
@@ -530,12 +662,23 @@ const makeStyles = (p: Palette) =>
     tab: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 8 },
     tabIcon: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
     tabText: { color: p.textSecondary, fontSize: 11, fontWeight: '800' },
+    tabDot: { position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, backgroundColor: '#FF3B30', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: p.elevated },
+    tabDotText: { color: '#fff', fontSize: 10, fontWeight: '900' },
     body: { paddingHorizontal: 16, paddingTop: 6 },
     muted: { color: p.textSecondary, fontSize: 12, lineHeight: 16 },
     foot: { color: p.textMuted, fontSize: 12, textAlign: 'center', paddingHorizontal: 20, lineHeight: 17 },
     tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
 
-    storeHero: { flexDirection: 'row', alignItems: 'center', gap: 18, borderRadius: 26, padding: 18 },
+    storeHero: { borderRadius: 26, padding: 18, gap: 16, overflow: 'hidden' },
+    storeRow: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+    storeFoot: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 16, padding: 12 },
+    storeFootTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    grade: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    gradeText: { color: '#000', fontSize: 24, fontWeight: '900' },
+    tile: { flex: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: p.card },
+    tileText: { position: 'absolute', left: 8, right: 6, bottom: 6 },
+    tileValue: { color: '#fff', fontSize: 13, fontWeight: '900' },
+    tileLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '700' },
     storePct: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
     storePctLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: '800' },
     storeKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },

@@ -1,7 +1,9 @@
 /**
  * The Videos tab in Overview mode: your videos as titles you rate and track,
- * built like the Movies / Shows / Anime tabs - continue cards, top rated,
- * status chips, and the library as posters or rows. Series (videos that
+ * built like the Movies / Shows / Anime tabs - a spotlight title at the top,
+ * how your titles split by status (tap one to filter), your ratings from 1 to
+ * 10, continue cards, plan to watch, top rated, status chips, and the library
+ * as posters or rows that slide in. Series (videos that
  * belong together) show as one title. Removed videos stay with their rating.
  * Presentational only (see the note at the top of types.ts).
  */
@@ -9,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { hueFor } from '@/features/simkl/ui/Poster';
@@ -23,6 +26,7 @@ import {
   OV_FILTERS,
   OV_SORTS,
   OV_STATUS_LABELS,
+  overviewInsights,
   overviewStats,
   playable,
   sortEntries,
@@ -42,7 +46,9 @@ import Icon from './Icon';
 import IconButton from './IconButton';
 import OverviewDetail, { SeriesMaker } from './OverviewDetail';
 import { Cover, fmtStars, ModeSwitch, statusColor, toOvVideo } from './overviewParts';
-import { PressableScale } from './motion';
+import { gradient, Ring } from './insightParts';
+import { DUR, EASE_OUT, enterUp, PressableScale, useReducedMotion } from './motion';
+import { GrowBar, GrowColumn, KenBurns } from './storyKit';
 import { OptionsSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { Look, OverviewData, VaultActions, VaultItem, VaultPrefs } from './types';
@@ -109,6 +115,7 @@ export default function OverviewScreen({
   const stats = useMemo(() => overviewStats(entries), [entries]);
   const going = useMemo(() => continueSeries(entries), [entries]);
   const best = useMemo(() => topRated(entries), [entries]);
+  const ins = useMemo(() => overviewInsights(entries), [entries]);
   const suggestions = useMemo(
     () => suggestSeries(videos, data.members).filter((s) => !prefs.hiddenSuggestions.includes(s.name)),
     [videos, data.members, prefs.hiddenSuggestions]
@@ -142,12 +149,67 @@ export default function OverviewScreen({
         <ModeSwitch mode="overview" onChange={onMode} />
       </View>
 
+      {look !== 'simple' && ins.spotlight && (
+        <Spotlight
+          entry={ins.spotlight}
+          width={width - SIDE * 2}
+          onOpen={() => setOpenKey(ins.spotlight!.key)}
+          onPlay={() => {
+            const ep = playable(ins.spotlight!);
+            if (ep) onPlay(ep.video.id);
+          }}
+        />
+      )}
+
       {look !== 'simple' && (
-        <View style={styles.stats}>
+        <Animated.View entering={enterUp(1)} style={styles.stats}>
           <Stat value={String(stats.titles)} label={stats.series ? `titles · ${stats.series} series` : 'titles'} />
           <Stat value={stats.avgRating !== null ? `★ ${fmtStars(stats.avgRating)}` : '–'} label={`average of ${stats.rated} rated`} />
           <Stat value={fmtMs(stats.watchedMs)} label="watched" />
-        </View>
+          <View style={styles.stat}>
+            <Ring size={40} stroke={5} progress={ins.ratedShare} color={p.rating}>
+              <Text style={styles.ringText}>{Math.round(ins.ratedShare * 100)}</Text>
+            </Ring>
+            <Text style={styles.statLabel}>% rated</Text>
+          </View>
+        </Animated.View>
+      )}
+
+      {look !== 'simple' && entries.length > 0 && (
+        <Animated.View entering={enterUp(2)} style={styles.statusCard}>
+          <StatusBar parts={ins.statuses} total={Math.max(1, ins.statuses.reduce((a, x) => a + x.count, 0))} />
+          <View style={styles.statusLegend}>
+            {ins.statuses
+              .filter((x) => x.count > 0)
+              .map((x) => (
+                <TouchableOpacity
+                  key={x.key}
+                  style={[styles.legendChip, filter === x.key && { backgroundColor: `${STATUS_COLORS[x.key]}33` }]}
+                  onPress={() => {
+                    tick();
+                    setFilter(filter === x.key ? 'all' : x.key);
+                  }}>
+                  <View style={[styles.legendDot, { backgroundColor: STATUS_COLORS[x.key] }]} />
+                  <Text style={styles.legendText}>{x.label}</Text>
+                  <Text style={styles.legendCount}>{x.count}</Text>
+                </TouchableOpacity>
+              ))}
+          </View>
+          {rich && ins.ratings.some((r) => r.count > 0) && (
+            <View style={styles.histo}>
+              {ins.ratings.map((r, i) => {
+                const max = Math.max(1, ...ins.ratings.map((x) => x.count));
+                return (
+                  <View key={r.score} style={styles.histoCol}>
+                    <Text style={styles.histoCount}>{r.count || ''}</Text>
+                    <GrowColumn ratio={r.count / max} height={54} width="70%" color={r.score >= 8 ? p.rating : r.score >= 5 ? `${p.rating}99` : `${p.rating}55`} delay={200 + i * 40} radius={4} />
+                    <Text style={styles.histoLabel}>{r.score}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </Animated.View>
       )}
 
       {going.length > 0 && (
@@ -213,6 +275,31 @@ export default function OverviewScreen({
                 </View>
               );
             })}
+          </ScrollView>
+        </>
+      )}
+
+      {rich && ins.planned.length > 0 && (
+        <>
+          <SectionHead title="Plan to Watch" detail={`${ins.planned.length}`} />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+            {ins.planned.map((e, i) => (
+              <Animated.View key={e.key} entering={FadeInDown.delay(i * 50).duration(DUR.base).easing(EASE_OUT)}>
+                <PressableScale style={{ width: 132 }} onPress={() => setOpenKey(e.key)} accessibilityLabel={e.title}>
+                  <Cover source={e.cover} title={e.title} width={132} height={88}>
+                    <View style={styles.planTag}>
+                      <Icon name="bookmark" size={10} color="#fff" />
+                    </View>
+                  </Cover>
+                  <Text style={styles.shelfTitle} numberOfLines={1}>
+                    {e.title}
+                  </Text>
+                  <Text style={styles.shelfSub} numberOfLines={1}>
+                    {e.kind === 'series' ? `${e.episodes.length} episodes` : fmtMs(e.totalMs)}
+                  </Text>
+                </PressableScale>
+              </Animated.View>
+            ))}
           </ScrollView>
         </>
       )}
@@ -328,8 +415,10 @@ export default function OverviewScreen({
           ListFooterComponent={footer}
           columnWrapperStyle={styles.gridRow}
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
-            <GridPoster entry={item} width={posterW} height={posterH} bare={look === 'simple'} onPress={() => setOpenKey(item.key)} />
+          renderItem={({ item, index }) => (
+            <Animated.View entering={index < 24 ? FadeInDown.delay(Math.min(index, 18) * 35).duration(DUR.base).easing(EASE_OUT) : undefined}>
+              <GridPoster entry={item} width={posterW} height={posterH} bare={look === 'simple'} onPress={() => setOpenKey(item.key)} />
+            </Animated.View>
           )}
         />
       ) : (
@@ -393,6 +482,72 @@ export default function OverviewScreen({
         />
       )}
     </View>
+  );
+}
+
+const STATUS_COLORS: Record<string, string> = { watching: '#0A84FF', plantowatch: '#BF5AF2', completed: '#30D158', hold: '#FF9F0A', dropped: '#FF453A' };
+
+/** One bar split by status, growing in from the left. */
+function StatusBar({ parts, total }: { parts: { key: string; count: number }[]; total: number }) {
+  const styles = useStyles(makeStyles);
+  const reduce = useReducedMotion();
+  const k = useSharedValue(reduce ? 1 : 0);
+  useEffect(() => {
+    if (!reduce) k.value = withTiming(1, { duration: 900, easing: EASE_OUT });
+  }, [reduce]); // eslint-disable-line react-hooks/exhaustive-deps
+  const grow = useAnimatedStyle(() => ({ width: `${k.value * 100}%` }));
+  return (
+    <View style={styles.statusTrack}>
+      <Animated.View style={[{ flexDirection: 'row', height: '100%', gap: 2 }, grow]}>
+        {parts
+          .filter((x) => x.count > 0)
+          .map((x) => (
+            <View key={x.key} style={{ flex: x.count / total, backgroundColor: STATUS_COLORS[x.key], borderRadius: 4 }} />
+          ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+/** The title at the top: its picture moving slowly, what it is, and play. */
+function Spotlight({ entry, width, onOpen, onPlay }: { entry: OvEntry; width: number; onOpen: () => void; onPlay: () => void }) {
+  const styles = useStyles(makeStyles);
+  const canPlay = !!playable(entry);
+  const kicker = entry.status === 'watching' && entry.next ? 'CONTINUE WATCHING' : entry.rating > 0 ? 'ONE OF YOUR BEST' : 'SPOTLIGHT';
+  const progress = entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
+  return (
+    <Animated.View entering={enterUp(0)}>
+      <PressableScale style={[styles.spot, { width, height: Math.min(330, width * 0.82) }]} onPress={onOpen} scaleTo={0.98} accessibilityLabel={`${entry.title}. Open`}>
+        <KenBurns source={entry.cover ?? undefined} ms={18000} seed={entry.title.length} />
+        <View style={[styles.fill, gradient('linear-gradient(180deg, rgba(0,0,0,0) 25%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.92) 100%)', 'rgba(0,0,0,0.4)')]} />
+        <View style={styles.spotBody}>
+          <Text style={styles.spotKicker}>{kicker}</Text>
+          <Text style={styles.spotTitle} numberOfLines={2}>
+            {entry.title}
+          </Text>
+          <Text style={styles.spotMeta} numberOfLines={1}>
+            {[entry.rating > 0 ? `★ ${fmtStars(entry.rating)}` : null, entry.kind === 'series' ? `${entry.watchedCount} of ${entry.episodes.length} episodes` : fmtMs(entry.totalMs), OV_STATUS_LABELS[entry.status]].filter(Boolean).join(' · ')}
+          </Text>
+          {entry.kind === 'series' && entry.episodes.length > 0 && (
+            <View style={styles.spotBar}>
+              <GrowBar share={progress} color="#fff" track="rgba(255,255,255,0.25)" height={5} delay={300} />
+            </View>
+          )}
+          <View style={styles.spotButtons}>
+            {canPlay && (
+              <TouchableOpacity style={styles.spotPlay} onPress={onPlay}>
+                <Icon name="play" size={15} color="#000" />
+                <Text style={styles.spotPlayText}>{entry.next && entry.kind === 'series' ? `Episode ${entry.next.number}` : 'Play'}</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.spotInfo} onPress={onOpen}>
+              <Icon name="info" size={15} color="#fff" />
+              <Text style={styles.spotInfoText}>Details</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </PressableScale>
+    </Animated.View>
   );
 }
 
@@ -636,6 +791,30 @@ const makeStyles = (p: Palette) =>
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
 
     stats: { flexDirection: 'row', gap: 8, paddingHorizontal: SIDE, paddingTop: 14 },
+    ringText: { color: p.text, fontSize: 12, fontWeight: '900' },
+    spot: { marginHorizontal: SIDE, marginTop: 14, borderRadius: 26, overflow: 'hidden', backgroundColor: p.elevated, justifyContent: 'flex-end' },
+    spotBody: { padding: 18, gap: 5 },
+    spotKicker: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
+    spotTitle: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8, lineHeight: 33 },
+    spotMeta: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '700' },
+    spotBar: { marginTop: 4, width: '60%' },
+    spotButtons: { flexDirection: 'row', gap: 10, marginTop: 10 },
+    spotPlay: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 18, paddingVertical: 11 },
+    spotPlayText: { color: '#000', fontSize: 15, fontWeight: '800' },
+    spotInfo: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 999, paddingHorizontal: 16, paddingVertical: 11 },
+    spotInfoText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    statusCard: { marginHorizontal: SIDE, marginTop: 10, backgroundColor: p.elevated, borderRadius: 18, padding: 14, gap: 12 },
+    statusTrack: { height: 12, borderRadius: 6, backgroundColor: p.card, overflow: 'hidden' },
+    statusLegend: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    legendChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: p.card },
+    legendDot: { width: 8, height: 8, borderRadius: 4 },
+    legendText: { color: p.text, fontSize: 12, fontWeight: '700' },
+    legendCount: { color: p.textSecondary, fontSize: 12, fontWeight: '800' },
+    histo: { flexDirection: 'row', alignItems: 'flex-end', height: 86, gap: 2 },
+    histoCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 3 },
+    histoCount: { color: p.textSecondary, fontSize: 10, fontWeight: '800' },
+    histoLabel: { color: p.textMuted, fontSize: 10, fontWeight: '800' },
+    planTag: { position: 'absolute', top: 6, left: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#BF5AF2', alignItems: 'center', justifyContent: 'center' },
     stat: { flex: 1, backgroundColor: p.elevated, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, gap: 2 },
     statValue: { color: p.text, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
     statLabel: { color: p.textSecondary, fontSize: 11, fontWeight: '600' },

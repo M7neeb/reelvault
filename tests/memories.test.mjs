@@ -93,3 +93,24 @@ test('clips: short videos play whole, long ones from the highlight; sections hid
   assert.equal(s.favourites.length, 1);
   assert.equal(s.moments.length, 1);
 });
+
+test('custom memories pick by keyword, album, dates and rating', async () => {
+  const { customMemory, customMatches, isCustomMemory } = await import('../src/features/vault/memories.ts');
+  const list = [
+    video({ tagNames: ['Beach'], rating: 9, albumIds: [2], createdAt: at(2026, 6, 1) }),
+    video({ tagNames: ['beach'], rating: 4, albumIds: [], createdAt: at(2026, 6, 2) }),
+    video({ tagNames: [], rating: 9, albumIds: [2], createdAt: at(2025, 6, 2) }),
+  ];
+  const base = { tag: null, albumId: null, from: null, to: null, minRating: 0 };
+  assert.equal(customMatches({ ...base, tag: 'beach' }, list).length, 2);
+  assert.equal(customMatches({ ...base, albumId: 2 }, list).length, 2);
+  assert.equal(customMatches({ ...base, from: at(2026, 0, 1, 0) }, list).length, 2);
+  assert.equal(customMatches({ ...base, tag: 'beach', minRating: 8 }, list).length, 1);
+  const c = { ...base, id: 'c1', title: 'Summer', mood: 'epic', createdAt: NOW, tag: 'beach' };
+  assert.ok(isCustomMemory(c));
+  assert.equal(isCustomMemory({ id: 1 }), false);
+  const m = customMemory(c, list, []);
+  assert.equal(m.kind, 'custom');
+  assert.equal(m.title, 'Summer');
+  assert.equal(customMemory({ ...c, tag: 'nothing' }, list, []), null);
+});
