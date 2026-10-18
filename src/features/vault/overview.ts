@@ -401,3 +401,19 @@ export function moveEpisode(order: string[], videoId: string, dir: -1 | 1): stri
   [next[i], next[j]] = [next[j], next[i]];
   return next;
 }
+
+/** For the Overview header: how your titles split by status, your ratings 1–10, a title to spotlight, what is planned. */
+export function overviewInsights(entries: OvEntry[]) {
+  const live = entries.filter((e) => !e.gone);
+  const statuses = (['watching', 'plantowatch', 'completed', 'hold', 'dropped'] as OvStatus[]).map((s) => ({ key: s, label: OV_STATUS_LABELS[s], count: live.filter((e) => e.status === s).length }));
+  const ratings = Array.from({ length: 10 }, (_, i) => ({ score: i + 1, count: entries.filter((e) => e.rating > 0 && Math.min(10, Math.max(1, Math.round(e.rating))) === i + 1).length }));
+  const withCover = live.filter((e) => e.cover);
+  const spotlight =
+    [...withCover].filter((e) => e.status === 'watching' && e.next).sort((a, b) => (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0))[0] ??
+    [...withCover].filter((e) => e.rating > 0).sort((a, b) => b.rating - a.rating || (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0))[0] ??
+    withCover[0] ??
+    null;
+  const planned = live.filter((e) => e.status === 'plantowatch').sort((a, b) => b.addedAt - a.addedAt).slice(0, 12);
+  const ratedShare = entries.length ? entries.filter((e) => e.rating > 0).length / entries.length : 0;
+  return { statuses, ratings, spotlight, planned, ratedShare };
+}

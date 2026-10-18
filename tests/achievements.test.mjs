@@ -173,3 +173,49 @@ test('wrapped knows active days, the best run, the peak hour and the first video
   assert.equal(w.videos.firstVideo.key, 'b');
   assert.ok(w.videos.topShare > 0.7);
 });
+
+test('memory, Wrapped and quiz badges come from dated events', () => {
+  const events = [
+    { k: 'memory', at: at(2026, 9, 1), v: 'trip' },
+    { k: 'memory', at: at(2026, 9, 2), v: 'onThisDay' },
+    { k: 'mood', at: at(2026, 9, 1), v: 'gentle' },
+    { k: 'mood', at: at(2026, 9, 2), v: 'upbeat' },
+    { k: 'mood', at: at(2026, 9, 3), v: 'epic' },
+    { k: 'quiz-right', at: at(2026, 9, 4) },
+    { k: 'wrapped-end', at: at(2026, 9, 5) },
+    { k: 'memory-fav', at: at(2026, 9, 6) },
+  ];
+  const list = achievements(input({ videos: [video('a')], events, memories: { total: 6, trips: 1 } }));
+  const get = (id) => list.find((a) => a.id === id);
+  assert.equal(get('memories-played-1').unlocked, true);
+  assert.equal(get('memories-played-1').earnedAt, at(2026, 9, 1));
+  assert.equal(get('mood-explorer').earnedAt, at(2026, 9, 3));
+  for (const id of ['nostalgic', 'wanderlust', 'heartfelt', 'spot-on-1', 'wraps-1', 'trips-1', 'memory-collection-5']) assert.equal(get(id).unlocked, true, id);
+  assert.equal(get('director-1').unlocked, false);
+});
+
+test('weekly challenges rotate, show this week and keep the ones won', () => {
+  const videos = ['a', 'b', 'c', 'd'].map((id) => video(id, { createdAt: at(2024, 1, 1) }));
+  // Mon 12 Oct – Sun 18 Oct: four days, four new videos, old ones, over two hours.
+  const plays = [12, 13, 14, 15].map((d, n) => play(videos[n].id, at(2026, 9, d), 40 * 60_000));
+  const list = achievements(input({ videos, plays }));
+  const week = list.find((a) => a.kind === 'weekly');
+  assert.ok(week.title.startsWith('This week: '));
+  assert.equal(week.unlocked, true);
+  assert.ok(list.find((a) => a.id === 'weekly-wins-1').unlocked);
+});
+
+test('badges about badges: all-rounder and platinum club', () => {
+  const list = achievements(input({ videos: Array.from({ length: 1000 }, (_, n) => video(`v${n}`)) }));
+  assert.equal(list.find((a) => a.id === 'platinum-club').unlocked, true);
+  assert.equal(list.find((a) => a.id === 'all-rounder').unlocked, false);
+  assert.ok(list.find((a) => a.id === 'diamond').secret);
+});
+
+test('secret date badges and far from home', () => {
+  const v = video('a', { location: { lat: 40.7, lon: -74 } });
+  const list = achievements(input({ videos: [v], plays: [play('a', at(2026, 1, 13, 21))], home: { lat: 51.66, lon: 7.35 } }));
+  assert.equal(list.find((a) => a.id === 'friday-13').unlocked, true);
+  assert.equal(list.find((a) => a.id === 'far-away').videoId, 'a');
+  assert.equal(list.find((a) => a.id === 'leap-day').unlocked, false);
+});

@@ -294,6 +294,14 @@ export function fixturePlays(): { videoId: string; startedAt: number; watchedMs:
     d.setHours(17 + Math.floor(rand() * 6), Math.floor(rand() * 60));
     out.push({ videoId: id, startedAt: d.getTime(), watchedMs: Math.round((item.durationMs ?? 60000) * (0.4 + rand() * 0.6)) });
   }
+  // A few older plays across the year, so the year's Wrapped has a month-by-month story.
+  for (let m = 2; m <= 9; m++) {
+    const id = ids[(m * 5) % 12];
+    const item = FIXTURE_ITEMS.find((v) => v.id === id)!;
+    const d = new Date(Date.now() - m * 30 * 86_400_000);
+    d.setHours(20, 15);
+    out.push({ videoId: id, startedAt: d.getTime(), watchedMs: Math.round((item.durationMs ?? 60000) * 0.9) });
+  }
   return out.sort((a, b) => a.startedAt - b.startedAt);
 }
 

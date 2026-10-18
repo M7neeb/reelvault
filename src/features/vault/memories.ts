@@ -10,9 +10,9 @@
 
 import { highlightAt, type RPlay, type RVideo } from './recap.ts';
 
-export type MVideo = RVideo & { location?: { lat: number; lon: number } | null };
+export type MVideo = RVideo & { location?: { lat: number; lon: number } | null; albumIds?: number[] };
 
-export type MemoryKind = 'onThisDay' | 'trip' | 'day' | 'recent' | 'repeat' | 'month' | 'season' | 'theme' | 'favourites' | 'gems' | 'year';
+export type MemoryKind = 'custom' | 'onThisDay' | 'trip' | 'day' | 'recent' | 'repeat' | 'month' | 'season' | 'theme' | 'favourites' | 'gems' | 'year';
 
 /** How a memory plays: slow and warm, quick cuts, or wide and cinematic. */
 export type Mood = 'gentle' | 'upbeat' | 'epic';
@@ -338,12 +338,70 @@ export function memorySections(list: Memory[], hidden: string[], favs: string[])
   const shown = list.filter((m) => !hidden.includes(m.id));
   const of = (...k: MemoryKind[]) => shown.filter((m) => k.includes(m.kind));
   return {
-    featured: shown.slice(0, 6),
+    featured: shown.filter((m) => m.kind !== 'custom').slice(0, 6),
     favourites: shown.filter((m) => favs.includes(m.id)),
+    mine: of('custom'),
     onThisDay: of('onThisDay'),
     moments: of('trip', 'day', 'recent').sort((a, b) => b.start - a.start),
     themes: of('theme', 'favourites', 'gems', 'repeat'),
     months: of('month', 'season').sort((a, b) => b.start - a.start),
     years: of('year').sort((a, b) => b.start - a.start),
+  };
+}
+
+/** A memory you made yourself: a keyword, an album, dates and a lowest rating, any mix. */
+export type CustomMemory = {
+  id: string;
+  title: string;
+  tag: string | null;
+  albumId: number | null;
+  from: number | null;
+  to: number | null;
+  minRating: number;
+  mood: Mood;
+  createdAt: number;
+};
+
+export function isCustomMemory(x: unknown): x is CustomMemory {
+  const c = x as CustomMemory;
+  return !!c && typeof c.id === 'string' && typeof c.title === 'string' && typeof c.createdAt === 'number' && ['gentle', 'upbeat', 'epic'].includes(c.mood);
+}
+
+/** The videos a custom memory picks. */
+export function customMatches(c: Pick<CustomMemory, 'tag' | 'albumId' | 'from' | 'to' | 'minRating'>, videos: MVideo[]): MVideo[] {
+  const tag = c.tag?.toLowerCase() ?? null;
+  return videos
+    .filter(
+      (v) =>
+        (!tag || v.tagNames.some((t) => t.toLowerCase() === tag)) &&
+        (c.albumId === null || (v.albumIds ?? []).includes(c.albumId)) &&
+        (c.from === null || v.createdAt >= c.from) &&
+        (c.to === null || v.createdAt < c.to + DAY) &&
+        v.rating >= c.minRating
+    )
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** A custom memory, made into a playable memory (null if nothing matches any more). */
+export function customMemory(c: CustomMemory, videos: MVideo[], plays: RPlay[]): Memory | null {
+  const list = customMatches(c, videos);
+  if (!list.length) return null;
+  const playsOf = new Map<string, number>();
+  for (const p of plays) playsOf.set(p.videoId, (playsOf.get(p.videoId) ?? 0) + 1);
+  const { ids, cover } = pickClips(list, playsOf, 20);
+  return {
+    id: c.id,
+    kind: 'custom',
+    kicker: 'MADE BY YOU',
+    title: c.title,
+    subtitle: plural(list.length, 'video'),
+    videoIds: ids,
+    coverId: cover,
+    total: list.length,
+    start: list[0].createdAt,
+    end: list[list.length - 1].createdAt,
+    mood: c.mood,
+    tone: 4,
+    score: 0,
   };
 }

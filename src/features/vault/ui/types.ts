@@ -469,6 +469,14 @@ export type VaultPrefs = {
   /** Memories you saved, and ones you hid (their ids). */
   memoryFavs: string[];
   memoryHidden: string[];
+  /** Memories you have opened (the rest show a New dot). */
+  memoriesSeen: string[];
+  /** Memories you made yourself. */
+  customMemories: import('../memories').CustomMemory[];
+  /** Things you did that leave no other trace, for badges (memories played, Wrapped quizzes). */
+  events: import('../achievements').AchEvent[];
+  /** Badges you have already been shown earning; null until the first look (so old ones don't all pop up). */
+  badgesSeen: string[] | null;
 };
 
 export const DEFAULT_VAULT_PREFS: VaultPrefs = {
@@ -482,6 +490,10 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   weeklyGoalMin: 120,
   memoryFavs: [],
   memoryHidden: [],
+  memoriesSeen: [],
+  customMemories: [],
+  events: [],
+  badgesSeen: null,
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */

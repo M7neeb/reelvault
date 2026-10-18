@@ -25,6 +25,7 @@ import type { SimklBridge } from '@/features/simkl/ui/types';
 import { WEEKDAYS } from '@/features/simkl/insights';
 
 import type { Achievement } from '../achievements';
+import type { Memory } from '../memories';
 import { highlightAt, monthRanges, storyFacts, yearRange, type RRange, type StoryFacts } from '../recap';
 import { fmtBytes, fmtDay, fmtMs, presetRange, recentWeeks, wrapped as buildWrapped, type Range, type VaultPlay, type Wrapped } from '../stats';
 import { friendlyName } from '../names';
@@ -357,6 +358,8 @@ export type StoryInput = {
   earned: Achievement[];
   /** Series with episodes watched in the range. */
   series: { name: string; episodes: number; finished: boolean }[];
+  /** For long ranges: your #1 of each month. */
+  sprint?: { label: string; videoId: string | null; ms: number }[];
 };
 
 /** What plays behind the cards: your videos (with sound) on the phone, their covers with a slow zoom in the preview. */
@@ -460,7 +463,7 @@ const bodyIn = new Keyframe({
 }).duration(420);
 
 /** "Which one did you watch the most?" Tap a cover; the right one lights up. */
-function Quiz({ options, answer, thumbs, width, onDone }: { options: { id: string; label: string }[]; answer: string; thumbs: Thumbs; width: number; onDone: () => void }) {
+function Quiz({ options, answer, thumbs, width, onAnswer, onDone }: { options: { id: string; label: string }[]; answer: string; thumbs: Thumbs; width: number; onAnswer?: (right: boolean) => void; onDone: () => void }) {
   const styles = useStyles(makeStyles);
   const reduce = useReducedMotion();
   const [pick, setPick] = useState<string | null>(null);
@@ -480,6 +483,7 @@ function Quiz({ options, answer, thumbs, width, onDone }: { options: { id: strin
                   setPick(o.id);
                   if (o.id === answer) success();
                   else warn();
+                  onAnswer?.(o.id === answer);
                   setTimeout(onDone, 2200);
                 }}
                 style={[styles.qOpt, { width: w, height: w * 1.4 }, right && styles.qRight, wrong && styles.qWrong, pick && !right && !wrong && { opacity: 0.45 }]}
@@ -516,6 +520,9 @@ export function WrappedStory({
   thumbs,
   enableVideo,
   loadBookmarks,
+  memories = [],
+  onOpenMemory,
+  onEvent,
   onOpenVideo,
   onClose,
 }: {
@@ -524,6 +531,11 @@ export function WrappedStory({
   thumbs: Thumbs;
   enableVideo: boolean;
   loadBookmarks: (videoId: string) => Promise<number[]>;
+  /** A memory from the same time, shown near the end. */
+  memories?: Memory[];
+  onOpenMemory?: (m: Memory) => void;
+  /** For badges: "quiz-right", "quiz-wrong", "wrapped-end". */
+  onEvent?: (k: string) => void;
   onOpenVideo?: (id: string) => void;
   onClose: () => void;
 }) {
@@ -535,6 +547,7 @@ export function WrappedStory({
   const name = (id: string) => (items.get(id) ? friendlyName(items.get(id)!) : 'A video');
   /** Moves to the next card (set below, used by the quiz). */
   const advance = useRef<() => void>(() => undefined);
+  const endLogged = useRef(false);
 
   const cards = useMemo<StoryCard[]>(() => {
     const out: StoryCard[] = [];
@@ -746,7 +759,14 @@ export function WrappedStory({
           <>
             {kicker('QUICK QUESTION', 0)}
             {big('Which one did you watch the most?', 1)}
-            <Quiz options={opts.map((o) => ({ id: o.id, label: o.label }))} answer={top[0].id} thumbs={thumbs} width={width - 56} onDone={() => advance.current()} />
+            <Quiz
+              options={opts.map((o) => ({ id: o.id, label: o.label }))}
+              answer={top[0].id}
+              thumbs={thumbs}
+              width={width - 56}
+              onAnswer={(right) => onEvent?.(right ? 'quiz-right' : 'quiz-wrong')}
+              onDone={() => advance.current()}
+            />
           </>
         ),
       });
@@ -809,6 +829,32 @@ export function WrappedStory({
             </>
           ),
         });
+    }
+
+    // 6c · month by month: your #1 of each month
+    const sprint = (input.sprint ?? []).filter((x) => x.videoId);
+    if (sprint.length >= 3) {
+      out.push({
+        key: 'sprint',
+        colors: ['#30D158', '#022814'],
+        media: [...new Set(sprint.map((x) => x.videoId!))].slice(0, 6),
+        ms: 9500,
+        body: (
+          <>
+            {kicker('MONTH BY MONTH', 0)}
+            {big('Your #1, every month', 1)}
+            <View style={styles.sSprint}>
+              {(input.sprint ?? []).map((x, n) => (
+                <Animated.View key={x.label + n} entering={reduce ? FadeIn : ZoomIn.delay(300 + n * 90).springify().damping(14)} style={styles.sSprintCell}>
+                  <View style={styles.sSprintThumb}>{x.videoId ? <Image source={thumbs.get(x.videoId)} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}</View>
+                  <Text style={styles.sSprintLabel}>{x.label}</Text>
+                </Animated.View>
+              ))}
+            </View>
+            {line(`${new Set(sprint.map((x) => x.videoId)).size} different videos took the top spot.`, 4)}
+          </>
+        ),
+      });
     }
 
     // 7 · comfort video
@@ -1095,6 +1141,31 @@ export function WrappedStory({
         });
     }
 
+    // 18b · a memory from this time
+    const mem = memories[0];
+    if (mem && onOpenMemory) {
+      out.push({
+        key: 'memory',
+        colors: ['#FF9F0A', '#3A1400'],
+        media: mem.videoIds.slice(0, 4),
+        ms: 8000,
+        interactive: true,
+        body: (
+          <>
+            {kicker('A MEMORY FROM THIS TIME', 0)}
+            {big(mem.title, 1)}
+            {line(mem.subtitle, 2)}
+            <Animated.View entering={t(3)}>
+              <TouchableOpacity style={styles.sButton} onPress={() => onOpenMemory(mem)}>
+                <Icon name="memories" size={14} color="#000" />
+                <Text style={styles.sButtonText}>Play the memory</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          </>
+        ),
+      });
+    }
+
     // 19 · persona
     out.push({
       key: 'persona',
@@ -1195,7 +1266,7 @@ export function WrappedStory({
       ),
     });
     return out;
-  }, [input, thumbs, width, height, reduce]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [input, thumbs, width, height, reduce, memories]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Where each video's clip starts: its first bookmark, else a quarter of the way in.
   const [starts, setStarts] = useState<Map<string, number>>(new Map());
@@ -1227,6 +1298,10 @@ export function WrappedStory({
     if (n >= cards.length) return onClose();
     if (cards[n].key === 'top1') success();
     else tick();
+    if (n === cards.length - 1 && !endLogged.current) {
+      endLogged.current = true;
+      onEvent?.('wrapped-end');
+    }
     setElapsed(0);
     setI(n);
   };
@@ -1394,6 +1469,10 @@ const makeStyles = (p: Palette) =>
 
     story: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', backgroundColor: '#000' },
     sTicker: { position: 'absolute', left: 0, right: 0, opacity: 0.1 },
+    sSprint: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+    sSprintCell: { width: '22%', alignItems: 'center', gap: 4 },
+    sSprintThumb: { width: '100%', aspectRatio: 0.8, borderRadius: 10, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.7)' },
+    sSprintLabel: { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 0.6 },
     sTickerText: { color: '#fff', fontSize: 96, fontWeight: '900', letterSpacing: -3 },
     sRankRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     sPolaroid: { backgroundColor: '#fff', padding: 6, paddingBottom: 20, borderRadius: 6 },

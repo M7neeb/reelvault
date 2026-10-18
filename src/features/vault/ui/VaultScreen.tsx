@@ -1325,6 +1325,7 @@ function VaultScreenBody({
           items={inPrivate ? privateItems : publicItems}
           deleted={visibleTrash}
           albums={albums.length}
+          albumList={albums.filter((a) => !a.isPrivate).map((a) => ({ id: a.id, name: a.name }))}
           smartFilters={smartFilters.length}
           overview={overview}
           prefs={prefs}

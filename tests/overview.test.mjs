@@ -179,3 +179,17 @@ test('backups carry series and removed videos; old backups still read', async ()
     { videoId: 'gone-1', label: null },
   ]);
 });
+
+test('overview insights: statuses, ratings, spotlight and planned', async () => {
+  const { overviewInsights } = await import('../src/features/vault/overview.ts');
+  const e = (over) => ({ key: over.id, kind: 'single', id: over.id, title: over.id, description: null, cover: 1, rating: 0, episodeAvg: null, status: 'completed', statusSet: true, episodes: [], watchedCount: 0, plays: 0, watchedMs: 0, totalMs: 0, lastWatchedAt: null, addedAt: 0, tags: [], gone: false, next: null, ...over });
+  const list = [e({ id: 'a', rating: 9 }), e({ id: 'b', rating: 7.6, status: 'plantowatch', addedAt: 5 }), e({ id: 'c', status: 'watching', next: {}, lastWatchedAt: 10 }), e({ id: 'd', gone: true, rating: 3 })];
+  const o = overviewInsights(list);
+  assert.equal(o.statuses.find((s) => s.key === 'completed').count, 1);
+  assert.equal(o.ratings[8].count, 1);
+  assert.equal(o.ratings[7].count, 1);
+  assert.equal(o.ratings[2].count, 1);
+  assert.equal(o.spotlight.id, 'c');
+  assert.deepEqual(o.planned.map((x) => x.id), ['b']);
+  assert.equal(o.ratedShare, 0.75);
+});
