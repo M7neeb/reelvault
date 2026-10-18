@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   Easing,
@@ -87,15 +87,24 @@ const rise = (delay: number) =>
     .delay(delay);
 
 /** Text that appears word by word. */
-export function Words({ text, style, delay = 0, stagger = 70 }: { text: string; style: StyleProp<TextStyle>; delay?: number; stagger?: number }) {
+export function Words({ text, style, delay = 0, stagger = 70, maxWidth }: { text: string; style: StyleProp<TextStyle>; delay?: number; stagger?: number; maxWidth?: number }) {
   const reduce = useReducedMotion();
+  const { width } = useWindowDimensions();
   const flat = StyleSheet.flatten(style) ?? {};
   const words = text.split(/\s+/).filter(Boolean);
-  if (reduce) return <Text style={style}>{text}</Text>;
+  // A word can't wrap, so a long one ("family_evening_oct") shrinks the whole title until it fits.
+  const size = flat.fontSize ?? 20;
+  const longest = Math.max(1, ...words.map((w) => w.length));
+  const scale = Math.max(0.35, Math.min(1, (maxWidth ?? width - 56) / (longest * size * 0.62)));
+  const fit: StyleProp<TextStyle> =
+    scale < 1
+      ? [style, { fontSize: size * scale, lineHeight: flat.lineHeight ? flat.lineHeight * scale : undefined, letterSpacing: flat.letterSpacing ? flat.letterSpacing * scale : undefined }]
+      : style;
+  if (reduce) return <Text style={fit}>{text}</Text>;
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: (flat.fontSize ?? 20) * 0.26, justifyContent: flat.textAlign === 'center' ? 'center' : 'flex-start' }} accessible accessibilityLabel={text}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: size * scale * 0.26, justifyContent: flat.textAlign === 'center' ? 'center' : 'flex-start' }} accessible accessibilityLabel={text}>
       {words.map((w, i) => (
-        <Animated.Text key={`${i}${w}`} entering={rise(delay + i * stagger)} style={style}>
+        <Animated.Text key={`${i}${w}`} entering={rise(delay + i * stagger)} style={fit}>
           {w}
         </Animated.Text>
       ))}

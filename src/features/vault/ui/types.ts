@@ -15,7 +15,10 @@ import type { CompressQuality } from '../smaller';
 
 export type { CompressQuality, EditPlan };
 
-export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration';
+export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration' | 'mostWatched' | 'leastWatched' | 'lastWatched';
+
+/** Sorts worked out from your plays (the rest come sorted from the database). */
+export const WATCH_SORTS: VaultSort[] = ['mostWatched', 'leastWatched', 'lastWatched'];
 
 export type UiTag = { id: number; name: string; pinned?: boolean };
 
@@ -289,6 +292,9 @@ export const SORTS: { key: VaultSort; label: string }[] = [
   { key: 'name', label: 'Name' },
   { key: 'size', label: 'Size' },
   { key: 'duration', label: 'Duration' },
+  { key: 'mostWatched', label: 'Most watched' },
+  { key: 'leastWatched', label: 'Least watched' },
+  { key: 'lastWatched', label: 'Last watched' },
 ];
 
 export type PasscodeKind = '4' | '6' | 'numeric' | 'alphanumeric';
@@ -400,7 +406,8 @@ export type VaultActions = {
   clearPasscode: () => Promise<void>;
   setFakePasscode: (code: string | null) => Promise<void>;
   setFaceId: (enabled: boolean) => Promise<void>;
-  checkPasscode: (code: string) => Promise<'real' | 'fake' | 'wrong'>;
+  /** `log: false` when checking a code you are choosing (not someone trying to get in). */
+  checkPasscode: (code: string, opts?: { log?: boolean }) => Promise<'real' | 'fake' | 'wrong'>;
   /** Move to Recently Deleted. Nothing is removed from disk yet. */
   onDeleteOne: (item: VaultItem) => Promise<void>;
   onDeleteMany: (items: VaultItem[]) => Promise<void>;
@@ -426,6 +433,24 @@ export type VaultActions = {
   /** A notification every Monday morning: "Your weekly Wrapped is ready". */
   getWrappedReminder: () => Promise<boolean>;
   setWrappedReminder: (on: boolean) => Promise<boolean>;
+  /** 9:00 on days with videos filmed on that date in earlier years. */
+  getOnThisDayReminder: () => Promise<boolean>;
+  setOnThisDayReminder: (on: boolean) => Promise<boolean>;
+  /** 1 December: "Your year's Wrapped is ready". */
+  getYearWrappedReminder: () => Promise<boolean>;
+  setYearWrappedReminder: (on: boolean) => Promise<boolean>;
+  /** Take one keyword off many videos. */
+  onRemoveTagMany: (videoIds: string[], name: string) => Promise<void>;
+  /** Remove one sitting from the watch history. */
+  deletePlays: (videoId: string, from: number, to: number) => Promise<void>;
+  /** HashPhotos' Export Metadata file: pick and read it (null = cancelled), then apply what was planned. */
+  pickMetadataFile: () => Promise<{ name: string; file: import('../hashphotos').MetaFile } | null>;
+  applyMetadata: (changes: import('../hashphotos').MetaChange[]) => Promise<void>;
+  /** Wrong and fake passcodes typed at Private, newest first. */
+  passcodeLog: () => Promise<{ at: number; kind: 'wrong' | 'fake' | 'faceid-failed' }[]>;
+  clearPasscodeLog: () => Promise<void>;
+  /** Wi-Fi transfer from a computer (app 1.9+): null when this build has no server. */
+  wifi: WifiBridge | null;
 
   /* Overview (rate and track your videos like shows). */
   ovCreateSeries: (name: string, videoIds: string[]) => Promise<string>;
@@ -447,6 +472,19 @@ export type VaultActions = {
   /** Forget removed videos completely. */
   ovForget: (ids: string[]) => Promise<void>;
 };
+
+/** The Wi-Fi transfer server, as the UI sees it. */
+export type WifiBridge = {
+  /** Starts the server; resolves with the address to type on the computer (null = no Wi-Fi). */
+  start: (onEvent: (e: WifiEvent) => void) => Promise<{ url: string | null; code: string }>;
+  stop: () => Promise<void>;
+};
+
+export type WifiEvent =
+  | { kind: 'receiving'; name: string; received: number; total: number }
+  | { kind: 'imported'; name: string }
+  | { kind: 'duplicate'; name: string }
+  | { kind: 'failed'; name: string; reason: string };
 
 /** Your own settings for watching your videos. */
 export type VaultPrefs = {
@@ -477,7 +515,25 @@ export type VaultPrefs = {
   events: import('../achievements').AchEvent[];
   /** Badges you have already been shown earning; null until the first look (so old ones don't all pop up). */
   badgesSeen: string[] | null;
+  /** Sound on the videos that play by themselves in cards (Dashboard, Memories, Wrapped, History). */
+  liveSound: boolean;
+  /** How Slideshow plays (remembered). */
+  slideshow: SlideshowOptions;
+  /** Albums in the sidebar: A to Z, most watched, or recently used. */
+  albumSort: 'name' | 'watched' | 'recent';
 };
+
+export type SlideshowOptions = {
+  order: 'shown' | 'shuffle' | 'oldest' | 'best';
+  /** Seconds of each video; 0 = the whole video. */
+  clipSec: number;
+  transition: 'fade' | 'zoom' | 'slide' | 'none';
+  titles: boolean;
+  sound: boolean;
+  repeat: boolean;
+};
+
+export const DEFAULT_SLIDESHOW: SlideshowOptions = { order: 'shown', clipSec: 0, transition: 'fade', titles: true, sound: true, repeat: false };
 
 export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   ratingLabels: {},
@@ -494,6 +550,9 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   customMemories: [],
   events: [],
   badgesSeen: null,
+  liveSound: true,
+  slideshow: DEFAULT_SLIDESHOW,
+  albumSort: 'name',
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */
@@ -512,6 +571,9 @@ export type VaultScreenProps = {
   /** Open this week's Wrapped (the Monday notification was tapped). */
   wrappedRequest?: boolean;
   onWrappedHandled?: () => void;
+  /** An On this day or yearly Wrapped notification was tapped. */
+  openRequest?: 'yearWrapped' | 'onThisDay' | null;
+  onOpenRequestHandled?: () => void;
   /** Simkl, for linking videos to a movie or episode and scrobbling them. */
   simkl?: import('@/features/simkl/ui/types').SimklBridge;
   /** All videos, already sorted by `viewOptions.sort`. Filtering happens inside the UI. */
@@ -571,7 +633,7 @@ export type VaultScreenProps = {
     /** With viewerId: open the editor on this tab. */
     editorTab?: 'trim' | 'crop' | 'size';
     importMenuOpen?: boolean;
-    insightsTab?: 'dashboard' | 'memories' | 'wrapped' | 'badges' | 'storage';
+    insightsTab?: 'dashboard' | 'history' | 'memories' | 'wrapped' | 'badges' | 'storage';
     /** Play the first memory as Memories opens. */
     memoryOpen?: boolean;
     personaliseOpen?: boolean;
@@ -580,6 +642,13 @@ export type VaultScreenProps = {
     overviewSheet?: 'new' | 'edit' | 'add';
     passcodeOpen?: boolean;
     slideshowOpen?: boolean;
+    /** Slideshow: start playing at once (skip the options). */
+    slideshowPlay?: boolean;
+    coverPickerOpen?: boolean;
+    dupReviewOpen?: boolean;
+    metaImportOpen?: boolean;
+    wifiOpen?: boolean;
+    historyStats?: boolean;
     compareOpen?: boolean;
   };
 };

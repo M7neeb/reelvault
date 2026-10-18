@@ -37,6 +37,7 @@ import { pickVideoFolder } from '@/features/vault/folderImport';
 import { importAssets, type ImportSummary } from '@/features/vault/import';
 import {
   addTagMany,
+  removeTagMany,
   adjustDates,
   clearTray,
   deleteSmartFilter,
@@ -86,6 +87,7 @@ import {
   bookmarkCount,
   bookmarksFor,
   deleteBookmark,
+  deletePlays,
   recordPlay,
   renameBookmark,
   resumePoints,
@@ -108,9 +110,25 @@ import {
   updateSeries,
 } from '@/features/vault/overviewStore';
 import type { OvMember, OvSeries, OvVideo } from '@/features/vault/overview';
-import { onWrappedTap, setWrappedReminder, wrappedReminderOn } from '@/features/vault/wrappedReminder';
+import {
+  onOpenRequestTap,
+  onThisDayReminderOn,
+  onWrappedTap,
+  scheduleOnThisDay,
+  scheduleYearWrapped,
+  setOnThisDayReminder,
+  setWrappedReminder,
+  setYearWrappedReminder,
+  wrappedReminderOn,
+  yearWrappedReminderOn,
+  type OpenRequest,
+} from '@/features/vault/wrappedReminder';
 import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
-import { DEFAULT_VAULT_PREFS, type VaultPrefs } from '@/features/vault/ui/types';
+import { DEFAULT_SLIDESHOW, DEFAULT_VAULT_PREFS, WATCH_SORTS, type SlideshowOptions, type VaultPrefs } from '@/features/vault/ui/types';
+import { onThisDayPlan } from '@/features/vault/recap';
+import { applyMetadata, pickMetadataFile } from '@/features/vault/metaImport';
+import { clearPasscodeLog, logPasscodeAttempt, passcodeLog } from '@/features/vault/passcodeLog';
+import { wifiBridge } from '@/features/vault/wifi';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -230,12 +248,41 @@ export type VaultData = {
   prefs: VaultPrefs;
   wrappedRequest: boolean;
   clearWrappedRequest: () => void;
+  openRequest: OpenRequest | null;
+  clearOpenRequest: () => void;
   kept: OvVideo[];
   series: OvSeries[];
   members: OvMember[];
 };
 
 const PREFS_KEY = 'vault.prefs';
+
+/** The shape the pure recap helpers read. */
+const asRVideo = (v: Video) => ({
+  id: v.id,
+  title: v.title,
+  filename: v.filename,
+  createdAt: v.createdAt,
+  importedAt: v.importedAt,
+  durationMs: v.durationMs,
+  sizeBytes: v.size,
+  rating: v.rating,
+  tagNames: [] as string[],
+});
+
+function parseSlideshow(r: unknown): SlideshowOptions {
+  const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+  const d = DEFAULT_SLIDESHOW;
+  const pick = <T extends string>(v: unknown, list: readonly T[], def: T): T => (list.includes(v as T) ? (v as T) : def);
+  return {
+    order: pick(o.order, ['shown', 'shuffle', 'oldest', 'best'] as const, d.order),
+    clipSec: typeof o.clipSec === 'number' && [0, 5, 10, 20, 30, 60].includes(o.clipSec) ? o.clipSec : d.clipSec,
+    transition: pick(o.transition, ['fade', 'zoom', 'slide', 'none'] as const, d.transition),
+    titles: typeof o.titles === 'boolean' ? o.titles : d.titles,
+    sound: typeof o.sound === 'boolean' ? o.sound : d.sound,
+    repeat: typeof o.repeat === 'boolean' ? o.repeat : d.repeat,
+  };
+}
 
 function parsePrefs(json: string | null): VaultPrefs {
   try {
@@ -258,6 +305,9 @@ function parsePrefs(json: string | null): VaultPrefs {
         ? r.events.filter((e: { k?: unknown; at?: unknown }) => e && typeof e.k === 'string' && typeof e.at === 'number').slice(-3000)
         : [],
       badgesSeen: Array.isArray(r?.badgesSeen) ? r.badgesSeen.filter((x: unknown) => typeof x === 'string') : null,
+      liveSound: typeof r?.liveSound === 'boolean' ? r.liveSound : DEFAULT_VAULT_PREFS.liveSound,
+      slideshow: parseSlideshow(r?.slideshow),
+      albumSort: r?.albumSort === 'watched' || r?.albumSort === 'recent' ? r.albumSort : 'name',
     };
   } catch {
     return DEFAULT_VAULT_PREFS;
@@ -281,6 +331,7 @@ export function useVaultData(): VaultData {
   const [resume, setResume] = useState<Map<string, number>>(new Map());
   const [prefs, setPrefsState] = useState<VaultPrefs>(DEFAULT_VAULT_PREFS);
   const [wrappedRequest, setWrappedRequest] = useState(false);
+  const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
   const [kept, setKept] = useState<OvVideo[]>([]);
   const [series, setSeries] = useState<OvSeries[]>([]);
   const [members, setMembers] = useState<OvMember[]>([]);
@@ -292,11 +343,20 @@ export function useVaultData(): VaultData {
     resumePoints()
       .then(setResume)
       .catch(() => undefined);
-    return onWrappedTap(() => setWrappedRequest(true));
+    const offOpen = onOpenRequestTap(setOpenRequest);
+    const offWrapped = onWrappedTap(() => setWrappedRequest(true));
+    return () => {
+      offOpen();
+      offWrapped();
+    };
   }, []);
 
-  const sortRef = useRef<SortKey>(viewOptions.sort);
-  sortRef.current = viewOptions.sort;
+  // Sorts by plays are done in the UI; the database lists those newest first.
+  const sqlSort = (s: ViewOptions['sort']): SortKey => (WATCH_SORTS.includes(s) ? 'recent' : (s as SortKey));
+  const videosRef = useRef<Video[]>([]);
+  videosRef.current = videos;
+  const sortRef = useRef<SortKey>(sqlSort(viewOptions.sort));
+  sortRef.current = sqlSort(viewOptions.sort);
 
   const refresh = useCallback(async () => {
     const [list, trash, map, index, tagList, filters, albumRows, folderRows, members, keptRows, seriesRows, seriesMembers] = await Promise.all([
@@ -354,6 +414,15 @@ export function useVaultData(): VaultData {
   useEffect(() => {
     refresh().catch((e) => console.log(`[VAULT] refresh failed: ${String(e)}`));
   }, [viewOptions.sort, refresh]);
+
+  // Plan the next two weeks of On this day notifications (and the yearly Wrapped) once the library is loaded.
+  const planned = useRef(false);
+  useEffect(() => {
+    if (planned.current || !videos.length) return;
+    planned.current = true;
+    scheduleOnThisDay(onThisDayPlan(videos.filter((v) => !v.isPrivate).map(asRVideo), Date.now())).catch((e) => console.log(`[OTD] ${String(e)}`));
+    scheduleYearWrapped().catch((e) => console.log(`[YEAR] ${String(e)}`));
+  }, [videos]);
 
   // On start: empty what has been in Recently Deleted for 30 days, then backfill
   // durations, duplicate fingerprints and file metadata for older rows.
@@ -435,6 +504,7 @@ export function useVaultData(): VaultData {
       await refresh();
       const line = describeImport(summary, readFreeGb());
       setStatus(saved > 0 ? `${line} · saved ${(saved / 1024 ** 3).toFixed(2)} GB` : line);
+      return summary;
     },
     [refresh]
   );
@@ -604,7 +674,11 @@ export function useVaultData(): VaultData {
         await setPrivateMany(ids, isPrivate);
         if (!isPrivate) await removeFromPrivateAlbums(ids);
       }),
-      unlockPrivate: unlockWithFaceId,
+      unlockPrivate: async () => {
+        const r = await unlockWithFaceId();
+        if (!r.ok && r.message) await logPasscodeAttempt('faceid-failed').catch(() => undefined);
+        return r;
+      },
       onSaveSmartFilter: andRefresh((f: { id?: number; name: string; rule: unknown }) =>
         saveSmartFilter({ id: f.id, name: f.name, ruleJson: JSON.stringify(f.rule) })
       ),
@@ -701,7 +775,13 @@ export function useVaultData(): VaultData {
       clearPasscode,
       setFakePasscode,
       setFaceId: setFaceIdEnabled,
-      checkPasscode,
+      checkPasscode: async (code, opts) => {
+        const r = await checkPasscode(code);
+        if (r !== 'real' && opts?.log !== false) await logPasscodeAttempt(r).catch(() => undefined);
+        return r;
+      },
+      passcodeLog,
+      clearPasscodeLog,
       recordPlay,
       loadPlays: allVaultPlays,
       loadBookmarks: bookmarksFor,
@@ -730,6 +810,15 @@ export function useVaultData(): VaultData {
       canChangeAppIcon: () => supportsAlternateIcons,
       getWrappedReminder: wrappedReminderOn,
       setWrappedReminder,
+      getOnThisDayReminder: onThisDayReminderOn,
+      setOnThisDayReminder: (on) => setOnThisDayReminder(on, onThisDayPlan(videosRef.current.filter((v) => !v.isPrivate).map(asRVideo), Date.now())),
+      getYearWrappedReminder: yearWrappedReminderOn,
+      setYearWrappedReminder,
+      onRemoveTagMany: andRefresh(removeTagMany),
+      deletePlays,
+      pickMetadataFile,
+      applyMetadata: andRefresh(applyMetadata),
+      wifi: wifiBridge((files) => runImport(files, false)),
       ovCreateSeries: async (name, ids) => {
         const id = await createSeries(name, ids);
         await refresh();
@@ -754,7 +843,7 @@ export function useVaultData(): VaultData {
       },
       ovForget: andRefresh(forgetKept),
     }),
-    [onImport, onImportFolder, onImportLink, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
+    [onImport, onImportFolder, onImportLink, runImport, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );
 
   return {
@@ -775,6 +864,8 @@ export function useVaultData(): VaultData {
     prefs,
     wrappedRequest,
     clearWrappedRequest: () => setWrappedRequest(false),
+    openRequest,
+    clearOpenRequest: () => setOpenRequest(null),
     kept,
     series,
     members,

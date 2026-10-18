@@ -1,6 +1,7 @@
 /**
  * Memories: your videos gathered into little films, the way Photos does it.
- * On this day in earlier years, trips away from home (from the videos' GPS),
+ * On this day in earlier years, a year ago this month, your very first videos,
+ * your 100th / 500th / 1000th video, after dark, trips away from home (from the videos' GPS),
  * days you filmed a lot, the best of a month, seasons, themes from your tags,
  * favourites, forgotten gems, whole years and what's on repeat. Each memory
  * picks its best videos (rating, plays) and plays them in the order they were
@@ -12,7 +13,23 @@ import { highlightAt, type RPlay, type RVideo } from './recap.ts';
 
 export type MVideo = RVideo & { location?: { lat: number; lon: number } | null; albumIds?: number[] };
 
-export type MemoryKind = 'custom' | 'onThisDay' | 'trip' | 'day' | 'recent' | 'repeat' | 'month' | 'season' | 'theme' | 'favourites' | 'gems' | 'year';
+export type MemoryKind =
+  | 'custom'
+  | 'onThisDay'
+  | 'yearAgo'
+  | 'first'
+  | 'milestone'
+  | 'night'
+  | 'trip'
+  | 'day'
+  | 'recent'
+  | 'repeat'
+  | 'month'
+  | 'season'
+  | 'theme'
+  | 'favourites'
+  | 'gems'
+  | 'year';
 
 /** How a memory plays: slow and warm, quick cuts, or wide and cinematic. */
 export type Mood = 'gentle' | 'upbeat' | 'epic';
@@ -151,6 +168,62 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
       score: 100 - years,
     });
   }
+
+  // A year ago: filmed in the weeks around this date last year (the days On this day already shows are left out).
+  const lastYear = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate(), 12).getTime();
+  const otdIds = new Set([...byYear.values()].flat().map((v) => v.id));
+  const yearAgo = all.filter((v) => Math.abs(v.createdAt - lastYear) <= 15 * DAY && !otdIds.has(v.id));
+  if (yearAgo.length >= 3)
+    add('yearAgo', `yago:${today.getFullYear() - 1}-${today.getMonth() + 1}`, yearAgo, {
+      kicker: 'ONE YEAR AGO',
+      title: `${monthName(lastYear)}, a year ago`,
+      subtitle: `${fmtDay(yearAgo[0].createdAt, { day: 'numeric', month: 'short' })} – ${fmtDay(yearAgo[yearAgo.length - 1].createdAt, { day: 'numeric', month: 'short', year: 'numeric' })} · ${plural(yearAgo.length, 'video')}`,
+      mood: 'gentle',
+      tone: 0,
+      score: 88,
+    });
+
+  // Where it all began: the first videos in your library.
+  if (all.length >= 12) {
+    const first = all.slice(0, Math.min(8, Math.max(3, Math.floor(all.length / 20))));
+    add('first', 'first', first, {
+      kicker: 'WHERE IT BEGAN',
+      title: 'Your first videos',
+      subtitle: `Since ${fmtDay(first[0].createdAt)} · the very start`,
+      mood: 'gentle',
+      tone: 11,
+      score: 38 + (ageDays(first[0].createdAt) > 365 ? 6 : 0),
+    });
+  }
+
+  // Milestones: your 100th, 500th, 1000th… video and the ones around it.
+  for (const n of [100, 250, 500, 1000, 2500, 5000]) {
+    if (all.length < n) break;
+    const around = all.slice(Math.max(0, n - 3), n + 2);
+    add('milestone', `milestone:${n}`, around, {
+      kicker: 'MILESTONE',
+      title: `Video number ${n.toLocaleString('en-GB')}`,
+      subtitle: `Filmed ${fmtDay(all[n - 1].createdAt)}`,
+      mood: 'epic',
+      tone: 12,
+      score: 33 + Math.log10(n),
+    });
+  }
+
+  // After dark: filmed between 9 pm and 4 am.
+  const night = all.filter((v) => {
+    const h = new Date(v.createdAt).getHours();
+    return h >= 21 || h < 4;
+  });
+  if (night.length >= 4)
+    add('night', 'night', night, {
+      kicker: 'AFTER DARK',
+      title: 'Night moments',
+      subtitle: `${plural(night.length, 'video')} filmed after 9 pm`,
+      mood: 'epic',
+      tone: 13,
+      score: 22,
+    });
 
   // Trips: runs of videos filmed 60 km or more from home, no more than three days apart.
   const home = homeOf(all);

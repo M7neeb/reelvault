@@ -15,6 +15,7 @@ import {
   nearby,
   orientationOf,
   parseRule,
+  pickKeeper,
 } from '../src/features/vault/ui/logic.ts';
 import { matchBackup, parseBackup } from '../src/features/vault/backupFormat.ts';
 
@@ -95,13 +96,27 @@ test('similar videos: same shape and length, but a different file', () => {
     video({ id: 'a', durationMs: 128_000, width: 1920, height: 1080, contentKey: 'x', importedAt: 2 }),
     video({ id: 'b', durationMs: 129_000, width: 1280, height: 720, contentKey: 'y', importedAt: 1 }),
     video({ id: 'c', durationMs: 128_500, width: 1080, height: 1920, contentKey: 'z', importedAt: 3 }),
-    video({ id: 'd', durationMs: 200_000, width: 1920, height: 1080, contentKey: 'w' }),
+    video({ id: 'd', durationMs: 200_000, width: 1920, height: 1080, contentKey: 'w', createdAt: at(2026, 10, 4) }),
     video({ id: 'same-file', durationMs: 128_200, width: 1920, height: 1080, contentKey: 'x', importedAt: 9 }),
   ];
   const groups = groupSimilar(items);
   assert.equal(groups.length, 1);
   // 'b' (oldest import) first; 'c' is the same clip rotated; 'same-file' is a duplicate, not "similar".
   assert.deepEqual(groups[0], ['b', 'a', 'c']);
+});
+
+test('similar videos: filmed in the same second (a trimmed copy), and which one to keep', () => {
+  const items = [
+    video({ id: 'full', durationMs: 300_000, contentKey: 'a', importedAt: at(2026, 10, 13) }),
+    video({ id: 'trim', durationMs: 60_000, contentKey: 'b', importedAt: at(2026, 10, 14) }),
+    // Only an import date (no filming date in the file): never matched by time.
+    video({ id: 'nodate', durationMs: 90_000, contentKey: 'c', createdAt: at(2026, 10, 15), importedAt: at(2026, 10, 15) }),
+    video({ id: 'nodate2', durationMs: 95_000, contentKey: 'd', createdAt: at(2026, 10, 15), importedAt: at(2026, 10, 15) }),
+  ];
+  assert.deepEqual(groupSimilar(items), [['full', 'trim']]);
+  const g = [video({ id: 'small', width: 720, height: 1280 }), video({ id: 'sharp', width: 1080, height: 1920 })];
+  assert.equal(pickKeeper(g), 'sharp');
+  assert.equal(pickKeeper([video({ id: 'x' }), video({ id: 'y', rating: 9 })]), 'y');
 });
 
 test('places: distance and videos nearby', () => {

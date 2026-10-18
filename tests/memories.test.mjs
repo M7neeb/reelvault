@@ -114,3 +114,22 @@ test('custom memories pick by keyword, album, dates and rating', async () => {
   assert.equal(m.title, 'Summer');
   assert.equal(customMemory({ ...c, tag: 'nothing' }, list, []), null);
 });
+
+test('a year ago, first videos, milestones and after dark', () => {
+  const list = [];
+  // 120 videos over three years, one every ~9 days, all at 22:00 for the first ten.
+  for (let i = 0; i < 120; i++) list.push(video({ createdAt: at(2023, 10, 1) + i * 9 * DAY + (i < 10 ? 10 * 3_600_000 : 0) }));
+  // Three filmed around this date last year (2025-10-18), not on the same few days.
+  list.push(video({ createdAt: at(2025, 9, 8) }), video({ createdAt: at(2025, 9, 28) }), video({ createdAt: at(2025, 10, 1) }));
+  const out = memories(list, [], NOW);
+  const kinds = new Set(out.map((m) => m.kind));
+  assert.ok(kinds.has('yearAgo'));
+  const ya = out.find((m) => m.kind === 'yearAgo');
+  assert.equal(ya.title, 'October, a year ago');
+  assert.ok(kinds.has('first'));
+  assert.equal(out.find((m) => m.kind === 'first').videoIds[0], list[0].id);
+  const ms = out.find((m) => m.id === 'milestone:100');
+  assert.ok(ms);
+  assert.equal(ms.title, 'Video number 100');
+  assert.ok(kinds.has('night'));
+});

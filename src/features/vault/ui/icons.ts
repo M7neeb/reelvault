@@ -85,6 +85,16 @@ export const ICONS = {
   memories: { sf: 'play.rectangle.on.rectangle', ion: 'albums-outline' },
   mapPin: { sf: 'mappin.and.ellipse', ion: 'location-outline' },
   wand: { sf: 'sparkles', ion: 'sparkles' },
+  history: { sf: 'clock.arrow.circlepath', ion: 'time-outline' },
+  wifi: { sf: 'wifi', ion: 'wifi' },
+  airplay: { sf: 'airplayvideo', ion: 'tv-outline' },
+  slideshow: { sf: 'play.square.stack', ion: 'images-outline' },
+  copies: { sf: 'square.on.square', ion: 'copy-outline' },
+  computer: { sf: 'desktopcomputer', ion: 'desktop-outline' },
+  shield: { sf: 'lock.shield', ion: 'shield-outline' },
+  frame: { sf: 'photo.on.rectangle.angled', ion: 'image-outline' },
+  minus: { sf: 'minus', ion: 'remove' },
+  fire: { sf: 'flame.fill', ion: 'flame' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

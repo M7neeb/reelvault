@@ -12,6 +12,7 @@
  * Presentational only.
  */
 
+import { LiveCard } from './live';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Modal, Platform, ScrollView, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -92,6 +93,7 @@ export function WrappedPicker({
   const weeks = useMemo(() => recentWeeks(now, 9).map((r) => ({ r, w: make(r) })), [items, plays, scope, simkl]); // eslint-disable-line react-hooks/exhaustive-deps
   const [thisWeek, ...past] = weeks;
   const top = (w: Wrapped) => (w.videos.topVideos[0] ? thumbs.get(w.videos.topVideos[0].key) : undefined);
+  const yearTop = yearW.videos.topVideos[0] ? items.find((v) => v.id === yearW.videos.topVideos[0].key) : undefined;
   const maxMonth = Math.max(1, ...months.map((m) => m.w.totalMinutes));
 
   /** 7 little bars, one per day, for a week card. */
@@ -126,8 +128,17 @@ export function WrappedPicker({
       {/* ── the year ─────────────────────────────────────────── */}
       <Animated.View entering={enterUp(1)}>
         <PressableScale onPress={() => open(year)} style={[styles.yearCard, { minHeight: Math.min(330, width * 0.82) }]} accessibilityLabel={`Play your ${year.label} Wrapped`}>
-          {top(yearW) ? <Image source={top(yearW)} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
-          <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(160deg, rgba(255,55,95,0.85) 0%, rgba(94,92,230,0.9) 55%, rgba(16,8,48,0.97) 100%)')]} />
+          <LiveCard
+            id="wrapped-year"
+            uri={yearTop?.uri}
+            durationMs={yearTop?.durationMs}
+            cover={top(yearW)}
+            radius={0}
+            priority={2}
+            style={StyleSheet.absoluteFill}
+            soundStyle={{ top: 74, right: 18 }}
+          />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient('linear-gradient(160deg, rgba(255,55,95,0.62) 0%, rgba(94,92,230,0.72) 50%, rgba(16,8,48,0.95) 100%)')]} />
           <View style={[styles.yearTicker, { top: '38%' }]}>
             <Marquee ms={16000}>
               <Text style={styles.yearTickerText}>{year.label} WRAPPED · </Text>

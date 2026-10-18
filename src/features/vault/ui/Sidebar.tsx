@@ -104,12 +104,16 @@ export type SidebarProps = {
   onMap: () => void;
   onSettings: () => void;
   onImport: () => void;
-  onInsights: (tab: 'dashboard' | 'wrapped' | 'badges' | 'storage') => void;
+  onInsights: (tab: 'dashboard' | 'history' | 'wrapped' | 'badges' | 'storage') => void;
   onPersonalise: () => void;
+  /** How the albums are listed (A to Z, most watched, recently used). */
+  albumSort?: 'name' | 'watched' | 'recent';
+  onAlbumSort?: (s: 'name' | 'watched' | 'recent') => void;
 };
 
-const TILES: { tab: 'dashboard' | 'wrapped' | 'badges' | 'storage'; label: string; icon: IconName; color: string }[] = [
+const TILES: { tab: 'dashboard' | 'history' | 'wrapped' | 'badges' | 'storage'; label: string; icon: IconName; color: string }[] = [
   { tab: 'dashboard', label: 'Dashboard', icon: 'dashboard', color: '#0A84FF' },
+  { tab: 'history', label: 'History', icon: 'history', color: '#30B0C7' },
   { tab: 'wrapped', label: 'Wrapped', icon: 'sparkle', color: '#BF5AF2' },
   { tab: 'badges', label: 'Badges', icon: 'trophy', color: '#FF9F0A' },
   { tab: 'storage', label: 'Storage', icon: 'storage', color: '#30D158' },
@@ -228,7 +232,19 @@ export default function Sidebar(props: SidebarProps) {
             </>
           )}
 
-          <Text style={styles.section}>Albums</Text>
+          <View style={styles.sectionRow}>
+            <Text style={styles.section}>Albums</Text>
+            {props.onAlbumSort && (
+              <TouchableOpacity
+                hitSlop={8}
+                onPress={() => props.onAlbumSort!(props.albumSort === 'name' ? 'watched' : props.albumSort === 'watched' ? 'recent' : 'name')}
+                accessibilityLabel="Change how albums are sorted">
+                <Text style={styles.sectionSort}>
+                  {props.albumSort === 'watched' ? 'Most watched' : props.albumSort === 'recent' ? 'Recently used' : 'A–Z'} ⇅
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {topAlbums.map((a) => albumRow(a))}
           {folders.map((folder) => {
             const open = openFolders.includes(folder.id);
@@ -351,6 +367,8 @@ const makeStyles = (p: Palette) =>
     },
     title: { color: p.text, fontSize: 22, fontWeight: '800', paddingHorizontal: 18, paddingBottom: 12 },
     scroll: { paddingHorizontal: 12, paddingBottom: 24, gap: 2 },
+    sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingRight: 8 },
+    sectionSort: { color: p.link, fontSize: 12, fontWeight: '700' },
     section: {
       color: p.textSecondary,
       fontSize: 12,

@@ -212,7 +212,7 @@ export const ruleIsEmpty = (rule: SmartRule): boolean => describeRule(rule) === 
 
 /* ------------------------------------------------------------- view options */
 
-const SORT_KEYS: VaultSort[] = ['recent', 'oldest', 'rating', 'name', 'size', 'duration'];
+const SORT_KEYS: VaultSort[] = ['recent', 'oldest', 'rating', 'name', 'size', 'duration', 'mostWatched', 'leastWatched', 'lastWatched'];
 const LAYOUT_KEYS: LayoutStyle[] = ['grid', 'natural', 'waterfall', 'mosaic'];
 const SIZE_KEYS: ThumbSize[] = ['small', 'medium', 'large', 'xlarge', 'fit'];
 const INFO_KEYS: ThumbInfo[] = [
@@ -346,6 +346,8 @@ type SimilarTarget = {
   height: number | null;
   sizeBytes: number;
   importedAt: number;
+  /** When filmed: two files filmed in the same second are the same moment. */
+  createdAt?: number;
 };
 
 /**
@@ -380,6 +382,20 @@ export function groupSimilar<T extends SimilarTarget>(items: T[]): string[][] {
       for (const g of group) seen.add(g.id);
       groups.push(group.sort((x, y) => x.importedAt - y.importedAt).map((g) => g.id));
     }
+  }
+  // Also: filmed in the same second (a trimmed or shrunk copy keeps the filming date), any length.
+  const byMoment = new Map<number, T[]>();
+  for (const v of items) {
+    // Skip videos whose date is only the import time (no filming date in the file).
+    if (seen.has(v.id) || !v.createdAt || v.createdAt <= 0 || Math.abs(v.createdAt - v.importedAt) < 60_000) continue;
+    const k = Math.round(v.createdAt / 1000);
+    byMoment.set(k, [...(byMoment.get(k) ?? []), v]);
+  }
+  for (const list of byMoment.values()) {
+    const distinct = list.filter((v, i) => !v.contentKey || list.findIndex((x) => x.contentKey === v.contentKey) === i);
+    if (distinct.length < 2) continue;
+    for (const g of distinct) seen.add(g.id);
+    groups.push(distinct.sort((x, y) => x.importedAt - y.importedAt).map((g) => g.id));
   }
   return groups;
 }
@@ -596,4 +612,27 @@ export function regionFor(points: { lat: number; lon: number }[]): MapRegion | n
     latitudeDelta: Math.min(170, Math.max(0.05, (maxLat - minLat) * 1.4)),
     longitudeDelta: Math.min(350, Math.max(0.05, (maxLon - minLon) * 1.4)),
   };
+}
+
+/* ------------------------------------------------------- the copy to keep */
+
+type KeeperTarget = { id: string; width: number | null; height: number | null; rating: number; importedAt: number; durationMs: number | null; tagNames: string[] };
+
+/**
+ * Which video of a duplicate or look-alike group to keep: the sharpest
+ * (most pixels), then the longest, the best rated, the most watched, the one
+ * with the most keywords, the oldest import. Returns its id.
+ */
+export function pickKeeper<T extends KeeperTarget>(group: T[], plays: Map<string, number> = new Map()): string | null {
+  if (!group.length) return null;
+  const px = (v: T) => (v.width ?? 0) * (v.height ?? 0);
+  return [...group].sort(
+    (a, b) =>
+      px(b) - px(a) ||
+      (b.durationMs ?? 0) - (a.durationMs ?? 0) ||
+      b.rating - a.rating ||
+      (plays.get(b.id) ?? 0) - (plays.get(a.id) ?? 0) ||
+      b.tagNames.length - a.tagNames.length ||
+      a.importedAt - b.importedAt
+  )[0].id;
 }

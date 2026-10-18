@@ -199,4 +199,7 @@ test('reminders: followed titles only, soonest first, inside three weeks, delay 
     ['4:release']
   );
   assert.deepEqual(parseReminderSettings('{"enabled":true,"delayMinutes":7}').delayMinutes, 0);
+  // A title with its bell turned off gets no reminders.
+  assert.deepEqual(planReminders(cal, library, { ...settings, muted: [3] }, now).map((r) => r.key), ['1:S01E05', '4:release']);
+  assert.deepEqual(parseReminderSettings('{"muted":[5,"x",7]}').muted, [5, 7]);
 });

@@ -12,12 +12,15 @@ export type ReminderSettings = {
   /** Minutes after the air time (0 = when it airs). */
   delayMinutes: number;
   types: Record<SimklType, boolean>;
+  /** Titles you turned the bell off for (Simkl ids). */
+  muted: number[];
 };
 
 export const DEFAULT_REMINDERS: ReminderSettings = {
   enabled: false,
   delayMinutes: 0,
   types: { show: true, anime: true, movie: true },
+  muted: [],
 };
 
 export const DELAYS: { minutes: number; label: string }[] = [
@@ -39,6 +42,7 @@ export function parseReminderSettings(raw: string | null): ReminderSettings {
         anime: v?.types?.anime !== false,
         movie: v?.types?.movie !== false,
       },
+      muted: Array.isArray(v?.muted) ? v.muted.filter((x: unknown) => typeof x === 'number').slice(0, 2000) : [],
     };
   } catch {
     return DEFAULT_REMINDERS;
@@ -67,7 +71,7 @@ export function planReminders(
   const seen = new Set<string>();
   for (const row of calendar) {
     const item = byId.get(row.simklId);
-    if (!item || !settings.types[item.type]) continue;
+    if (!item || !settings.types[item.type] || settings.muted.includes(item.simklId)) continue;
     const follows = item.type === 'movie' ? item.status === 'plantowatch' : item.status === 'watching' || item.status === 'hold' || item.status === 'plantowatch';
     if (!follows || !row.date) continue;
     const at = Date.parse(row.date) + settings.delayMinutes * 60_000;

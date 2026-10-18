@@ -26,6 +26,12 @@ export async function allVaultPlays(): Promise<VaultPlay[]> {
   return rows.map((r) => ({ videoId: r.video_id, startedAt: r.started_at, watchedMs: r.watched_ms }));
 }
 
+/** Removes plays of one video that started between `from` and `to` (one sitting in the history). */
+export async function deletePlays(videoId: string, from: number, to: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM vault_plays WHERE video_id = ? AND started_at >= ? AND started_at <= ?;', [videoId, Math.floor(from), Math.ceil(to)]);
+}
+
 /* ---------------------------------------------------------------- bookmarks */
 
 export async function bookmarksFor(videoId: string): Promise<Bookmark[]> {
