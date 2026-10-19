@@ -1,0 +1,49 @@
+# Sends the app's JavaScript to the phone over the air (no reinstall). The app
+# downloads it when it opens and uses it from the next launch on.
+#
+# Only for changes that need no new native build (no new native packages, same
+# runtimeVersion as the installed app). Anything else needs "iOS build".
+#
+# Needs the repository secret EXPO_TOKEN (expo.dev → Account settings → Access tokens).
+# Run it: Actions tab → "OTA update" → "Run workflow" (pick the branch to send).
+
+name: OTA update
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: What changed
+        required: false
+
+concurrency:
+  group: ota-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPO_PUBLIC_SIMKL_CLIENT_ID: ${{ vars.SIMKL_CLIENT_ID }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      MESSAGE: ${{ github.event.inputs.message }}
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the Expo token
+        run: test -n "$EXPO_TOKEN" || { echo "Add the EXPO_TOKEN repository secret first."; exit 1; }
+
+      - name: Publish the update
+        run: |
+          [ -n "$MESSAGE" ] || MESSAGE="$(git log -1 --pretty=%s | cut -c1-200)"
+          npx -y eas-cli@latest update --channel production --platform ios --message "$MESSAGE" --non-interactive
