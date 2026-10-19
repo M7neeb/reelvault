@@ -109,6 +109,17 @@ export const ICONS = {
   frame: { sf: 'photo.on.rectangle.angled', ion: 'image-outline' },
   minus: { sf: 'minus', ion: 'remove' },
   fire: { sf: 'flame.fill', ion: 'flame' },
+  duplicate: { sf: 'square.on.square', ion: 'copy-outline' },
+  headphones: { sf: 'headphones', ion: 'headset-outline' },
+  audio: { sf: 'waveform', ion: 'musical-notes-outline' },
+  book: { sf: 'book.fill', ion: 'book' },
+  bookOpen: { sf: 'book.pages', ion: 'book-outline' },
+  back15: { sf: 'gobackward.15', ion: 'play-back' },
+  forward30: { sf: 'goforward.30', ion: 'play-forward' },
+  sleep: { sf: 'moon.zzz.fill', ion: 'moon' },
+  chapters: { sf: 'list.number', ion: 'list' },
+  textSize: { sf: 'textformat.size', ion: 'text' },
+  follow: { sf: 'text.line.first.and.arrowtriangle.forward', ion: 'locate-outline' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

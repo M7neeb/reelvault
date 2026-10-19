@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export type Migration = {
   version: number;
@@ -393,6 +393,75 @@ export const MIGRATIONS: Migration[] = [
         label     TEXT                        -- episode name, null = the video's own
       );
       CREATE INDEX IF NOT EXISTS idx_series_items ON vault_series_items(series_id, position);
+    `,
+  },
+  {
+    version: 10,
+    sql: `
+      -- The Audio section: your own audio files, books made of several files,
+      -- and EPUB 3 books (read-along). Each item's files live in its own folder,
+      -- stored RELATIVE to the app's documents ("audio/<id>"), so iOS moving
+      -- the app's folder on an update never loses them.
+      CREATE TABLE IF NOT EXISTS audio_items (
+        id             TEXT PRIMARY KEY,
+        kind           TEXT NOT NULL,              -- 'audio' | 'book' (EPUB 3)
+        folder         TEXT NOT NULL,              -- relative: audio/<id>
+        filename       TEXT NOT NULL,              -- what it was called when added
+        size           INTEGER NOT NULL DEFAULT 0, -- bytes on the phone
+        duration_ms    INTEGER,
+        title          TEXT,
+        author         TEXT,
+        album          TEXT,
+        narrator       TEXT,
+        year           INTEGER,
+        genre          TEXT,
+        description    TEXT,
+        notes          TEXT,
+        rating         REAL NOT NULL DEFAULT 0,   -- 0 = none, else 1.0..10.0
+        status         TEXT,                       -- planned | listening | finished | dropped
+        cover          TEXT,                       -- file name in the folder
+        tracks_json    TEXT NOT NULL DEFAULT '[]', -- [{file, title, durationMs}]
+        chapters_json  TEXT NOT NULL DEFAULT '[]', -- [{title, track, startMs}]
+        content_key    TEXT,
+        is_private     INTEGER NOT NULL DEFAULT 0,
+        position_track INTEGER NOT NULL DEFAULT 0,
+        position_ms    INTEGER NOT NULL DEFAULT 0,
+        speed          REAL,
+        last_played_at INTEGER,
+        finished_at    INTEGER,
+        created_at     INTEGER NOT NULL,
+        imported_at    INTEGER NOT NULL,
+        deleted_at     INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_audio_items_key ON audio_items(content_key);
+
+      CREATE TABLE IF NOT EXISTS audio_tags (
+        item_id TEXT NOT NULL REFERENCES audio_items(id) ON DELETE CASCADE,
+        name    TEXT NOT NULL COLLATE NOCASE,
+        PRIMARY KEY (item_id, name)
+      );
+
+      -- Every listen: when it started and how much was heard (for stats and history).
+      CREATE TABLE IF NOT EXISTS audio_plays (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id     TEXT NOT NULL,
+        started_at  INTEGER NOT NULL,
+        listened_ms INTEGER NOT NULL,
+        from_ms     INTEGER,
+        to_ms       INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_audio_plays_item ON audio_plays(item_id);
+      CREATE INDEX IF NOT EXISTS idx_audio_plays_time ON audio_plays(started_at);
+
+      CREATE TABLE IF NOT EXISTS audio_bookmarks (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id    TEXT NOT NULL REFERENCES audio_items(id) ON DELETE CASCADE,
+        track      INTEGER NOT NULL DEFAULT 0,
+        at_ms      INTEGER NOT NULL,
+        label      TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_audio_bookmarks_item ON audio_bookmarks(item_id);
     `,
   },
 ];

@@ -49,6 +49,7 @@ import { ConnectCard } from './ConnectCard';
 import DetailModal from './DetailModal';
 import DiscoverModal from './DiscoverModal';
 import InsightsModal from './InsightsModal';
+import SimklDashboard from './SimklDashboard';
 import { ListEditor, ListModal, ListShelf } from './ListsUI';
 import { RatingsLine } from './parts';
 import Poster, { hueFor } from './Poster';
@@ -108,6 +109,7 @@ export default function SimklScreen(props: SimklScreenProps) {
   const [discover, setDiscover] = useState(dev?.discoverOpen ?? false);
   const [calendar, setCalendar] = useState(dev?.calendarOpen ?? false);
   const [stats, setStats] = useState<null | 'overview' | 'review'>(dev?.statsOpen ? 'overview' : (dev?.insightsTab ?? null));
+  const [dashboard, setDashboard] = useState(!!(dev?.dashboardOpen || dev?.wrappedOpen));
   const [account, setAccount] = useState(dev?.accountOpen ?? false);
   const [pick, setPick] = useState(dev?.pickOpen ?? false);
   const [importing, setImporting] = useState(dev?.importOpen ?? false);
@@ -203,7 +205,7 @@ export default function SimklScreen(props: SimklScreenProps) {
           <View style={styles.buttons}>
             <IconButton icon="dice" label="Pick something for me" onPress={() => setPick(true)} />
             <IconButton icon="calendar" label={category === 'movie' ? 'Upcoming releases' : 'Upcoming episodes'} onPress={() => setCalendar(true)} />
-            <IconButton icon="stats" label="Stats and review" onPress={() => setStats('overview')} />
+            <IconButton icon="stats" label="Dashboard, Wrapped and stats" onPress={() => setDashboard(true)} />
             <IconButton icon="more" label="Simkl settings" onPress={() => setAccount(true)} />
           </View>
         )}
@@ -535,6 +537,26 @@ export default function SimklScreen(props: SimklScreenProps) {
       )}
       {discover && <DiscoverModal type={category} library={library} actions={actions} onOpen={setOpen} onClose={() => setDiscover(false)} />}
       {calendar && <CalendarModal type={category} items={ofType} allItems={items} actions={actions} onOpen={setOpen} onClose={() => setCalendar(false)} />}
+      {dashboard && (
+        <SimklDashboard
+          items={items}
+          actions={actions}
+          initialWrap={dev?.wrappedOpen}
+          onOpenTitle={(it) => {
+            setDashboard(false);
+            setOpen(asTitle(it));
+          }}
+          onStats={() => {
+            setDashboard(false);
+            setStats('overview');
+          }}
+          onReview={() => {
+            setDashboard(false);
+            setStats('review');
+          }}
+          onClose={() => setDashboard(false)}
+        />
+      )}
       {stats && <InsightsModal items={items} actions={actions} initialTab={stats} onClose={() => setStats(null)} />}
       {pick && (
         <PickModal

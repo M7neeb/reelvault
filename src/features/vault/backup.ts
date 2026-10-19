@@ -11,7 +11,7 @@ import { getDb } from '@/db';
 
 
 import { addToAlbums, createAlbum, createFolder, listAlbums, listFolders } from './albums';
-import { BACKUP_KIND, BACKUP_VERSION, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupSeries } from './backupFormat';
+import { BACKUP_KIND, BACKUP_VERSION, matchAudio, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupAudio, type BackupSeries } from './backupFormat';
 import { getSetting, saveSmartFilter, setSetting, setTagPinned } from './library';
 import { mergeOvExtra, OV_EXTRA_KEY, ovExtraForBackup, parseOvExtra } from './ovExtra';
 import { addToSeries, createSeries, listSeries, setEpisodeLabel, updateSeries } from './overviewStore';
@@ -151,6 +151,7 @@ async function buildBackup(): Promise<{ json: string; videos: number }> {
     })),
     prefs,
     overview,
+    audio: await audioForBackup(),
     albums: albums.map((a) => ({ name: a.name, folder: folderName(a.folder_id), pinned: a.pinned === 1 })),
     folders: folders.map((f) => f.name),
     smartFilters: smart.map((s) => ({
@@ -388,5 +389,106 @@ export async function importLibraryInfo(uri?: string): Promise<{ matched: number
     await setSetting(OV_EXTRA_KEY, JSON.stringify(mergeOvExtra(current, incoming, mapKey)));
   }
 
+  // The Audio section.
+  if (backup.audio?.length) playsAdded += await restoreAudio(backup.audio);
+
   return { matched: matches.size, total: backup.videos.length, plays: playsAdded };
+}
+
+/* ------------------------------------------------------------------ audio */
+
+type AudioRow = {
+  id: string;
+  content_key: string | null;
+  filename: string;
+  size: number;
+  title: string | null;
+  author: string | null;
+  narrator: string | null;
+  album: string | null;
+  genre: string | null;
+  year: number | null;
+  notes: string | null;
+  rating: number;
+  status: string | null;
+  position_track: number;
+  position_ms: number;
+  speed: number | null;
+  last_played_at: number | null;
+  finished_at: number | null;
+};
+
+async function audioForBackup(): Promise<BackupAudio[]> {
+  const db = await getDb();
+  let rows: AudioRow[] = [];
+  try {
+    rows = await db.getAllAsync<AudioRow>('SELECT * FROM audio_items WHERE deleted_at IS NULL AND is_private = 0;');
+  } catch {
+    return [];
+  }
+  const tags = await db.getAllAsync<{ item_id: string; name: string }>('SELECT item_id, name FROM audio_tags;');
+  const plays = await db.getAllAsync<{ item_id: string; started_at: number; listened_ms: number }>('SELECT item_id, started_at, listened_ms FROM audio_plays;');
+  const marks = await db.getAllAsync<{ item_id: string; track: number; at_ms: number; label: string | null; created_at: number }>('SELECT item_id, track, at_ms, label, created_at FROM audio_bookmarks;');
+  return rows.map((r) => ({
+    contentKey: r.content_key,
+    filename: r.filename,
+    size: r.size,
+    title: r.title,
+    author: r.author,
+    narrator: r.narrator,
+    album: r.album,
+    genre: r.genre,
+    year: r.year,
+    notes: r.notes,
+    rating: r.rating,
+    status: r.status,
+    keywords: tags.filter((t) => t.item_id === r.id).map((t) => t.name),
+    positionTrack: r.position_track,
+    positionMs: r.position_ms,
+    speed: r.speed,
+    lastPlayedAt: r.last_played_at,
+    finishedAt: r.finished_at,
+    plays: plays.filter((x) => x.item_id === r.id).map((x): [number, number] => [x.started_at, x.listened_ms]),
+    bookmarks: marks.filter((m) => m.item_id === r.id).map((m) => ({ track: m.track, atMs: m.at_ms, label: m.label, createdAt: m.created_at })),
+  }));
+}
+
+/** Puts backed-up audio info back on the items you have now; returns how many listens were added. */
+async function restoreAudio(entries: BackupAudio[]): Promise<number> {
+  const db = await getDb();
+  const library = await db.getAllAsync<{ id: string; content_key: string | null; filename: string; size: number; last_played_at: number | null }>(
+    'SELECT id, content_key, filename, size, last_played_at FROM audio_items WHERE deleted_at IS NULL;'
+  );
+  const matches = matchAudio(entries, library.map((v) => ({ id: v.id, contentKey: v.content_key, filename: v.filename, size: v.size })));
+  let added = 0;
+  for (const [i, id] of matches) {
+    const a = entries[i];
+    const now = library.find((x) => x.id === id);
+    await db.runAsync(
+      `UPDATE audio_items SET title = COALESCE(?, title), author = COALESCE(?, author), narrator = COALESCE(?, narrator), album = COALESCE(?, album),
+         genre = COALESCE(?, genre), year = COALESCE(?, year), notes = COALESCE(?, notes), rating = ?, status = ?, speed = COALESCE(?, speed),
+         finished_at = COALESCE(?, finished_at)
+       WHERE id = ?;`,
+      [a.title, a.author, a.narrator, a.album, a.genre, a.year, a.notes, a.rating ?? 0, a.status, a.speed, a.finishedAt, id]
+    );
+    // Where you were: the backup's, when it is newer than what this phone has.
+    if ((a.lastPlayedAt ?? 0) > (now?.last_played_at ?? 0)) {
+      await db.runAsync('UPDATE audio_items SET position_track = ?, position_ms = ?, last_played_at = ? WHERE id = ?;', [a.positionTrack ?? 0, a.positionMs ?? 0, a.lastPlayedAt, id]);
+    }
+    for (const k of a.keywords) await db.runAsync('INSERT OR IGNORE INTO audio_tags (item_id, name) VALUES (?, ?);', [id, k]);
+    const have = new Set((await db.getAllAsync<{ started_at: number }>('SELECT started_at FROM audio_plays WHERE item_id = ?;', [id])).map((x) => x.started_at));
+    for (const [at, ms] of a.plays) {
+      if (have.has(at)) continue;
+      await db.runAsync('INSERT INTO audio_plays (item_id, started_at, listened_ms) VALUES (?, ?, ?);', [id, at, ms]);
+      added++;
+    }
+    const marks = new Set(
+      (await db.getAllAsync<{ track: number; at_ms: number }>('SELECT track, at_ms FROM audio_bookmarks WHERE item_id = ?;', [id])).map((m) => `${m.track}:${m.at_ms}`)
+    );
+    for (const m of a.bookmarks) {
+      if (marks.has(`${m.track}:${m.atMs}`)) continue;
+      await db.runAsync('INSERT INTO audio_bookmarks (item_id, track, at_ms, label, created_at) VALUES (?, ?, ?, ?, ?);', [id, m.track ?? 0, m.atMs, m.label, m.createdAt ?? Date.now()]);
+    }
+  }
+  return added;
 }

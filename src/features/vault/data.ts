@@ -37,7 +37,8 @@ import { contentKeyOf } from '@/features/vault/contentKey';
 import { probeDurationMs } from '@/features/vault/duration';
 import { ensureFilmstrip } from '@/features/vault/filmstrip';
 import { pickVideoFolder } from '@/features/vault/folderImport';
-import { importAssets, type ImportSummary } from '@/features/vault/import';
+import { importAssets, type DuplicateInfo, type ImportSummary } from '@/features/vault/import';
+import { stickyAsker } from '@/features/vault/dupMatch';
 import {
   addTagMany,
   removeTagMany,
@@ -163,6 +164,7 @@ import { gbFromBytes } from './ui/format';
 import { FREE_SPACE_RESERVE_GB, groupDuplicates, parseRule, parseViewOptions } from './ui/logic';
 import {
   DEFAULT_VIEW_OPTIONS,
+  type DuplicateAsk,
   type ImportSource,
   type SmartFilter,
   type UiAlbum,
@@ -230,7 +232,9 @@ function applyTheme(theme: ViewOptions['theme']): void {
 /** One readable line for the header after an import. */
 function describeImport(s: ImportSummary, freeGb: number | null): string {
   const parts = [`Imported ${s.imported}`];
-  if (s.duplicates.length) parts.push(`${s.duplicates.length} already in ReelVault`);
+  if (s.replaced.length) parts.push(`${s.replaced.length} replaced`);
+  if (s.keptBoth.length) parts.push(`${s.keptBoth.length} kept as a second copy`);
+  if (s.duplicates.length) parts.push(`${s.duplicates.length} already in ReelVault, skipped`);
   if (s.unverified.length) parts.push(`${s.unverified.length} may not play`);
   if (s.failed.length) parts.push(`${s.failed.length} failed`);
   if (freeGb !== null) parts.push(`${freeGb} GB free`);
@@ -260,6 +264,8 @@ export type VaultData = {
   busy: boolean;
   status: string;
   actions: VaultActions;
+  /** An import waits for an answer: this file is already in the library. */
+  duplicateAsk: DuplicateAsk | null;
   resume: Map<string, number>;
   prefs: VaultPrefs;
   wrappedRequest: boolean;
@@ -321,7 +327,7 @@ function parsePrefs(json: string | null): VaultPrefs {
       ratingLabels: parseRatingLabels(JSON.stringify(r?.ratingLabels ?? {})),
       resumeEnabled: typeof r?.resumeEnabled === 'boolean' ? r.resumeEnabled : DEFAULT_VAULT_PREFS.resumeEnabled,
       holdForSpeed: typeof r?.holdForSpeed === 'boolean' ? r.holdForSpeed : DEFAULT_VAULT_PREFS.holdForSpeed,
-      videosMode: r?.videosMode === 'overview' ? 'overview' : 'watch',
+      videosMode: r?.videosMode === 'overview' || r?.videosMode === 'audio' ? r.videosMode : 'watch',
       keepUnrated: typeof r?.keepUnrated === 'boolean' ? r.keepUnrated : DEFAULT_VAULT_PREFS.keepUnrated,
       hiddenSuggestions: Array.isArray(r?.hiddenSuggestions) ? r.hiddenSuggestions.filter((x: unknown) => typeof x === 'string').slice(0, 200) : [],
       showcase: Array.isArray(r?.showcase) ? r.showcase.filter((x: unknown) => typeof x === 'string').slice(0, 3) : [],
@@ -366,6 +372,7 @@ export function useVaultData(): VaultData {
   const [folders, setFolders] = useState<UiFolder[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const [duplicateAsk, setDuplicateAsk] = useState<DuplicateAsk | null>(null);
   const [viewOptions, setViewOptions] = useState<ViewOptions>(DEFAULT_VIEW_OPTIONS);
   const [freeGb, setFreeGb] = useState<number | null>(null);
   const [resume, setResume] = useState<Map<string, number>>(new Map());
@@ -574,11 +581,40 @@ export function useVaultData(): VaultData {
     async (assets: { uri: string; name: string; size?: number }[], keepOriginals: boolean) => {
       const quality = canMakeSmaller() ? parseQuality(await getSetting(IMPORT_QUALITY_KEY)) : null;
       let saved = 0;
+      // One question per copy found, unless "do the same for the rest" is ticked.
+      const onDuplicate = stickyAsker<DuplicateInfo>(
+        (info) =>
+          new Promise((resolve) => {
+            const v = info.existing;
+            setDuplicateAsk({
+              kind: 'video',
+              name: info.name,
+              size: info.size,
+              durationMs: info.durationMs,
+              existing: {
+                id: v.id,
+                title: v.isPrivate ? 'A video in Private' : friendlyName(v),
+                detail: v.filename,
+                thumb: v.isPrivate ? null : thumbnailUri(v.id, v.coverAt),
+                rating: v.isPrivate ? 0 : v.rating,
+                importedAt: v.importedAt,
+              },
+              exact: info.exact,
+              reason: info.reason,
+              remaining: info.remaining,
+              answer: (choice, all) => {
+                setDuplicateAsk(null);
+                resolve({ choice, all });
+              },
+            });
+          })
+      );
       const summary = await importAssets(
         assets.map((a) => ({ uri: a.uri, name: a.name, size: a.size })),
         (done, total) => setStatus(`Importing ${Math.min(done + 1, total)} of ${total}…`),
         {
           keepOriginals,
+          onDuplicate,
           // Each video is made smaller before the next one comes in, so the space is freed as it goes.
           afterEach: quality
             ? async (video, index, total) => {
@@ -1018,6 +1054,7 @@ export function useVaultData(): VaultData {
     busy,
     status,
     actions,
+    duplicateAsk,
     resume,
     prefs,
     wrappedRequest,

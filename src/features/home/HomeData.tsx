@@ -12,6 +12,7 @@ import { useRouter, type Href } from 'expo-router';
 import { useSimklData } from '@/features/simkl/data';
 import type { SimklType } from '@/features/simkl/ui/types';
 import { useVaultData } from '@/features/vault/data';
+import { useAudioData } from '@/features/vault/audio/audioData';
 import { resolveScheme } from '@/features/vault/ui/logic';
 import { themeFor, type Palette } from '@/features/vault/ui/theme';
 import { setRotateEverywhere } from '@/features/vault/rotate';
@@ -19,6 +20,8 @@ import { setRotateEverywhere } from '@/features/vault/rotate';
 type Home = {
   vault: ReturnType<typeof useVaultData>;
   simkl: ReturnType<typeof useSimklData>;
+  /** The Audio section (in the Videos tab). */
+  audio: ReturnType<typeof useAudioData>;
   palette: Palette;
 };
 
@@ -33,6 +36,7 @@ export const ROUTE_FOR: Record<SimklType, string> = {
 export function HomeDataProvider({ children }: { children: React.ReactNode }) {
   const vault = useVaultData();
   const simkl = useSimklData();
+  const audio = useAudioData();
   const system = useColorScheme();
   const palette = themeFor(resolveScheme(vault.viewOptions.theme, system), vault.viewOptions);
   const router = useRouter();
@@ -47,7 +51,7 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
     if (simkl.openRequest) router.navigate(ROUTE_FOR[simkl.openRequest.type] as Href);
   }, [simkl.openRequest, router]);
 
-  return <HomeContext.Provider value={{ vault, simkl, palette }}>{children}</HomeContext.Provider>;
+  return <HomeContext.Provider value={{ vault, simkl, audio, palette }}>{children}</HomeContext.Provider>;
 }
 
 export function useHome(): Home {

@@ -1,12 +1,15 @@
 # ReelVault
 
-A local-first video vault for iPhone.
+A local-first video and audio vault for iPhone.
 
-Import videos, keep them in one place, and organise them with keywords, ratings and
-search. Everything stays on the device — no account, no server, no telemetry.
+Import videos and your own audio and audiobooks, keep them in one place, and organise them
+with keywords, ratings and search. Everything stays on the device — no account, no server,
+no telemetry.
 
 ## Features
 
+- **Audio section** (Audio mode of the Videos tab) — your own audio files and audiobooks (MP3, M4A, M4B, AAC, WAV, AIFF, CAF, FLAC, Opus) and **EPUB 3 books with read-along**: the sentence being read lights up as the narration plays, tap any sentence to play from there, adjustable text size. Several files of one album become one book with a chapter per file; M4B and MP3 chapter marks are read. A player with chapters, back 15 / forward 30, speed up to 3×, a sleep timer (minutes or the end of the chapter), bookmarks with notes, smart rewind after a pause, background play and the lock screen. Ratings with decimals, status, keywords, notes, search, filters, sorting, Continue listening, select-to-edit, Private, Recently Deleted, listening stats, a year heat map and an Audio Wrapped. **Light on storage**: a book is unpacked once, a piece at a time, straight into its folder (no second copy, nothing cached, nothing grows while you listen), covers are kept small, and the Storage page shows what it takes
+- **"Already in your library"** — importing a video or audio file you already have (the very same file, or one with the same length and picture size, or the same name and length) asks: replace the one you have (it keeps its rating, keywords and history), keep both, or don't import; one answer can cover the rest of the import
 - **Import** videos from the Files app, Photos, a whole folder, a link, a computer over Wi-Fi (drop videos on a page in the browser), or **Open in ReelVault** from any app that shares a video file (Files, Safari downloads, chat apps)
 - **HashPhotos info** — read HashPhotos' metadata export (CSV, JSON or XML) and bring its keywords, ratings, titles, captions and flags across, matched by file name
 - **Automatic thumbnails** and a scrubbable **filmstrip with a live playhead**
@@ -40,6 +43,8 @@ search. Everything stays on the device — no account, no server, no telemetry.
 - **Badges** — a trophy room of 90+ badges: levels and XP, a full-screen reveal for each new badge (tap through, or Skip all to see every new one on one page), medals you can tilt, a showcase, weekly and monthly challenges, personal records, your journey, the badge road (every badge you earned on a winding path, where you are and what is next), and badges for memories, Wrapped, trips and secret dates
 - **Live cards** — Dashboard, Memories, Wrapped and History cards play their video with sound while on screen (one at a time, with a mute button), showing the whole picture over a blurred copy of itself instead of a cropped zoom
 - **Year heat map** — a whole year of days as twelve little calendars, coloured by watch time
+- **Simkl dashboard** — this week by day against last week, today / this month / this year, your streak, what is waiting in Up Next and how long it would take to finish, your year in days, the next milestones, your library by status, your top title this month and the last days you watched something
+- **Simkl Wrapped** — a story of a year (or a month) of movies, shows and anime: your hours, the split between them, a guess-your-#1 quiz, your top five, your #1, your genres, your biggest binge, your busiest month, your habits, your longest streak, what you discovered and finished, your best rated, the kind of watcher you are, and a summary to share
 - **Simkl** — Up Next as a big card with a one-tap watched, this week's calendar and what is new this week on the home screen; stats with genres month by month, hours per show and how many shows you finish
 - **Looks** — colour sets (Midnight, Graphite, Forest, Rose, Ember, or the colours of one of your videos), fonts, glass strength, round or square cards and outlines; **turn with the phone** so the whole app works sideways
 - **Control Center button** (iOS 18) — links for a random favourite, today's memory or any video, to put in Control Center through a shortcut
@@ -93,7 +98,7 @@ design decisions.
 
 ## Status
 
-In daily use on an iPhone, installed with SideStore. Version 1.9.2.
+In daily use on an iPhone, installed with SideStore. Version 1.10.0.
 
 ## License
 

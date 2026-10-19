@@ -55,6 +55,8 @@ import type { IconName } from '@/features/vault/ui/icons';
 import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/types';
 import { resolveScheme } from '@/features/vault/ui/logic';
 import { themeFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
+import { fixtureAudioData } from '@/features/vault/ui/audio/audioFixtures';
+import { AudioPlaybackProvider, useAudioPlayback } from '@/features/vault/ui/audio/playback';
 
 /**
  * A drawing of the iOS 26 tab bar (the real one is native and has no web
@@ -184,6 +186,8 @@ function SimklPreview({ category, surface, look }: { category: Exclude<Category,
     discoverOpen: surface === 'discover',
     calendarOpen: surface === 'calendar',
     statsOpen: surface === 'stats',
+    dashboardOpen: surface === 'dashboard',
+    wrappedOpen: surface === 'wrapped',
     connectCode: surface === 'connect' ? { code: 'ABCD-1234', url: 'https://simkl.com/pin' } : undefined,
     listOpen: surface === 'lists' ? 1 : undefined,
     pickOpen: surface === 'pick',
@@ -270,6 +274,14 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'slideshow-play': { slideshowOpen: true, slideshowPlay: true },
   cover: { viewerId: first, coverPickerOpen: true },
   'dup-review': { dupReviewOpen: true },
+  'dup-ask': { dupAsk: true },
+  // The Audio section (Audio mode).
+  audio: {},
+  'audio-player': { audio: { player: true } },
+  'audio-read': { audio: { player: true } },
+  'audio-info': { audio: { info: true } },
+  'audio-stats': { audio: { dashboard: true } },
+  'audio-deleted': { audio: { deleted: true } },
   'meta-import': { metaImportOpen: true },
   wifi: { wifiOpen: true },
   keywords: { keywordsOpen: true },
@@ -333,7 +345,7 @@ export default function PreviewRoute() {
   const [prefs, setPrefs] = useState<VaultPrefs>({
     ...DEFAULT_VAULT_PREFS,
     ratingLabels: SUGGESTED_LABELS,
-    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : 'watch',
+    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : view?.startsWith('audio') ? 'audio' : 'watch',
     // `badges-new` shows the reveal of newly earned badges.
     badgesSeen: view === 'badges-new' ? [] : null,
     events: [
@@ -475,7 +487,7 @@ export default function PreviewRoute() {
       ],
       backupNow: async () => ({ name: 'ReelVault info 2026-10-19.json', uri: 'file:///b0', at: Date.now(), size: 48_200 }),
       restoreAutoBackup: async () => ({ matched: 12, total: 12, plays: 0 }),
-      getAppStorage: async () => ({ videos: 2.1e9, deleted: 3.4e8, covers: 1.8e7, filmstrips: 4.2e7, temporary: 9.6e7, database: 2.3e6, measured: true }),
+      getAppStorage: async () => ({ videos: 2.1e9, deleted: 3.4e8, covers: 1.8e7, filmstrips: 4.2e7, temporary: 9.6e7, database: 2.3e6, audio: 4.1e8, measured: true }),
       tidyStorage: async () => ({ freed: 1.24e8, covers: 41, files: 7 }),
       emptyRecentlyDeleted: async () => 3,
       getMonthWrappedReminder: async () => true,
@@ -539,6 +551,7 @@ export default function PreviewRoute() {
   const category: Category | 'search' = cat === 'movie' || cat === 'show' || cat === 'anime' || cat === 'search' ? cat : 'videos';
   const palette = themeFor(resolveScheme(viewOptions.theme, 'dark'), viewOptions);
   const bridge = useMemo(() => fixtureBridge(first), []);
+  const audioData = useMemo(() => fixtureAudioData(), []);
 
   if (!inBrowser) return null;
 
@@ -556,7 +569,10 @@ export default function PreviewRoute() {
   return (
     <ThemeContext.Provider value={palette}>
       <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
+        <AudioPlaybackProvider items={audioData.items} actions={audioData.actions} enabled={false}>
+        {view?.startsWith('audio-player') || view === 'audio-read' ? <AudioPreviewStart book={view === 'audio-read'} items={audioData.items} /> : null}
         <VaultScreen
+          audio={audioData}
           items={items}
           allTags={FIXTURE_TAGS}
           tagMap={FIXTURE_TAG_MAP}
@@ -579,8 +595,19 @@ export default function PreviewRoute() {
           overview={FIXTURE_OVERVIEW}
           devInitialState={VIEWS[view ?? 'grid'] ?? {}}
         />
+        </AudioPlaybackProvider>
         {!VIEWS[view ?? 'grid']?.viewerId && <TabBarMock active="videos" />}
       </TabBarSpace.Provider>
     </ThemeContext.Provider>
   );
+}
+
+/** Starts an item in the (silent) preview player, so the player screens have something to show. */
+function AudioPreviewStart({ book, items }: { book: boolean; items: import('@/features/vault/ui/audio/audioTypes').AudioUiItem[] }) {
+  const pb = useAudioPlayback();
+  useEffect(() => {
+    const it = book ? items.find((i) => i.kind === 'book') : items.find((i) => i.id === 'aud-2');
+    if (it) pb.open(it, { autoplay: false });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
 }

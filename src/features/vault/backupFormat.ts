@@ -63,6 +63,31 @@ export type BackupSeries = {
   episodes: { video?: number; kept?: string; label: string | null }[];
 };
 
+/** An item of the Audio section: what you added to it (the files themselves are not in the backup). */
+export type BackupAudio = {
+  contentKey: string | null;
+  filename: string;
+  size: number;
+  title: string | null;
+  author: string | null;
+  narrator: string | null;
+  album: string | null;
+  genre: string | null;
+  year: number | null;
+  notes: string | null;
+  rating: number;
+  status: string | null;
+  keywords: string[];
+  positionTrack: number;
+  positionMs: number;
+  speed: number | null;
+  lastPlayedAt: number | null;
+  finishedAt: number | null;
+  /** [started at, listened ms] */
+  plays: [number, number][];
+  bookmarks: { track: number; atMs: number; label: string | null; createdAt: number }[];
+};
+
 export type Backup = {
   kind: typeof BACKUP_KIND;
   version: number;
@@ -78,6 +103,8 @@ export type Backup = {
   prefs?: Record<string, unknown> | null;
   /** Overview reviews, rewatches, Plan to Watch order and rating history; series as 'S:<name>'. */
   overview?: unknown;
+  /** The Audio section (ratings, notes, keywords, progress, listens, bookmarks). */
+  audio?: BackupAudio[];
 };
 
 /** Reads a backup file; null when it isn't one. */
@@ -103,6 +130,16 @@ export function parseBackup(json: string): Backup | null {
     kept: Array.isArray(b.kept) ? b.kept.filter((k) => k && typeof k.id === 'string' && typeof k.filename === 'string') : [],
     prefs: b.prefs && typeof b.prefs === 'object' && !Array.isArray(b.prefs) ? (b.prefs as Record<string, unknown>) : null,
     overview: b.overview && typeof b.overview === 'object' ? b.overview : null,
+    audio: Array.isArray(b.audio)
+      ? b.audio
+          .filter((a) => a && typeof a.filename === 'string')
+          .map((a) => ({
+            ...a,
+            keywords: Array.isArray(a.keywords) ? a.keywords.filter((k) => typeof k === 'string') : [],
+            plays: Array.isArray(a.plays) ? a.plays.filter((x) => Array.isArray(x) && typeof x[0] === 'number' && typeof x[1] === 'number') : [],
+            bookmarks: Array.isArray(a.bookmarks) ? a.bookmarks.filter((m) => m && typeof m.atMs === 'number') : [],
+          }))
+      : [],
     series: Array.isArray(b.series)
       ? b.series
           .filter((x) => x && typeof x.name === 'string' && Array.isArray(x.episodes))
@@ -132,6 +169,29 @@ export function matchBackup(backup: Backup, library: Target[]): Map<number, stri
     const id =
       (entry.contentKey ? byKey.get(entry.contentKey) : undefined) ?? byNameSize.get(`${entry.filename}|${entry.size}`);
     if (id) out.set(i, id);
+  });
+  return out;
+}
+
+/** Which audio item each backed-up entry belongs to (index -> item id): by fingerprint, else by file name and size, else by a file name only one item has. */
+export function matchAudio(entries: BackupAudio[], library: Target[]): Map<number, string> {
+  const byKey = new Map<string, string>();
+  const byNameSize = new Map<string, string>();
+  const byName = new Map<string, string[]>();
+  for (const v of library) {
+    if (v.contentKey) byKey.set(v.contentKey, v.id);
+    byNameSize.set(`${v.filename}|${v.size}`, v.id);
+    byName.set(v.filename, [...(byName.get(v.filename) ?? []), v.id]);
+  }
+  const out = new Map<number, string>();
+  const used = new Set<string>();
+  entries.forEach((e, i) => {
+    const one = byName.get(e.filename);
+    const id = (e.contentKey ? byKey.get(e.contentKey) : undefined) ?? byNameSize.get(`${e.filename}|${e.size}`) ?? (one && one.length === 1 ? one[0] : undefined);
+    if (id && !used.has(id)) {
+      out.set(i, id);
+      used.add(id);
+    }
   });
   return out;
 }
