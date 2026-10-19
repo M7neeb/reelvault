@@ -31,7 +31,7 @@ import {
 } from '@/features/vault/albums';
 import { getDb } from '@/db';
 import { autoBackup, exportLibraryInfo, importLibraryInfo, listAutoBackups } from '@/features/vault/backup';
-import { appStorage, tidy } from '@/features/vault/housekeeping';
+import { appStorage, recoverInbox, tidy } from '@/features/vault/housekeeping';
 import { incomingName, onIncoming } from '@/features/vault/incoming';
 import { contentKeyOf } from '@/features/vault/contentKey';
 import { probeDurationMs } from '@/features/vault/duration';
@@ -61,6 +61,7 @@ import { unlockWithFaceId } from '@/features/vault/privateLock';
 import {
   listDeleted,
   listVideos,
+  repairVideoPaths,
   searchVideos,
   setContentKey,
   setDuration,
@@ -484,7 +485,13 @@ export function useVaultData(): VaultData {
   // A little after start, clear what ReelVault no longer needs (temporary files, leftovers, old filmstrips).
   useEffect(() => {
     const t = setTimeout(() => {
-      tidy(false)
+      // First, videos another app sent that never got imported (the app closed part way through).
+      recoverInbox()
+        .catch((e) => {
+          console.log(`[INBOX] ${String(e)}`);
+          return 0;
+        })
+        .then(() => tidy(false))
         .then(() => setFreeGb(readFreeGb()))
         .catch((e) => console.log(`[TIDY] ${String(e)}`))
         // Then the weekly copy of your info (ratings, keywords, history…).
@@ -498,6 +505,16 @@ export function useVaultData(): VaultData {
   // durations, duplicate fingerprints and file metadata for older rows.
   useEffect(() => {
     (async () => {
+      // After an update iOS may have moved the app's folder: point every video at where its file is now.
+      const moved = await repairVideoPaths().catch((e) => {
+        console.log(`[PATHS] ${String(e)}`);
+        return 0;
+      });
+      if (moved) {
+        console.log(`[PATHS] ${moved} video addresses updated`);
+        await refresh();
+      }
+
       // Recently Deleted keeps videos as long as you chose (30 days unless you changed it).
       const savedPrefs = parsePrefs(await getSetting(PREFS_KEY));
       const purged = await purgeExpired(Date.now(), savedPrefs.trashDays);

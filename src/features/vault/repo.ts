@@ -1,5 +1,7 @@
 import { getDb } from '@/db';
 import type { Mp4Meta } from './mp4';
+import { videosDirUri } from './storage';
+import { relocateVideoUri } from './videoPaths';
 import type { Video, WatchStatus } from './types';
 
 type Row = {
@@ -40,7 +42,8 @@ function parseMeta(json: string | null): Mp4Meta | null {
 function toVideo(r: Row): Video {
   return {
     id: r.id,
-    uri: r.uri,
+    // Rebuilt from the file name: an update can move the app's folder (see videoPaths.ts).
+    uri: relocateVideoUri(r.uri, videosDirUri()),
     filename: r.filename,
     size: r.size,
     durationMs: r.duration_ms,
@@ -62,6 +65,25 @@ function toVideo(r: Row): Video {
     originalSize: r.original_size ?? null,
     originalKey: r.original_key ?? null,
   };
+}
+
+/**
+ * Saves every video's address under the current videos folder, after iOS
+ * moved the app's folder (an update). Returns how many were fixed.
+ */
+export async function repairVideoPaths(): Promise<number> {
+  const dir = videosDirUri();
+  if (!dir) return 0;
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string; uri: string }>('SELECT id, uri FROM videos;');
+  let fixed = 0;
+  for (const r of rows) {
+    const now = relocateVideoUri(r.uri, dir);
+    if (now === r.uri) continue;
+    await db.runAsync('UPDATE videos SET uri = ? WHERE id = ?;', [now, r.id]);
+    fixed++;
+  }
+  return fixed;
 }
 
 /** Every normal list leaves out videos sitting in Recently Deleted. */

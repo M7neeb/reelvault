@@ -8,7 +8,11 @@
  *   frames made for sharing, finished edits), files left over from imports
  *   that did not finish, covers that were replaced, full-size filmstrip frames
  *   from before 1.9.2, and filmstrips of videos you haven't opened lately
- *   (they are remade, small, when you open the video again).
+ *   (they are remade, small, when you open the video again). Videos in the
+ *   Inbox are never cleared: they were sent but not taken in yet, and
+ *   `recoverInbox()` imports them.
+ * - `recoverInbox()`: videos another app sent that never got imported (the
+ *   app closed part way through a big batch) are imported on the next start.
  * - Once: shrinks every cover made before 1.9.2 to 720 px.
  * Needs the native helper (app 1.9.2+) for sizes, ages and shrinking; without
  * it only the parts that work from JavaScript run.
@@ -23,7 +27,9 @@ import { ReelVaultMedia } from '../../../modules/reelvault-media';
 import { COVER_SIDE } from './frames';
 import { parseCoverName } from './coverNames';
 import { getSetting, setSetting } from './library';
+import { pushIncoming, isVideoName } from './incoming';
 import { coverFileName, thumbsDir, videosDir } from './storage';
+import { strandedInbox } from './videoPaths';
 
 const HOUR = 3_600_000;
 const SHRUNK_KEY = 'vault.coversShrunk';
@@ -90,8 +96,10 @@ export async function tidy(deep = false): Promise<TidyResult> {
         result.freed += pictures;
       }
     }
-    // Files other apps sent with "Open in ReelVault" that were already taken in.
-    result.freed += await ReelVaultMedia.clearOld(new Directory(Paths.document, 'Inbox').uri, 3600, []).catch(() => 0);
+    // What else other apps left in the Inbox. Videos stay: they haven't been taken in yet (see recoverInbox).
+    const inbox = await ReelVaultMedia.entries(inboxDir().uri).catch(() => []);
+    const videosThere = inbox.filter((e) => !e.dir && isVideoName(e.name)).map((e) => e.name);
+    result.freed += await ReelVaultMedia.clearOld(inboxDir().uri, 3600, videosThere).catch(() => 0);
   }
 
   // 2. Video files no video row points at (an import that stopped half way).
@@ -179,6 +187,29 @@ export async function tidy(deep = false): Promise<TidyResult> {
   await setSetting(LAST_TIDY_KEY, String(Date.now()));
   if (result.freed || result.files) console.log(`[TIDY] freed ${Math.round(result.freed / 1e6)} MB, ${result.files} files, ${result.covers} covers shrunk`);
   return result;
+}
+
+const inboxDir = () => new Directory(Paths.document, 'Inbox');
+
+/**
+ * Videos another app sent ("Open in ReelVault", HashPhotos' export) that are
+ * still in the Inbox because the app closed before it got to them: they are
+ * imported now, like a new send. Returns how many were found.
+ */
+export async function recoverInbox(): Promise<number> {
+  const dir = inboxDir();
+  if (!dir.exists) return 0;
+  let entries: { name: string; modified: number; dir: boolean }[] = [];
+  if (ReelVaultMedia) entries = await ReelVaultMedia.entries(dir.uri).catch(() => []);
+  else
+    entries = dir
+      .list()
+      .filter((f): f is File => f instanceof File)
+      .map((f) => ({ name: f.name, modified: f.modificationTime ?? 0, dir: false }));
+  const names = strandedInbox(entries, Date.now());
+  for (const name of names) pushIncoming(new File(dir, name).uri);
+  if (names.length) console.log(`[INBOX] ${names.length} videos sent earlier were not imported yet; importing them now`);
+  return names.length;
 }
 
 /** The cover a video shows now. */

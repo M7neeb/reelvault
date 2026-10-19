@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.9.2",
+    "version": "1.9.3",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -194,7 +194,7 @@
         ]
       ]
     ],
-    "runtimeVersion": "1.9.2",
+    "runtimeVersion": "1.9.3",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {
