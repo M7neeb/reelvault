@@ -69,3 +69,22 @@ test('finding the video when Files or Windows changed its name, and counting pic
   const g = parseMetadataFile('Filename\nPart 3.mp4\n');
   assert.deepEqual(planMetadata(g, library).unmatched, ['Part 3.mp4']);
 });
+
+test('column names with a standard in front, nested JSON and XMP lists are read', () => {
+  const t = (id, filename, extra = {}) => ({ id, filename, title: null, notes: null, rating: 0, tagNames: [], flag: 0, ...extra });
+  const library = [t('a', 'IMG_0001.MOV'), t('b', 'IMG_0002.mp4', { tagNames: ['dog'] })];
+  const c = parseMetadataFile('File Name,IPTC:Keywords,XMP:Rating,Caption-Abstract\nIMG_0001.MOV,Beach;Sun,★★★,Hi\nIMG_0002.mp4,Dog,,\n');
+  assert.deepEqual(c.recognised.sort(), ['caption', 'filename', 'keywords', 'rating']);
+  assert.equal(c.records[0].rating, 6);
+  const plan = planMetadata(c, library);
+  assert.equal(plan.keywords, 2);
+  assert.equal(plan.withKeywords, 2);
+  assert.equal(plan.keywordsAlreadyThere, 1);
+  const j = parseMetadataFile(JSON.stringify([{ file: { name: 'IMG_0001.MOV' }, metadata: { 'Keyword List': [{ name: 'Holiday' }], 'Star Rating': '4 stars' } }]));
+  assert.deepEqual(j.records[0].keywords, ['Holiday']);
+  assert.equal(j.records[0].filename, 'IMG_0001.MOV');
+  assert.equal(j.records[0].rating, 8);
+  const x = parseMetadataFile('<x:xmpmeta><rdf:RDF><rdf:Description rdf:about="IMG_0001.MOV" xmp:Rating="5"><dc:subject><rdf:Bag><rdf:li>Sea</rdf:li><rdf:li>Boat</rdf:li></rdf:Bag></dc:subject></rdf:Description></rdf:RDF></x:xmpmeta>');
+  assert.deepEqual(x.records[0].keywords, ['Sea', 'Boat']);
+  assert.equal(x.records[0].rating, 10);
+});
