@@ -647,6 +647,13 @@ export function useVaultData(): VaultData {
     [runImport]
   );
 
+  // Wi-Fi transfer: ONE bridge for the life of the app. A new one per render made the Wi-Fi
+  // screen stop the server and start it again (with a new code) after every video it added,
+  // so the computer's next uploads lost the connection.
+  const runImportRef = useRef(runImport);
+  runImportRef.current = runImport;
+  const wifi = useMemo(() => wifiBridge((files) => runImportRef.current(files, false)), []);
+
   const onImport = useCallback(
     async (source: ImportSource) => {
       setBusy(true);
@@ -1008,7 +1015,7 @@ export function useVaultData(): VaultData {
       deletePlays,
       pickMetadataFile,
       applyMetadata: andRefresh(applyMetadata),
-      wifi: wifiBridge((files) => runImport(files, false)),
+      wifi,
       ovCreateSeries: async (name, ids) => {
         const id = await createSeries(name, ids);
         await refresh();
