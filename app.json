@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.9.3",
+    "version": "1.10.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -12,7 +12,7 @@
       "bundleIdentifier": "com.muneeb.reelvault",
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "ReelVault receives videos you send from your computer over Wi-Fi.",
+        "NSLocalNetworkUsageDescription": "ReelVault receives videos and audio you send from your computer over Wi-Fi.",
         "LSSupportsOpeningDocumentsInPlace": false,
         "UIFileSharingEnabled": true,
         "CFBundleDocumentTypes": [
@@ -21,6 +21,18 @@
             "CFBundleTypeRole": "Viewer",
             "LSHandlerRank": "Alternate",
             "LSItemContentTypes": ["public.movie", "public.mpeg-4", "com.apple.quicktime-movie", "public.avi", "com.apple.m4v-video", "public.3gpp"]
+          },
+          {
+            "CFBundleTypeName": "Audio",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["public.audio", "public.mp3", "public.mpeg-4-audio", "com.apple.m4a-audio", "com.apple.protected-mpeg-4-audio", "public.aac-audio", "com.microsoft.waveform-audio", "public.aiff-audio", "com.apple.coreaudio-format", "org.xiph.flac", "public.ogg-audio"]
+          },
+          {
+            "CFBundleTypeName": "EPUB book",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": ["org.idpf.epub-container"]
           }
         ]
       }
@@ -194,7 +206,7 @@
         ]
       ]
     ],
-    "runtimeVersion": "1.9.3",
+    "runtimeVersion": "1.10.0",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {

@@ -44,6 +44,40 @@ export function pushIncoming(path: string): void {
   }
 }
 
+/* ------------------------------------------------- audio and EPUB books */
+
+const AUDIO = /\.(mp3|m4a|m4b|aac|wav|aif|aiff|aifc|caf|flac|alac|opus|oga|ogg|mp2|amr|3ga|epub)$/i;
+const audioQueue: string[] = [];
+const audioListeners = new Set<(uris: string[]) => void>();
+
+/** True for a file address that looks like audio or an EPUB book (for the Audio section). */
+export function isIncomingAudio(path: string | null | undefined): boolean {
+  if (!path || !/^file:\/\//i.test(path)) return false;
+  try {
+    return AUDIO.test(decodeURIComponent(path.split('?')[0]));
+  } catch {
+    return AUDIO.test(path.split('?')[0]);
+  }
+}
+
+export function pushIncomingAudio(path: string): void {
+  if (audioQueue.includes(path)) return;
+  audioQueue.push(path);
+  if (audioListeners.size) {
+    const batch = audioQueue.splice(0);
+    for (const fn of audioListeners) fn(batch);
+  }
+}
+
+/** Get every audio file sent in so far, and the ones that come later. */
+export function onIncomingAudio(fn: (uris: string[]) => void): () => void {
+  audioListeners.add(fn);
+  if (audioQueue.length) fn(audioQueue.splice(0));
+  return () => {
+    audioListeners.delete(fn);
+  };
+}
+
 /** Get every video sent in so far, and the ones that come later. */
 export function onIncoming(fn: (uris: string[]) => void): () => void {
   listeners.add(fn);

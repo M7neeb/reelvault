@@ -9,6 +9,7 @@ import * as Crypto from 'expo-crypto';
 import { File } from 'expo-file-system';
 
 import { ReelVaultWifi } from '../../../modules/reelvault-wifi';
+import { isIncomingAudio, pushIncomingAudio } from './incoming';
 import type { ImportSummary } from './import';
 import type { WifiBridge, WifiEvent } from './ui/types';
 
@@ -35,6 +36,12 @@ export function wifiBridge(importFiles: (files: { uri: string; name: string; siz
           const uri = e.path ?? '';
           // One import at a time, in the order they arrive.
           chain = chain.then(async () => {
+            // Audio and EPUB books: to the Audio section (it moves the file in).
+            if (isIncomingAudio(`file://x/${name}`)) {
+              pushIncomingAudio(uri.startsWith('file://') ? uri : `file://${uri}`);
+              onEvent({ kind: 'imported', name });
+              return;
+            }
             if (!VIDEO.test(name)) {
               try {
                 new File(uri).delete();

@@ -177,6 +177,9 @@ export type SimklScreenProps = {
     discoverOpen?: boolean;
     calendarOpen?: boolean;
     statsOpen?: boolean;
+    dashboardOpen?: boolean;
+    /** The dashboard with this year's Wrapped playing. */
+    wrappedOpen?: boolean;
     accountOpen?: boolean;
     insightsTab?: 'overview' | 'review';
     rewatchOpen?: boolean;

@@ -79,6 +79,7 @@ import {
   type UiAlbum,
   type UiFolder,
   type UiTag,
+  type DuplicateAsk,
   type VaultItem,
   type VaultPrefs,
   type VaultScreenProps,
@@ -99,6 +100,9 @@ import { DEFAULT_VAULT_PREFS } from './types';
 import { Image as ThumbImage } from 'expo-image';
 import { fmtClock } from '../stats';
 import { friendlyName } from '../names';
+import { DuplicatePrompt } from './dupPrompt';
+import AudioSection from './audio/AudioSection';
+import { useAudioPlaybackOptional } from './audio/playback';
 
 const EMPTY_RESUME = new Map<string, number>();
 const EMPTY_OVERVIEW: OverviewData = { kept: [], series: [], members: [] };
@@ -145,6 +149,8 @@ function VaultScreenBody({
   busy,
   status,
   actions,
+  duplicateAsk = null,
+  audio,
   enableVideo = true,
   simkl,
   resume = EMPTY_RESUME,
@@ -254,6 +260,22 @@ function VaultScreenBody({
   const [triage, setTriage] = useState<{ mode: TriageMode; queue: VaultItem[] } | null>(null);
   const [compare, setCompare] = useState<[VaultItem, VaultItem] | null>(null);
   const [dupReview, setDupReview] = useState<'duplicates' | 'similar' | null>(dev?.dupReviewOpen ? 'similar' : null);
+  // The browser preview shows the "already in your library" question with a fixture video.
+  const [devDupAsk, setDevDupAsk] = useState<DuplicateAsk | null>(() => {
+    const v = dev?.dupAsk ? items[0] : undefined;
+    if (!v) return null;
+    return {
+      kind: 'video',
+      name: 'IMG_4471 (1).MOV',
+      size: v.sizeBytes,
+      durationMs: v.durationMs,
+      existing: { id: v.id, title: friendlyName(v), detail: v.filename, thumb: v.thumbSource, rating: v.rating, importedAt: v.importedAt },
+      exact: false,
+      reason: 'the same length and picture size',
+      remaining: 3,
+      answer: () => setDevDupAsk(null),
+    };
+  });
   const [metaOpen, setMetaOpen] = useState(dev?.metaImportOpen ?? false);
   const [wifiOpen, setWifiOpen] = useState(dev?.wifiOpen ?? false);
   const [jumpTo, setJumpTo] = useState<{ key: string; nonce: number } | null>(null);
@@ -276,6 +298,16 @@ function VaultScreenBody({
   const [playing, setPlaying] = useState<VaultItem | null>(
     () => items.find((i) => i.id === dev?.viewerId) ?? null
   );
+  // A video and an audiobook never play at once: opening a video pauses the audio.
+  const audioPlayback = useAudioPlaybackOptional();
+  useEffect(() => {
+    if (playing && audioPlayback?.playing) audioPlayback.pause();
+  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Audio sent from another app (or over Wi-Fi) is being added: show the Audio section.
+  const audioBusy = audio?.busy ?? false;
+  useEffect(() => {
+    if (audioBusy && prefs.videosMode !== 'audio') actions.setPrefs({ ...prefs, videosMode: 'audio' }).catch(() => undefined);
+  }, [audioBusy]); // eslint-disable-line react-hooks/exhaustive-deps
   // Cards on the home rows play their video (the one most in view); everything stops while something opens on top.
   const live = useLiveScope({
     enableVideo,
@@ -1623,6 +1655,19 @@ function VaultScreenBody({
         />
       )}
 
+      {videosMode === 'audio' && audio && (
+        <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
+          <AudioSection
+            data={audio}
+            onMode={switchMode}
+            showPrivate={privateOpen}
+            onUnlockPrivate={() => void requestUnlock(() => undefined)}
+            onWifi={() => setWifiOpen(true)}
+            dev={dev?.audio}
+          />
+        </Animated.View>
+      )}
+
       {videosMode === 'overview' && (
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
           <OverviewScreen
@@ -1796,6 +1841,9 @@ function VaultScreenBody({
           onClose={() => setDupReview(null)}
         />
       )}
+
+      {/* An import waits: this file is already in the library. */}
+      {(duplicateAsk ?? devDupAsk) && <DuplicatePrompt ask={(duplicateAsk ?? devDupAsk)!} />}
 
       {metaOpen && (
         <MetaImportSheet

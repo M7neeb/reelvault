@@ -271,6 +271,37 @@ export async function videosMissingContentKey(): Promise<{ id: string; uri: stri
 }
 
 /** The live video with this content key, if any - checked before importing a copy. */
+/** Videos about as long as `durationMs` (within 2 s): the ones a new import could be a copy of. */
+export async function videosNearLength(durationMs: number): Promise<Video[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Row>(
+    `SELECT * FROM videos WHERE ${LIVE} AND duration_ms BETWEEN ? AND ? LIMIT 200;`,
+    [durationMs - 2000, durationMs + 2000]
+  );
+  return rows.map(toVideo);
+}
+
+/**
+ * A video's file swapped for another one ("Replace" when importing a copy):
+ * its rating, keywords, history and everything else stay; what the file says
+ * (size, length, picture size, metadata) comes from the new one.
+ */
+export async function replaceVideoFile(
+  videoId: string,
+  next: { uri: string; filename: string; size: number; contentKey: string | null; durationMs: number | null; width: number | null; height: number | null; metaJson: string | null }
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE videos SET
+       uri = ?, filename = ?, size = ?, content_key = ?,
+       duration_ms = COALESCE(?, duration_ms), width = COALESCE(?, width), height = COALESCE(?, height),
+       meta_json = COALESCE(?, meta_json),
+       original_size = NULL, original_key = NULL
+     WHERE id = ?;`,
+    [next.uri, next.filename, next.size, next.contentKey, next.durationMs, next.width, next.height, next.metaJson, videoId]
+  );
+}
+
 export async function findByContentKey(key: string): Promise<Video | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<Row>(

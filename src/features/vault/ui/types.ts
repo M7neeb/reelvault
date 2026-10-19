@@ -279,6 +279,26 @@ export type UiMeta = {
  */
 export type ThumbSource = number | string | { uri: string };
 
+/**
+ * "Already in your library": an import found a file you already have and
+ * waits for an answer. `all` = do the same for the rest of this import.
+ */
+export type DuplicateAsk = {
+  kind: 'video' | 'audio';
+  /** The file being imported. */
+  name: string;
+  size: number;
+  durationMs: number | null;
+  /** The one you already have. */
+  existing: { id: string; title: string; detail: string; thumb: ThumbSource | null; rating: number; importedAt: number };
+  /** The very same file (true) or one that looks like the same (false; `reason` says why). */
+  exact: boolean;
+  reason: string;
+  /** Files of this import still to come. */
+  remaining: number;
+  answer: (choice: 'replace' | 'both' | 'skip', all: boolean) => void;
+};
+
 /** One video, already resolved for display. */
 export type VaultItem = {
   id: string;
@@ -568,7 +588,8 @@ export type VaultPrefs = {
   /** Hold the left or right edge of the video to play at 2×. */
   holdForSpeed: boolean;
   /** The Videos tab: watch your videos, or rate and track them (Overview). */
-  videosMode: 'watch' | 'overview';
+  /** Watch (the grid), Overview (rate and track) or Audio (your audio files and books). */
+  videosMode: 'watch' | 'overview' | 'audio';
   /** Keep the info of removed videos you never rated too (not only rated ones). */
   keepUnrated: boolean;
   /** Series suggestions you dismissed (by their name). */
@@ -705,6 +726,10 @@ export type VaultScreenProps = {
   busy: boolean;
   status: string;
   actions: VaultActions;
+  /** An import is waiting: this file is already in the library (replace, keep both or skip). */
+  duplicateAsk?: DuplicateAsk | null;
+  /** The Audio section (Audio mode of this tab). */
+  audio?: import('./audio/audioTypes').AudioData;
   /**
    * Mount the real <VideoView>. Off in the browser preview, where fixture
    * videos have no playable source - the stage is black either way.
@@ -758,6 +783,10 @@ export type VaultScreenProps = {
     slideshowPlay?: boolean;
     coverPickerOpen?: boolean;
     dupReviewOpen?: boolean;
+    /** Show the "already in your library" question. */
+    dupAsk?: boolean;
+    /** Audio mode: open the player, an item's details, the stats or Recently Deleted. */
+    audio?: import('./audio/AudioSection').AudioDev;
     metaImportOpen?: boolean;
     wifiOpen?: boolean;
     historyStats?: boolean;

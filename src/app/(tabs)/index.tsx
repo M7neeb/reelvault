@@ -14,15 +14,18 @@ import { TAB_BAR_HEIGHT, TabBarSpace } from '@/features/vault/ui/chrome';
 import { SideSafe } from '@/features/vault/ui/screen';
 import { ThemeContext } from '@/features/vault/ui/theme';
 import VaultScreen from '@/features/vault/ui/VaultScreen';
+import { AudioPlaybackProvider } from '@/features/vault/ui/audio/playback';
 
 export default function VideosRoute() {
-  const { vault, simkl, palette } = useHome();
+  const { vault, simkl, audio, palette } = useHome();
   const insets = useSafeAreaInsets();
   return (
     <ThemeContext.Provider value={palette}>
     <SideSafe>
     <TabBarSpace.Provider value={insets.bottom + TAB_BAR_HEIGHT}>
+    <AudioPlaybackProvider items={audio.items} actions={audio.actions}>
       <VaultScreen
+        audio={audio}
         items={vault.items}
         allTags={vault.allTags}
         tagMap={vault.tagMap}
@@ -36,6 +39,7 @@ export default function VideosRoute() {
         busy={vault.busy}
         status={vault.status}
         actions={vault.actions}
+        duplicateAsk={vault.duplicateAsk}
         simkl={simkl.bridge}
         resume={vault.resume}
         prefs={vault.prefs}
@@ -45,6 +49,7 @@ export default function VideosRoute() {
         onOpenRequestHandled={vault.clearOpenRequest}
         overview={{ kept: vault.kept, series: vault.series, members: vault.members }}
       />
+    </AudioPlaybackProvider>
     </TabBarSpace.Provider>
     </SideSafe>
     </ThemeContext.Provider>

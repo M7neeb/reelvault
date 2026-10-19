@@ -58,11 +58,14 @@ export function toOvVideo(v: VaultItem): OvVideo {
 }
 
 /** Watch ⟷ Overview, at the top of the Videos tab in both modes. The pill slides across. */
-export function ModeSwitch({ mode, onChange }: { mode: 'watch' | 'overview'; onChange: (m: 'watch' | 'overview') => void }) {
+export type VideosMode = 'watch' | 'overview' | 'audio';
+
+/** Watch · Overview · Audio: the three ways of the Videos tab. */
+export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m: VideosMode) => void }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const [sizes, setSizes] = useState<{ x: number; w: number }[]>([]);
-  const index = mode === 'watch' ? 0 : 1;
+  const index = mode === 'watch' ? 0 : mode === 'overview' ? 1 : 2;
   const x = useSharedValue(0);
   const w = useSharedValue(0);
   useEffect(() => {
@@ -81,6 +84,7 @@ export function ModeSwitch({ mode, onChange }: { mode: 'watch' | 'overview'; onC
   const items = [
     ['watch', 'Watch', 'play'],
     ['overview', 'Overview', 'star'],
+    ['audio', 'Audio', 'headphones'],
   ] as const;
   return (
     <View style={styles.mode} accessibilityRole="tablist">

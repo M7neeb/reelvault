@@ -44,6 +44,8 @@ export type AppStorage = {
   filmstrips: number;
   temporary: number;
   database: number;
+  /** The Audio section: audio files and unpacked books (each counted once). */
+  audio: number;
   /** False when the sizes on disk could not be measured (before 1.9.2): only the videos are known. */
   measured: boolean;
 };
@@ -64,13 +66,15 @@ export async function appStorage(): Promise<AppStorage> {
   const all = await rows();
   const videos = all.filter((r) => r.deleted_at === null).reduce((a, r) => a + (r.size || 0), 0);
   const deleted = all.filter((r) => r.deleted_at !== null).reduce((a, r) => a + (r.size || 0), 0);
-  if (!ReelVaultMedia) return { videos, deleted, covers: 0, filmstrips: 0, temporary: 0, database: 0, measured: false };
+  if (!ReelVaultMedia) return { videos, deleted, covers: 0, filmstrips: 0, temporary: 0, database: 0, audio: 0, measured: false };
   const thumbs = await ReelVaultMedia.entries(dirUri(thumbsDir)).catch(() => []);
   const covers = thumbs.filter((e) => !e.dir || e.name === 'kept' || e.name === 'series').reduce((a, e) => a + e.bytes, 0);
   const filmstrips = thumbs.filter((e) => e.dir && e.name !== 'kept' && e.name !== 'series').reduce((a, e) => a + e.bytes, 0);
   const temporary = await ReelVaultMedia.dirSize(Paths.cache.uri).catch(() => 0);
   const database = await ReelVaultMedia.dirSize(new Directory(Paths.document, 'SQLite').uri).catch(() => 0);
-  return { videos, deleted, covers, filmstrips, temporary, database, measured: true };
+  const audioDir = new Directory(Paths.document, 'audio');
+  const audio = audioDir.exists ? await ReelVaultMedia.dirSize(audioDir.uri).catch(() => 0) : 0;
+  return { videos, deleted, covers, filmstrips, temporary, database, audio, measured: true };
 }
 
 /**
