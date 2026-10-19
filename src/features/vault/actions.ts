@@ -63,9 +63,9 @@ export async function purgeVideos(videos: Video[]): Promise<void> {
   console.log(`[PURGE] batch done - ${videos.length} removed for good`);
 }
 
-/** Remove everything that has been in Recently Deleted for 30 days. Runs on app start. */
-export async function purgeExpired(now = Date.now()): Promise<number> {
-  const due = await deletedBefore(purgeCutoff(now));
+/** Remove everything that has been in Recently Deleted longer than you keep it (30 days unless changed). Runs on app start. */
+export async function purgeExpired(now = Date.now(), days = 30): Promise<number> {
+  const due = await deletedBefore(purgeCutoff(now, days));
   if (due.length) await purgeVideos(due);
   return due.length;
 }

@@ -50,13 +50,14 @@ export default function Glass({
 }) {
   const p = usePalette();
   const reduce = useReduceTransparency();
-  if (!HAS_GLASS || reduce) {
+  // Settings → Personalise → Glass: solid turns it off, see-through uses the clear glass everywhere.
+  if (!HAS_GLASS || reduce || p.glass === 'solid') {
     return <View style={[{ backgroundColor: tint ?? fallback ?? p.glassFallback }, style]}>{children}</View>;
   }
   return (
     <GlassView
       style={style}
-      glassEffectStyle={clear ? 'clear' : 'regular'}
+      glassEffectStyle={clear || p.glass === 'clear' ? 'clear' : 'regular'}
       colorScheme={p.scheme}
       tintColor={tint}
       isInteractive={interactive}>

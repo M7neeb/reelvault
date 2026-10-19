@@ -611,3 +611,30 @@ export function treemap(items: { id: string; value: number }[], width: number, h
   if (row.length) lay(row);
   return out;
 }
+
+const PLAN_ORDER = ['deleted', 'dups', 'smaller', 'rarely', 'cold', 'rejects'];
+
+/**
+ * The space planner: the gentlest way to get `target` bytes back. Steps are
+ * taken in order of how little they cost you (empty Recently Deleted, then
+ * duplicates, then re-saving old files as HEVC, then shrinking what you rarely
+ * watch, then big unwatched ones, last your rejects) until the target is met.
+ * A video counted in an earlier step is not counted again.
+ */
+export function spacePlan(ideas: SpaceIdea[], target: number): { steps: (SpaceIdea & { counted: number })[]; bytes: number; reached: boolean } {
+  const used = new Set<string>();
+  const steps: (SpaceIdea & { counted: number })[] = [];
+  let bytes = 0;
+  const ordered = [...ideas].sort((a, b) => PLAN_ORDER.indexOf(a.key) - PLAN_ORDER.indexOf(b.key));
+  for (const idea of ordered) {
+    if (bytes >= target) break;
+    const fresh = idea.ids.filter((id) => !used.has(id));
+    if (!fresh.length) continue;
+    const counted = Math.round(idea.bytes * (fresh.length / Math.max(1, idea.ids.length)));
+    if (counted <= 0) continue;
+    for (const id of fresh) used.add(id);
+    steps.push({ ...idea, ids: fresh, count: fresh.length, counted });
+    bytes += counted;
+  }
+  return { steps, bytes, reached: bytes >= target };
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { CLUBS, clubOf, rewatchMeter, videoAge } from '../src/features/vault/wrappedExtras.ts';
+import { clubJourney, quizFrom, yearBefore } from '../src/features/vault/wrappedExtras.ts';
 
 const YEAR = 365.25 * 86_400_000;
 const NOW = new Date(2026, 9, 18).getTime();
@@ -42,4 +43,46 @@ test('rewatch meter', () => {
   assert.deepEqual(rewatchMeter(12, 4), { perVideo: 3, label: 'On repeat' });
   assert.equal(rewatchMeter(1, 1), null);
   assert.equal(rewatchMeter(5, 5).label, 'Once is enough');
+});
+
+test('club month by month: switches, first, last and most', () => {
+  const j = clubJourney([
+    { label: 'Jan', club: 'night' },
+    { label: 'Feb', club: null },
+    { label: 'Mar', club: 'night' },
+    { label: 'Apr', club: 'comfort' },
+    { label: 'May', club: 'night' },
+  ]);
+  assert.equal(j.switches, 2);
+  assert.equal(j.first.key, 'night');
+  assert.equal(j.last.key, 'night');
+  assert.equal(j.most.key, 'night');
+  assert.equal(j.months, 4);
+  assert.equal(clubJourney([{ label: 'Jan', club: 'night' }]), null);
+});
+
+test('quiz: the biggest is the answer, three different options', () => {
+  const list = [
+    { id: 'a', label: 'A', value: 5 },
+    { id: 'b', label: 'B', value: 9 },
+    { id: 'c', label: 'C', value: 1 },
+    { id: 'd', label: 'D', value: 7 },
+  ];
+  for (let seed = 0; seed < 12; seed++) {
+    const q = quizFrom(list, seed);
+    assert.equal(q.answer, 'b');
+    assert.equal(new Set(q.options.map((o) => o.id)).size, 3);
+    assert.ok(q.options.some((o) => o.id === 'b'));
+  }
+  // A tie at the top, or too few: no quiz.
+  assert.equal(quizFrom([{ id: 'a', label: 'A', value: 2 }, { id: 'b', label: 'B', value: 2 }, { id: 'c', label: 'C', value: 1 }], 0), null);
+  assert.equal(quizFrom(list.slice(0, 2), 0), null);
+});
+
+test('a year before keeps the dates', () => {
+  const r = { start: new Date(2026, 9, 1).getTime(), end: new Date(2026, 10, 1).getTime(), label: 'October' };
+  const y = yearBefore(r);
+  assert.equal(new Date(y.start).getFullYear(), 2025);
+  assert.equal(new Date(y.start).getMonth(), 9);
+  assert.equal(new Date(y.end).getMonth(), 10);
 });

@@ -13,7 +13,8 @@ import { useSimklData } from '@/features/simkl/data';
 import type { SimklType } from '@/features/simkl/ui/types';
 import { useVaultData } from '@/features/vault/data';
 import { resolveScheme } from '@/features/vault/ui/logic';
-import { paletteFor, withAccent, type Palette } from '@/features/vault/ui/theme';
+import { themeFor, type Palette } from '@/features/vault/ui/theme';
+import { setRotateEverywhere } from '@/features/vault/rotate';
 
 type Home = {
   vault: ReturnType<typeof useVaultData>;
@@ -33,8 +34,13 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
   const vault = useVaultData();
   const simkl = useSimklData();
   const system = useColorScheme();
-  const palette = withAccent(paletteFor(resolveScheme(vault.viewOptions.theme, system)), vault.viewOptions.accent);
+  const palette = themeFor(resolveScheme(vault.viewOptions.theme, system), vault.viewOptions);
   const router = useRouter();
+
+  // Settings → Personalise → Turn with the phone: the whole app, or only the player.
+  useEffect(() => {
+    setRotateEverywhere(vault.viewOptions.rotate);
+  }, [vault.viewOptions.rotate]);
 
   // A tapped notification jumps to that title's tab; the screen then opens it.
   useEffect(() => {

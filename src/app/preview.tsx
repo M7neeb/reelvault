@@ -28,6 +28,7 @@ import {
   fixtureFrames,
   fixtureSearch,
   fixturePlays,
+  fixtureOvExtra,
   FIXTURE_BOOKMARKS,
   FIXTURE_OVERVIEW,
   FIXTURE_META,
@@ -53,7 +54,7 @@ import Icon from '@/features/vault/ui/Icon';
 import type { IconName } from '@/features/vault/ui/icons';
 import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/types';
 import { resolveScheme } from '@/features/vault/ui/logic';
-import { paletteFor, ThemeContext, usePalette, withAccent } from '@/features/vault/ui/theme';
+import { themeFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
 
 /**
  * A drawing of the iOS 26 tab bar (the real one is native and has no web
@@ -271,6 +272,9 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'dup-review': { dupReviewOpen: true },
   'meta-import': { metaImportOpen: true },
   wifi: { wifiOpen: true },
+  keywords: { keywordsOpen: true },
+  'quick-tag': { triage: 'tag' },
+  'keep-delete': { triage: 'keep' },
   history: { insightsTab: 'history' },
   'history-stats': { insightsTab: 'history', historyStats: true },
   compare: { compareOpen: true },
@@ -289,6 +293,7 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'ov-single': { overviewKey: 'v:fixture-2' },
   'ov-kept': { overviewKey: 'v:fixture-kept-6' },
   'ov-new': { overviewSheet: 'new' },
+  'ov-order': { overviewSheet: 'order' },
   'ov-edit': { overviewKey: 's:fixture-series-1', overviewSheet: 'edit' },
   'ov-add': { overviewKey: 's:fixture-series-2', overviewSheet: 'add' },
 };
@@ -458,8 +463,30 @@ export default function PreviewRoute() {
       setOnThisDayReminder: async () => true,
       getYearWrappedReminder: async () => true,
       setYearWrappedReminder: async () => true,
+      searchBookmarks: async () => [],
+      renameTag: noop,
+      mergeTags: noop,
+      deleteTag: noop,
+      setTagColor: noop,
+      deleteUnusedTags: async () => 0,
+      listAutoBackups: async () => [
+        { name: 'ReelVault info 2026-10-12.json', uri: 'file:///b1', at: new Date(2026, 9, 12).getTime(), size: 48_000 },
+        { name: 'ReelVault info 2026-10-05.json', uri: 'file:///b2', at: new Date(2026, 9, 5).getTime(), size: 46_500 },
+      ],
+      backupNow: async () => ({ name: 'ReelVault info 2026-10-19.json', uri: 'file:///b0', at: Date.now(), size: 48_200 }),
+      restoreAutoBackup: async () => ({ matched: 12, total: 12, plays: 0 }),
+      getAppStorage: async () => ({ videos: 2.1e9, deleted: 3.4e8, covers: 1.8e7, filmstrips: 4.2e7, temporary: 9.6e7, database: 2.3e6, measured: true }),
+      tidyStorage: async () => ({ freed: 1.24e8, covers: 41, files: 7 }),
+      emptyRecentlyDeleted: async () => 3,
       getMonthWrappedReminder: async () => true,
       setMonthWrappedReminder: async () => true,
+      getWeeklySummary: async () => true,
+      colorsOf: async (item) => {
+        const palette = ['#2E7D5B', '#B4561E', '#3550A8', '#9B2C55', '#6B5BD2'];
+        const n = [...item.id].reduce((a, ch) => a + ch.charCodeAt(0), 0);
+        return { dominant: palette[n % palette.length], average: '#555555' };
+      },
+      setWeeklySummary: async () => true,
       onRemoveTagMany: noop,
       deletePlays: noop,
       pickMetadataFile: async () => ({ name: 'HashPhotos Metadata.csv', file: FIXTURE_META }),
@@ -485,6 +512,8 @@ export default function PreviewRoute() {
       ovUpdateKept: noop,
       ovKeptCover: async () => true,
       ovForget: noop,
+      loadOvExtra: async () => fixtureOvExtra(),
+      saveOvExtra: noop,
     }),
     [security],
   );
@@ -508,7 +537,7 @@ export default function PreviewRoute() {
   }, [viewOptions.sort]);
 
   const category: Category | 'search' = cat === 'movie' || cat === 'show' || cat === 'anime' || cat === 'search' ? cat : 'videos';
-  const palette = withAccent(paletteFor(resolveScheme(viewOptions.theme, 'dark')), viewOptions.accent);
+  const palette = themeFor(resolveScheme(viewOptions.theme, 'dark'), viewOptions);
   const bridge = useMemo(() => fixtureBridge(first), []);
 
   if (!inBrowser) return null;

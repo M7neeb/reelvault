@@ -9,6 +9,8 @@
 import { createContext, useContext } from 'react';
 import { StyleSheet } from 'react-native';
 
+import { COLOR_SETS, FONTS, restyle, tintPalette, type ColorSet, type CornerKey, type FontKey, type GlassKey } from './paletteMath';
+
 export type Scheme = 'light' | 'dark';
 
 export type Palette = {
@@ -57,6 +59,13 @@ export type Palette = {
   /** Raised cards on the screen background (Up Next, grouped rows). */
   elevated: string;
   success: string;
+  /** Styles are built once per key (colours + look); the scheme when unset. */
+  key?: string;
+  /** Settings → Personalise: a font family for all text, glass strength, card corners, outlined cards. */
+  font?: string | null;
+  glass?: GlassKey;
+  corners?: CornerKey;
+  outlined?: boolean;
 };
 
 /** The original ReelVault / HashPhotos dark look. */
@@ -134,7 +143,7 @@ export const ThemeContext = createContext<Palette>(DARK);
 export const usePalette = (): Palette => useContext(ThemeContext);
 
 type Factory = (p: Palette) => object;
-const cache = new WeakMap<Factory, Partial<Record<Scheme, object>>>();
+const cache = new WeakMap<Factory, Record<string, object>>();
 
 /**
  * The styles a `makeStyles(p)` factory returns for the current theme, built
@@ -147,7 +156,20 @@ export function useStyles<T extends object>(factory: (p: Palette) => T): T {
     byScheme = {};
     cache.set(factory, byScheme);
   }
-  return (byScheme[p.scheme] ??= factory(p)) as T;
+  const key = p.key ?? p.scheme;
+  return (byScheme[key] ??= build(factory, p)) as T;
+}
+
+function build<T extends object>(factory: (p: Palette) => T, p: Palette): T {
+  const styles = factory(p);
+  if (!p.font && (p.corners ?? 'standard') === 'standard' && !p.outlined) return styles;
+  return restyle(styles as Record<string, unknown>, {
+    font: p.font ?? null,
+    corners: p.corners ?? 'standard',
+    outlined: !!p.outlined,
+    cardColors: [p.elevated, p.card, p.panel],
+    border: p.border,
+  }) as T;
 }
 
 /** For factories: `StyleSheet.create`, re-exported so UI files need one import. */
@@ -159,6 +181,25 @@ export function rgbOf(hex: string): string {
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6);
   const n = parseInt(full, 16);
   return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}
+
+/**
+ * The whole look from your settings: the light or dark colours, tinted from
+ * a colour set (or a colour taken from a video), your accent, font, glass,
+ * card corners and outlines.
+ */
+export function themeFor(
+  scheme: Scheme,
+  o: { accent: string | null; colors?: ColorSet; videoColor?: string | null; font?: FontKey; glass?: GlassKey; corners?: CornerKey; outlined?: boolean }
+): Palette {
+  let p = paletteFor(scheme);
+  const tint = o.colors === 'video' ? (o.videoColor ?? null) : (COLOR_SETS.find((c) => c.key === o.colors)?.color ?? null);
+  if (tint) p = tintPalette(p, tint, !!o.accent);
+  p = withAccent(p, o.accent);
+  const font = FONTS.find((f) => f.key === o.font)?.family ?? null;
+  const corners = o.corners ?? 'standard';
+  const outlined = !!o.outlined;
+  return { ...p, font, glass: o.glass ?? 'regular', corners, outlined, key: [scheme, p.bg, p.accent, font ?? '', corners, outlined ? 1 : 0].join('|') };
 }
 
 /** The palette with your accent colour (Settings → Personalise); null keeps the default blue. */

@@ -5,18 +5,15 @@
  * only what is near the visible part of the scroll view (one screen above, two
  * below), so thousands of videos cost no more than a few dozen mounted images.
  *
+ * Pinch the grid to make the tiles bigger or smaller (like the Photos app).
+ * When grouped, a row of chips under the header jumps to any group.
+ *
  * Presentational only - no native modules (see the rule in types.ts).
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native';
+import { ScrollView as RNScrollView, Text, TouchableOpacity, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 
 import { plural } from './confirm';
@@ -56,6 +53,12 @@ type Props = {
   jumpTo?: { key: string; nonce: number } | null;
   onPressTile: (item: VaultItem) => void;
   onLongPressTile?: (item: VaultItem) => void;
+  /** Video id -> its series name, for "Group by series". */
+  seriesOf?: Map<string, string>;
+  /** Pinched: 1 = bigger tiles, -1 = smaller. */
+  onPinchSize?: (dir: 1 | -1) => void;
+  /** Also told about scrolling (the live cards on the home rows). */
+  onScrollExtra?: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
   /** Videos linked to a Simkl movie or episode (a small TV mark). */
   linked?: Set<string>;
   /** "Continue another time" points: a thin bar where you stopped. */
@@ -78,6 +81,9 @@ export default function Grid({
   onLongPressTile,
   linked,
   resume,
+  seriesOf,
+  onPinchSize,
+  onScrollExtra,
 }: Props) {
   const styles = useStyles(makeStyles);
   const tabSpace = useTabBarSpace();
@@ -92,7 +98,7 @@ export default function Grid({
 
   // Group titles only make sense for the normal library views.
   const groupBy = mode === 'normal' ? viewOptions.groupBy : 'none';
-  const sections = useMemo(() => groupItems(items, groupBy), [items, groupBy]);
+  const sections = useMemo(() => groupItems(items, groupBy, seriesOf), [items, groupBy, seriesOf]);
 
   const layout = useMemo(
     () =>
@@ -130,7 +136,22 @@ export default function Grid({
   );
   const visibleHeaders = layout.headers.filter((h) => h.y < windowBottom && h.y + GROUP_HEADER > windowTop);
 
+  const pinch = Gesture.Pinch()
+    .runOnJS(true)
+    .onEnd((e) => {
+      if (!onPinchSize) return;
+      if (e.scale > 1.18) onPinchSize(1);
+      else if (e.scale < 0.85) onPinchSize(-1);
+    });
+  const gestures = Gesture.Simultaneous(pinch, Gesture.Native());
+
+  function jumpToSection(key: string) {
+    const target = layout.headers.find((h) => h.key === key);
+    if (target) scrollRef.current?.scrollTo({ y: Math.max(0, headerH + target.y - 60), animated: true });
+  }
+
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    onScrollExtra?.(e);
     const next = Math.floor(e.nativeEvent.contentOffset.y / step);
     if (next !== stepRef.current) {
       stepRef.current = next;
@@ -141,6 +162,7 @@ export default function Grid({
   const now = Date.now();
 
   return (
+    <GestureDetector gesture={gestures}>
     <ScrollView
       ref={scrollRef}
       style={styles.scroll}
@@ -152,7 +174,21 @@ export default function Grid({
       onScroll={onScroll}
       scrollEventThrottle={32}
       keyboardShouldPersistTaps="handled">
-      <View onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}>{header}</View>
+      <View onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}>
+        {header}
+        {groupBy !== 'none' && sections.length > 1 && (
+          <RNScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.jumpRow}>
+            {sections.slice(0, 40).map((sec) => (
+              <TouchableOpacity key={sec.key} style={styles.jumpChip} onPress={() => jumpToSection(sec.key)} accessibilityLabel={`Jump to ${sec.title}`}>
+                <Text style={styles.jumpText} numberOfLines={1}>
+                  {sec.title}
+                </Text>
+                <Text style={styles.jumpCount}>{sec.items.length}</Text>
+              </TouchableOpacity>
+            ))}
+          </RNScrollView>
+        )}
+      </View>
       {items.length === 0 ? (
         empty
       ) : (
@@ -187,6 +223,7 @@ export default function Grid({
         </View>
       )}
     </ScrollView>
+    </GestureDetector>
   );
 }
 
@@ -384,4 +421,8 @@ const makeStyles = (p: Palette) =>
       justifyContent: 'center',
     },
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },
+    jumpRow: { gap: 6, paddingHorizontal: 12, paddingBottom: 8 },
+    jumpChip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 220, borderRadius: 999, backgroundColor: p.card, paddingHorizontal: 12, paddingVertical: 6 },
+    jumpText: { color: p.text, fontSize: 13, fontWeight: '700', flexShrink: 1 },
+    jumpCount: { color: p.textSecondary, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
   });

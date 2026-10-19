@@ -5,15 +5,8 @@
  */
 
 import { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal } from './screen';
 
 import { tick } from './haptics';
 import { sheet, usePalette, useStyles, type Palette } from './theme';

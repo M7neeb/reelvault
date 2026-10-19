@@ -53,7 +53,10 @@ const OTD_TAG = 'reelvault-otd';
 const YEAR_KEY = 'vault.yearWrappedReminder';
 const YEAR_TAG = 'reelvault-year';
 
-export type OpenRequest = 'yearWrapped' | 'monthWrapped' | 'onThisDay';
+export type OpenRequest = 'yearWrapped' | 'monthWrapped' | 'weekWrapped' | 'onThisDay';
+
+const WEEKSUM_KEY = 'vault.weeklySummary';
+const WEEKSUM_TAG = 'reelvault-weeksum';
 
 const MONTH_KEY = 'vault.monthWrappedReminder';
 const MONTH_TAG = 'reelvault-month';
@@ -161,6 +164,37 @@ export async function setMonthWrappedReminder(on: boolean): Promise<boolean> {
   return true;
 }
 
+export async function weeklySummaryOn(): Promise<boolean> {
+  return (await getSetting(WEEKSUM_KEY)) !== '0';
+}
+
+/**
+ * Sunday 19:00: your week so far, your #1 and your run of days. Planned again
+ * each time the app goes to the background, so the words are up to date.
+ * On unless turned off (it only asks for permission when turned on by hand).
+ */
+export async function scheduleWeeklySummary(n: { at: number; title: string; body: string } | null): Promise<void> {
+  await cancelTagged(WEEKSUM_TAG);
+  if (!n || !(await weeklySummaryOn())) return;
+  const perm = await Notifications.getPermissionsAsync();
+  if (!perm.granted) return;
+  await Notifications.scheduleNotificationAsync({
+    identifier: WEEKSUM_TAG,
+    content: { title: n.title, body: n.body, data: { tag: WEEKSUM_TAG } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(n.at) },
+  }).catch((e) => console.log(`[WEEK] could not schedule: ${String(e)}`));
+}
+
+export async function setWeeklySummary(on: boolean, n: { at: number; title: string; body: string } | null): Promise<boolean> {
+  if (on && !(await allowed())) {
+    await setSetting(WEEKSUM_KEY, '0');
+    return false;
+  }
+  await setSetting(WEEKSUM_KEY, on ? '1' : '0');
+  await scheduleWeeklySummary(on ? n : null);
+  return true;
+}
+
 /** Tapping an On this day or yearly Wrapped notification. */
 export function onOpenRequestTap(open: (r: OpenRequest) => void): () => void {
   const handle = (r: Notifications.NotificationResponse | null) => {
@@ -168,6 +202,7 @@ export function onOpenRequestTap(open: (r: OpenRequest) => void): () => void {
     if (tag === OTD_TAG) open('onThisDay');
     else if (tag === YEAR_TAG) open('yearWrapped');
     else if (tag === MONTH_TAG) open('monthWrapped');
+    else if (tag === WEEKSUM_TAG) open('weekWrapped');
   };
   Notifications.getLastNotificationResponseAsync()
     .then(handle)

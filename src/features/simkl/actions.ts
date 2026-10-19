@@ -33,6 +33,13 @@ import {
 import { nextSessionNumber, normaliseExact, toSimklRating, type Session } from './insights';
 import { getSetting, setSetting } from '@/features/vault/library';
 
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
+
 const HOUR = 3600 * 1000;
 
 /** The request body groups by type; anime goes in `anime`, shows in `shows`. */
@@ -77,7 +84,7 @@ function episodeBody(item: Pick<SimklItem, 'simklId' | 'type'>, episodes: { seas
     return { anime: [{ ids: { simkl: item.simklId }, episodes: episodes.map((e) => ({ number: e.episode, watched_at: watchedAt })) }] };
   }
   const seasons = new Map<number, number[]>();
-  for (const e of episodes) seasons.set(e.season, [...(seasons.get(e.season) ?? []), e.episode]);
+  for (const e of episodes) pushTo(seasons, e.season, e.episode);
   return {
     shows: [
       {

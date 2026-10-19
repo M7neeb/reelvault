@@ -6,7 +6,8 @@
  */
 
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 

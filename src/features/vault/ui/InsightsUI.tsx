@@ -14,7 +14,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,12 +40,23 @@ import type { IconName } from './icons';
 import { Bars, Card, gradient, Ring, StatTile } from './insightParts';
 import { DUR, enterUp, PressableScale, SPRING } from './motion';
 import { MemoriesTab, MemoryPlayer } from './MemoriesUI';
+import { AppSpaceCard, ImportShrinkCard, SpacePlanner, TrashCard } from './storageParts';
 import { settleFreezes } from '../streakFreeze';
 import { Aurora, CountUp, GrowBar } from './storyKit';
 import { toOvVideo } from './overviewParts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
-import { previous, WrappedPicker, WrappedStory, type StoryInput } from './WrappedUI';
+import { previous, WrappedPicker, WrappedStory, type StoryInput, type WrappedGroup } from './WrappedUI';
+import { clubFor, yearBefore } from '../wrappedExtras';
+import { EMPTY_OV_EXTRA, type OvExtra } from '../ovExtra';
+import { playable } from '../overview';
+
+/** Adds to a list in a map (in place: building lists by copying gets slow with thousands of videos). */
+function push<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
 
 export type InsightsTab = 'dashboard' | 'history' | 'memories' | 'wrapped' | 'badges' | 'storage';
 
@@ -115,6 +127,7 @@ export default function VideoInsightsModal({
   initialMemoryKind,
   initialYear,
   initialMonth,
+  initialWeek,
   initialHistoryStats,
   onOpenVideo,
   onMakeSmaller,
@@ -143,11 +156,14 @@ export default function VideoInsightsModal({
   /** Play the first memory straight away (the browser preview). */
   initialMemory?: boolean;
   /** Play the first memory of this kind (the On this day notification). */
-  initialMemoryKind?: 'onThisDay';
+  /** onThisDay: that memory (the notification); today: it, or the top memory for you (a quick link). */
+  initialMemoryKind?: 'onThisDay' | 'today';
   /** Open this year's Wrapped (the 1 December notification). */
   initialYear?: boolean;
   /** Open last month's Wrapped (the monthly notification was tapped). */
   initialMonth?: boolean;
+  /** Open this week's Wrapped (the Sunday summary was tapped). */
+  initialWeek?: boolean;
   /** Open History on Stats (the browser preview). */
   initialHistoryStats?: boolean;
   onOpenVideo: (id: string) => void;
@@ -187,6 +203,10 @@ export default function VideoInsightsModal({
 
   const live = useLiveScope({ enableVideo, sound: prefs.liveSound, onSound: (on) => savePrefs({ liveSound: on }), paused: !!memory || !!story });
 
+  const [ovx, setOvx] = useState<OvExtra>(EMPTY_OV_EXTRA);
+  useEffect(() => {
+    actions.loadOvExtra().then(setOvx).catch(() => undefined);
+  }, [actions]);
   useEffect(() => {
     actions.loadPlays().then(setPlays).catch(() => setPlays([]));
     actions.countBookmarks().then(setBookmarks).catch(() => undefined);
@@ -270,7 +290,10 @@ export default function VideoInsightsModal({
   useEffect(() => {
     if (!initialMemoryKind || askedKind.current || !plays) return;
     askedKind.current = true;
-    const m = memoryList.find((x) => x.kind === initialMemoryKind);
+    const m =
+      initialMemoryKind === 'today'
+        ? (memoryList.find((x) => x.kind === 'onThisDay') ?? memoryList.find((x) => x.kind !== 'custom' && x.kind !== 'mix'))
+        : memoryList.find((x) => x.kind === initialMemoryKind);
     if (m) openMemory(m);
   }, [initialMemoryKind, memoryList, plays]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleIn = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -285,16 +308,71 @@ export default function VideoInsightsModal({
     if (!prefsRef.current.memoriesSeen.includes(m.id)) savePrefs((cur) => ({ memoriesSeen: [...cur.memoriesSeen, m.id].slice(-1000) }));
   };
 
-  /** Everything the story needs for a range. */
-  const openStory = (r: Range, scope: 'everything' | 'videos') => {
+  /** Keywords, albums and series you watched, most watched first: each can have a Wrapped of its own. */
+  const wrappedGroups = useMemo<WrappedGroup[]>(() => {
+    if (!plays) return [];
+    const msOf = new Map<string, number>();
+    for (const x of plays) msOf.set(x.videoId, (msOf.get(x.videoId) ?? 0) + x.watchedMs);
+    const make = (key: string, kind: WrappedGroup['kind'], name: string, ids: string[]): WrappedGroup | null => {
+      const watched = ids.filter((id) => (msOf.get(id) ?? 0) > 0);
+      if (watched.length < 2) return null;
+      const best = [...watched].sort((a, b) => (msOf.get(b) ?? 0) - (msOf.get(a) ?? 0))[0];
+      return { key, kind, name, ids, cover: best, ms: watched.reduce((a, id) => a + (msOf.get(id) ?? 0), 0) };
+    };
+    const byTag = new Map<string, string[]>();
+    for (const v of items) for (const t of v.tagNames) push(byTag, t, v.id);
+    const out: WrappedGroup[] = [];
+    for (const [t, ids] of byTag) {
+      const g = make(`k:${t}`, 'keyword', t, ids);
+      if (g) out.push(g);
+    }
+    for (const a of albumList) {
+      const g = make(`a:${a.id}`, 'album', a.name, items.filter((v) => v.albumIds.includes(a.id)).map((v) => v.id));
+      if (g) out.push(g);
+    }
+    for (const e of entries)
+      if (e.kind === 'series') {
+        const g = make(`s:${e.id}`, 'series', e.title, e.episodes.map((ep) => ep.video.id));
+        if (g) out.push(g);
+      }
+    return out.sort((a, b) => b.ms - a.ms).slice(0, 14);
+  }, [plays, items, albumList, entries]);
+
+  /** Reviews you wrote, as the story shows them. */
+  const reviewsFor = (keep: (key: string, at: number) => boolean) =>
+    Object.entries(ovx.reviews)
+      .filter(([key, r]) => keep(key, r.at))
+      .sort((a, b) => b[1].at - a[1].at)
+      .flatMap(([key, r]) => {
+        const e = entries.find((x) => x.key === key);
+        if (!e) return [];
+        const ep = playable(e);
+        return [{ title: e.title, text: r.text, videoId: ep && byId.has(ep.video.id) ? ep.video.id : null, rating: e.rating }];
+      });
+
+  /** A Wrapped of one keyword, album or series: from its first play to now. */
+  const openGroup = (g: WrappedGroup) => {
+    if (!plays) return;
+    const ids = new Set(g.ids);
+    const first = Math.min(...plays.filter((x) => ids.has(x.videoId)).map((x) => x.startedAt));
+    const d = new Date(first);
+    const r: Range = { start: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(), end: Date.now() + 1, label: `Since ${d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}` };
+    openStory(r, 'videos', g);
+  };
+
+  /** Everything the story needs for a range (of one keyword, album or series, when `group` is given). */
+  const openStory = (r: Range, scope: 'everything' | 'videos', group?: WrappedGroup) => {
     if (!plays) return;
     const now = Date.now();
-    const skUse = scope === 'everything' ? (sk ?? undefined) : undefined;
+    const only = group ? new Set(group.ids) : null;
+    const items_ = only ? items.filter((v) => only.has(v.id)) : items;
+    const plays_ = only ? plays.filter((x) => only.has(x.videoId)) : plays;
+    const skUse = scope === 'everything' && !group ? (sk ?? undefined) : undefined;
     const series = entries
       .filter((e) => e.kind === 'series')
       .map((e) => ({
         name: e.title,
-        episodes: new Set(plays.filter((x) => x.startedAt >= r.start && x.startedAt < r.end && e.episodes.some((ep) => ep.video.id === x.videoId)).map((x) => x.videoId)).size,
+        episodes: new Set(plays_.filter((x) => x.startedAt >= r.start && x.startedAt < r.end && e.episodes.some((ep) => ep.video.id === x.videoId)).map((x) => x.videoId)).size,
         finished: e.episodes.length > 0 && e.watchedCount === e.episodes.length,
       }))
       .filter((s) => s.episodes > 0)
@@ -307,18 +385,23 @@ export default function VideoInsightsModal({
             .filter((m) => m.start >= r.start - 86_400_000 && m.start < r.end)
             .reverse()
             .map((m) => {
-              const f = storyFacts(m, items, plays, now);
-              return { label: new Date(m.start).toLocaleDateString(undefined, { month: 'short' }).toUpperCase(), videoId: f.top[0]?.id ?? null, ms: f.watchedMs };
+              const f = storyFacts(m, items_, plays_, now);
+              return { label: new Date(m.start).toLocaleDateString(undefined, { month: 'short' }).toUpperCase(), videoId: f.top[0]?.id ?? null, ms: f.watchedMs, club: clubFor(f)?.key ?? null };
             })
         : undefined;
+    const ly = yearBefore(r);
+    const groupKeys = only ? new Set(entries.filter((e) => e.episodes.some((ep) => only.has(ep.video.id))).map((e) => e.key)) : null;
     setStory({
       sprint,
       range: r,
-      facts: storyFacts(r, items, plays, now),
-      prev: prevR.start >= 0 ? storyFacts(prevR, items, plays, now) : null,
-      w: buildWrapped(r, items, plays, skUse),
-      earned: badgeList.filter((a) => a.unlocked && a.earnedAt !== null && a.earnedAt >= r.start && a.earnedAt < r.end),
+      facts: storyFacts(r, items_, plays_, now),
+      prev: prevR.start >= 0 && !group ? storyFacts(prevR, items_, plays_, now) : null,
+      w: buildWrapped(r, items_, plays_, skUse),
+      earned: group ? [] : badgeList.filter((a) => a.unlocked && a.earnedAt !== null && a.earnedAt >= r.start && a.earnedAt < r.end),
       series,
+      subject: group ? { kind: group.kind, name: group.name } : undefined,
+      lastYear: group ? null : storyFacts(ly, items_, plays_, now),
+      reviews: reviewsFor((key, at) => (groupKeys ? groupKeys.has(key) : at >= r.start && at < r.end)),
     });
   };
 
@@ -329,7 +412,8 @@ export default function VideoInsightsModal({
       const year = initialYear || (Platform.OS === 'web' && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('range') === 'year');
       const n = new Date();
       const lastMonth = { start: new Date(n.getFullYear(), n.getMonth() - 1, 1).getTime(), end: new Date(n.getFullYear(), n.getMonth(), 1).getTime(), label: new Date(n.getFullYear(), n.getMonth() - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) };
-      openStory(year ? yearRange(new Date().getFullYear(), Date.now()) : initialMonth ? lastMonth : last, sk ? 'everything' : 'videos');
+      const [thisWeek] = recentWeeks(Date.now(), 1);
+      openStory(year ? yearRange(new Date().getFullYear(), Date.now()) : initialMonth ? lastMonth : initialWeek ? thisWeek : last, sk ? 'everything' : 'videos');
     }
   }, [initialWrapped, plays]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -408,7 +492,7 @@ export default function VideoInsightsModal({
                   onDeleteCustom={(id) => savePrefs((cur) => ({ customMemories: cur.customMemories.filter((c) => c.id !== id) }))}
                 />
               )}
-              {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} thumbs={thumbs} onOpen={openStory} />}
+              {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} thumbs={thumbs} groups={wrappedGroups} onOpen={(r, scope) => openStory(r, scope)} onOpenGroup={openGroup} />}
               {tab === 'badges' && (
                 <Badges
                   list={badgeList}
@@ -427,6 +511,9 @@ export default function VideoInsightsModal({
               )}
               {tab === 'storage' && (
                 <Storage
+                  actions={actions}
+                  trashDays={prefs.trashDays}
+                  onTrashDays={(d) => savePrefs({ trashDays: d })}
                   items={items}
                   deleted={deleted}
                   plays={plays}
@@ -499,6 +586,9 @@ const QUALITY_COLORS: Record<string, string> = { '4K': '#0A84FF', '1080p': '#5E5
 const GB = 1024 ** 3;
 
 function Storage({
+  actions,
+  trashDays,
+  onTrashDays,
   items,
   deleted,
   plays,
@@ -509,6 +599,9 @@ function Storage({
   onMakeSmaller,
   onFilter,
 }: {
+  actions: VaultActions;
+  trashDays: number;
+  onTrashDays: (days: number) => void;
   items: VaultItem[];
   deleted: VaultItem[];
   plays: VaultPlay[];
@@ -614,6 +707,12 @@ function Storage({
           </View>
         </Card>
       )}
+
+      {/* ── keeping it small ─────────────────────────────────── */}
+      <SpacePlanner ideas={ideas} freeBytes={freeGb !== null ? freeGb * GB : null} onStep={act} index={1} />
+      <AppSpaceCard actions={actions} index={1} />
+      <TrashCard days={trashDays} onDays={onTrashDays} count={deleted.length} bytes={s.deletedBytes} onEmpty={actions.emptyRecentlyDeleted} index={1} />
+      <ImportShrinkCard actions={actions} index={1} />
 
       <Card index={1} title="What takes the space">
         <View style={styles.stack}>

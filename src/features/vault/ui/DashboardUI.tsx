@@ -15,7 +15,8 @@
  */
 
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import Animated from 'react-native-reanimated';
 
@@ -30,6 +31,7 @@ import { noticed, onThisDay, rediscover } from '../recap';
 import { randomPick, unfinished } from '../history';
 import { frozenTimes, MAX_FREEZES, type Freezes } from '../streakFreeze';
 import Heatmap from './Heatmap';
+import { YearHeatCard } from './yearHeatUI';
 import Icon from './Icon';
 import { Bars, Card, ChangePill, gradient, iconOr, PhotoCard, Ring, SectionTitle, ShareBar, StatTile } from './insightParts';
 import { tick } from './haptics';
@@ -603,6 +605,8 @@ export default function Dashboard({
           Longest run: {longestStreak(times)} {longestStreak(times) === 1 ? 'day' : 'days'} in a row.
         </Text>
       </Card>
+
+      <YearHeatCard index={8} plays={plays.filter((x) => own.has(x.videoId))} nameOf={(id) => (byIdMap.get(id) ? friendlyName(byIdMap.get(id)!) : null)} onOpen={onOpen} />
 
       {/* ── records & the next milestone ──────────────────────────── */}
       {!empty && (

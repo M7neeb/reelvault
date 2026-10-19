@@ -1,6 +1,7 @@
 /** HashPhotos' Places map: every video that knows where it was filmed, as a pin. */
 
-import { Modal, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { Modal } from './screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { plural } from './confirm';

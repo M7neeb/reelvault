@@ -1,14 +1,17 @@
 /**
  * Movies, Shows or Anime from Simkl. From the top: a large title with glass
- * buttons (Pick for me, calendar, stats, settings); Up Next cards with the
- * show's backdrop and a one-tap "watched" (shows, anime) or your Plan to
- * Watch shelf (movies); your lists; then the library with status chips, a
- * sort menu, a filter box and rows (or a poster grid).
+ * buttons (Pick for me, calendar, stats, settings); Up Next as one big card
+ * with the show's art and a one-tap "watched", the rest as smaller cards
+ * (shows, anime) or your Plan to Watch shelf (movies); this week's calendar
+ * (seven days, tap one to see what airs); what is new this week; your lists;
+ * then the library with status chips, a sort menu, a filter box and rows
+ * (or a poster grid).
  * Presentational only (see simkl/ui/types.ts).
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { FlatList, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +30,9 @@ import {
   episodesLeft,
   fanartUrl,
   filterItems,
+  followedIds,
+  newThisWeek,
+  weekAhead,
   parseEpisodeCode,
   posterUrl,
   SIMKL_TYPES,
@@ -133,6 +139,25 @@ export default function SimklScreen(props: SimklScreenProps) {
         : [],
     [ofType, category]
   );
+  // This week on the home screen: what airs in the next seven days, and what came out lately.
+  const [calRows, setCalRows] = useState<CatalogTitle[] | null>(null);
+  useEffect(() => {
+    if (!connected) return;
+    let on = true;
+    setCalRows(null);
+    actions
+      .calendar(category)
+      .then((r) => on && setCalRows(r))
+      .catch(() => on && setCalRows([]));
+    return () => {
+      on = false;
+    };
+  }, [actions, category, connected]);
+  const following = useMemo(() => followedIds(ofType), [ofType]);
+  const week = useMemo(() => weekAhead(calRows ?? [], following, Date.now()), [calRows, following]);
+  const fresh = useMemo(() => newThisWeek(ofType, calRows ?? [], following, Date.now()), [ofType, calRows, following]);
+  const [weekDay, setWeekDay] = useState<number | null>(null);
+  const shownDay = week.find((d) => d.day === weekDay) ?? week.find((d) => d.rows.length) ?? week[0];
   const library = useMemo(() => new Set(items.map((i) => i.simklId)), [items]);
   const libraryMap = useMemo(() => new Map(items.map((i) => [i.simklId, i])), [items]);
   const openItem = open ? (items.find((i) => i.simklId === open.simklId) ?? null) : null;
@@ -203,9 +228,21 @@ export default function SimklScreen(props: SimklScreenProps) {
           {next.length > 0 && (
             <>
               <SectionHead title="Up Next" detail={`${next.length}`} />
+              {look !== 'compact' && look !== 'desktop' && (
+                <UpNextHero
+                  key={next[0].simklId}
+                  item={next[0]}
+                  width={width - SIDE * 2}
+                  busy={busyId === next[0].simklId}
+                  hideSpoilers={hideSpoilers}
+                  actions={actions}
+                  onOpen={() => setOpen(asTitle(next[0]))}
+                  onWatched={() => void watchedNext(next[0])}
+                />
+              )}
               <FlatList
                 horizontal
-                data={next}
+                data={look !== 'compact' && look !== 'desktop' ? next.slice(1) : next}
                 keyExtractor={(i) => String(i.simklId)}
                 showsHorizontalScrollIndicator={false}
                 snapToInterval={cardW + 12}
@@ -242,6 +279,85 @@ export default function SimklScreen(props: SimklScreenProps) {
                       {i.title}
                     </Text>
                     <Text style={styles.shelfSub}>{[i.year, i.runtime ? `${i.runtime} min` : null].filter(Boolean).join(' · ')}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
+          {look !== 'simple' && week.some((d) => d.rows.length) && (
+            <>
+              <SectionHead title="This week" detail={`${week.reduce((a, d) => a + d.rows.length, 0)}`} action="Calendar" onAction={() => setCalendar(true)} />
+              <View style={styles.weekStrip}>
+                {week.map((d, i) => {
+                  const on = d.day === shownDay?.day;
+                  return (
+                    <TouchableOpacity
+                      key={d.day}
+                      style={[styles.weekCell, on && styles.weekCellOn]}
+                      onPress={() => {
+                        tick();
+                        setWeekDay(d.day);
+                      }}
+                      accessibilityLabel={`${new Date(d.day).toLocaleDateString(undefined, { weekday: 'long' })}: ${d.rows.length} airing`}>
+                      <Text style={[styles.weekDayName, on && styles.weekOnText]}>{i === 0 ? 'Today' : new Date(d.day).toLocaleDateString(undefined, { weekday: 'short' })}</Text>
+                      <Text style={[styles.weekDate, on && styles.weekOnText]}>{new Date(d.day).getDate()}</Text>
+                      <View style={styles.weekDots}>
+                        {d.rows.slice(0, 3).map((r, n) => (
+                          <View key={`${r.simklId}-${n}`} style={[styles.weekDot, on && { backgroundColor: p.bg }]} />
+                        ))}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {shownDay && shownDay.rows.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+                  {shownDay.rows.map((r, n) => (
+                    <TouchableOpacity key={`${r.simklId}-${n}`} style={{ width: 104 }} onPress={() => setOpen(r)} accessibilityLabel={r.title}>
+                      <Poster path={r.poster} title={r.title} width={104} height={154} radius={10}>
+                        {!!r.date && (
+                          <View style={styles.timeBadge}>
+                            <Text style={styles.timeBadgeText}>{new Date(r.date).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</Text>
+                          </View>
+                        )}
+                      </Poster>
+                      <Text style={styles.shelfTitle} numberOfLines={1}>
+                        {r.title}
+                      </Text>
+                      <Text style={styles.shelfSub} numberOfLines={1}>
+                        {hideSpoilers ? 'New episode' : (r.episodeLabel ?? (category === 'movie' ? 'Release' : 'New episode'))}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : (
+                <Text style={styles.hint}>Nothing airs that day.</Text>
+              )}
+            </>
+          )}
+
+          {look !== 'simple' && fresh.length > 0 && (
+            <>
+              <SectionHead title="New this week" detail={`${fresh.length}`} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+                {fresh.slice(0, 20).map((x) => (
+                  <TouchableOpacity
+                    key={x.simklId}
+                    style={{ width: 104 }}
+                    onPress={() => setOpen({ simklId: x.simklId, type: x.type, title: x.title, year: null, poster: x.poster, slug: null })}
+                    accessibilityLabel={`${x.title}, new`}>
+                    <Poster path={x.poster} title={x.title} width={104} height={154} radius={10}>
+                      <View style={styles.newBadge}>
+                        <Text style={styles.newBadgeText}>NEW</Text>
+                      </View>
+                    </Poster>
+                    <Text style={styles.shelfTitle} numberOfLines={1}>
+                      {x.title}
+                    </Text>
+                    <Text style={styles.shelfSub} numberOfLines={1}>
+                      {[x.label, fmtDay(x.date)].filter(Boolean).join(' · ')}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -550,6 +666,88 @@ function UpNextCard({
   );
 }
 
+/** The first show to continue, big: its art (loaded if the sync didn't bring it), the next episode and a one-tap "watched". */
+function UpNextHero({
+  item,
+  width,
+  busy,
+  hideSpoilers,
+  actions,
+  onOpen,
+  onWatched,
+}: {
+  item: SimklItem;
+  width: number;
+  busy: boolean;
+  hideSpoilers: boolean;
+  actions: SimklScreenProps['actions'];
+  onOpen: () => void;
+  onWatched: () => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const { height: screenH } = useWindowDimensions();
+  const [fan, setFan] = useState<string | null>(item.fanart ?? null);
+  useEffect(() => {
+    if (fan) return;
+    let on = true;
+    actions
+      .loadDetail(item.type, item.simklId)
+      .then((d) => on && setFan(d.fanart ?? null))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [item.simklId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const art = fanartUrl(fan);
+  const left = episodesLeft(item);
+  const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
+  const when = item.nextDate ? `Aired ${fmtDay(item.nextDate)}` : item.lastWatchedAt ? `Watched ${fmtAgo(item.lastWatchedAt)}` : null;
+  return (
+    <TouchableOpacity style={[styles.hero, { width, height: Math.round(Math.min(width * 0.66, Math.max(220, screenH * 0.66))) }]} onPress={onOpen} activeOpacity={0.92} accessibilityLabel={`${item.title}, up next ${item.nextToWatch}`}>
+      {art ? (
+        <Image source={{ uri: art }} style={StyleFill} contentFit="cover" transition={250} recyclingKey={art} />
+      ) : item.poster ? (
+        <Image source={{ uri: posterUrl(item.poster, '_m') }} style={StyleFill} contentFit="cover" blurRadius={26} />
+      ) : (
+        <View style={[StyleFill, { backgroundColor: `hsl(${hueFor(item.title)}, 38%, 24%)` }]} />
+      )}
+      <Fade color="0,0,0" from={0} to={0.92} style={[StyleFill, { top: '30%' }]} />
+      <View style={styles.heroChip}>
+        <Text style={styles.heroChipText}>UP NEXT</Text>
+      </View>
+      <View style={styles.heroBody}>
+        {!art && <Poster path={item.poster} title={item.title} width={70} height={104} radius={8} />}
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={styles.heroTitle} numberOfLines={2}>
+            {item.title}
+          </Text>
+          <Text style={styles.upEp} numberOfLines={1}>
+            <Text style={styles.upCode}>{item.nextToWatch}</Text>
+            {!hideSpoilers && item.nextTitle ? `  ${item.nextTitle}` : ''}
+          </Text>
+          <Text style={styles.upMeta} numberOfLines={1}>
+            {[left > 0 ? `${left} left` : null, when].filter(Boolean).join(' · ')}
+          </Text>
+          <View style={styles.heroBtns}>
+            <TouchableOpacity style={[styles.heroWatched, busy && { opacity: 0.5 }]} onPress={onWatched} disabled={busy} accessibilityLabel={`Mark ${item.nextToWatch} watched`}>
+              <Icon name="check" size={16} color="#000" weight="bold" />
+              <Text style={styles.heroWatchedText}>Watched {item.nextToWatch}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onOpen} accessibilityLabel="Details">
+              <Glass interactive clear fallback="rgba(255,255,255,0.22)" style={styles.heroMore}>
+                <Text style={styles.heroMoreText}>Details</Text>
+              </Glass>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+      <View style={styles.upTrack}>
+        <View style={[styles.upFill, { width: `${Math.round(progress * 100)}%` }]} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 /** One title in the list: poster, next episode, progress, date, ratings. */
 function Row({ item, sort, detailed, onPress }: { item: SimklItem; sort: SimklSort; detailed?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
@@ -707,6 +905,28 @@ const makeStyles = (p: Palette) =>
     sectionActionText: { color: p.link, fontSize: 15, fontWeight: '600' },
 
     carousel: { gap: 12, paddingHorizontal: SIDE },
+    hero: { alignSelf: 'center', borderRadius: 22, overflow: 'hidden', backgroundColor: p.elevated, justifyContent: 'flex-end', marginBottom: 12 },
+    heroChip: { position: 'absolute', top: 14, left: 14, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+    heroChipText: { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
+    heroBody: { flexDirection: 'row', alignItems: 'flex-end', gap: 14, paddingHorizontal: 18, paddingBottom: 20 },
+    heroTitle: { color: '#fff', fontSize: 26, fontWeight: '900', letterSpacing: -0.6 },
+    heroBtns: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+    heroWatched: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+    heroWatchedText: { color: '#000', fontSize: 14, fontWeight: '800' },
+    heroMore: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+    heroMoreText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    weekStrip: { flexDirection: 'row', gap: 6, paddingHorizontal: SIDE, paddingBottom: 12 },
+    weekCell: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 14, backgroundColor: p.elevated },
+    weekCellOn: { backgroundColor: p.text },
+    weekDayName: { color: p.textSecondary, fontSize: 11, fontWeight: '700' },
+    weekDate: { color: p.text, fontSize: 17, fontWeight: '800' },
+    weekOnText: { color: p.bg },
+    weekDots: { flexDirection: 'row', gap: 3, height: 5 },
+    weekDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: p.accent },
+    timeBadge: { position: 'absolute', left: 6, bottom: 6, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+    timeBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+    newBadge: { position: 'absolute', left: 6, top: 6, backgroundColor: '#FF375F', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+    newBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.6 },
     upCard: { height: 200, borderRadius: 20, overflow: 'hidden', backgroundColor: p.elevated, justifyContent: 'flex-end' },
     upPoster: { position: 'absolute', top: 14, left: 14, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
     upBody: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, paddingHorizontal: 16, paddingBottom: 16 },

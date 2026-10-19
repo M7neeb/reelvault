@@ -127,7 +127,22 @@ const DEFAULTS = {
   showRating: true,
   showKeywords: true,
   theme: 'system',
+  colors: 'standard',
+  videoColor: null,
+  videoColorFrom: null,
+  font: 'system',
+  glass: 'regular',
+  corners: 'standard',
+  outlined: false,
+  rotate: false,
 };
+
+test('colours, font, glass, cards and turning are read, bad values fall back', () => {
+  const o = parseViewOptions('{"colors":"video","videoColor":"#1E6B45","videoColorFrom":"v1","font":"georgia","glass":"solid","corners":"round","outlined":true,"rotate":true}', DEFAULTS);
+  assert.deepEqual([o.colors, o.videoColor, o.videoColorFrom, o.font, o.glass, o.corners, o.outlined, o.rotate], ['video', '#1E6B45', 'v1', 'georgia', 'solid', 'round', true, true]);
+  const bad = parseViewOptions('{"colors":"neon","videoColor":"green","font":"comic","glass":"frosted","corners":"wavy","outlined":"yes","rotate":1}', DEFAULTS);
+  assert.deepEqual([bad.colors, bad.videoColor, bad.font, bad.glass, bad.corners, bad.outlined, bad.rotate], ['standard', null, 'system', 'regular', 'standard', false, false]);
+});
 
 test('look and accent are read, bad values fall back', () => {
   assert.equal(parseViewOptions('{"look":"desktop","accent":"#FF375F"}', DEFAULTS).look, 'desktop');
@@ -215,4 +230,17 @@ test('smart filter rules with the new fields survive a round trip', async () => 
   assert.deepEqual(r, { watched: 'never', minPlays: 3, notWatchedDays: 365, addedWithinDays: 30, anyTags: ['a', 'b'] });
   assert.match(describeRule(r), /never watched/);
   assert.match(describeRule(r), /#a or #b/);
+});
+
+test('group by rating, keyword, series, length and week', async () => {
+  const { groupItems } = await import('../src/features/vault/ui/logic.ts');
+  const v = (id, over = {}) => ({ id, createdAt: new Date(2026, 9, 14).getTime(), rating: 0, tagNames: [], durationMs: 30_000, ...over });
+  const items = [v('a', { rating: 9, tagNames: ['trip', 'beach'] }), v('b', { rating: 0 }), v('c', { rating: 9, tagNames: ['trip'], durationMs: 10 * 60_000 }), v('d', { rating: 7, durationMs: null })];
+  assert.deepEqual(groupItems(items, 'rating').map((s) => [s.title, s.items.length]), [['★ 9', 2], ['★ 7', 1], ['Not rated', 1]]);
+  // A video goes under its first keyword (A to Z); the biggest group first, untagged last.
+  assert.deepEqual(groupItems(items, 'keyword').map((s) => [s.title, s.items.map((x) => x.id).join('')]), [['No keyword', 'bd'], ['#beach', 'a'], ['#trip', 'c']].sort((x, y) => (x[0] === 'No keyword') - (y[0] === 'No keyword') || y[1].length - x[1].length || x[0].localeCompare(y[0])));
+  assert.deepEqual(groupItems(items, 'series', new Map([['a', 'Walks'], ['c', 'Walks']])).map((s) => [s.title, s.items.length]), [['Walks', 2], ['Not in a series', 2]]);
+  assert.deepEqual(groupItems(items, 'length').map((s) => s.title), ['Under a minute', '5 to 20 minutes', 'Length unknown']);
+  // 14 October 2026 is a Wednesday: its week starts on Monday the 12th.
+  assert.deepEqual(groupItems(items, 'week').map((s) => s.title), ['Week of 12 Oct 2026']);
 });

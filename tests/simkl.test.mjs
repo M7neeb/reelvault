@@ -4,6 +4,9 @@ import { test } from 'node:test';
 
 import {
   backoffMs,
+  followedIds,
+  newThisWeek,
+  weekAhead,
   groupBySeason,
   myCalendar,
   parseAllItems,
@@ -246,4 +249,29 @@ test('CSV export escapes commas and quotes', () => {
   const csv = libraryCsv(items).split('\n');
   assert.equal(csv.length, 2);
   assert.ok(csv[1].startsWith('movie,"Hello, ""World""",2020,completed'));
+});
+
+test('home: the week ahead and what is new this week', () => {
+  const now = new Date(2026, 9, 19, 12).getTime();
+  const iso = (d, h = 20) => new Date(2026, 9, d, h).toISOString();
+  const item = (id, over = {}) => ({ simklId: id, type: 'show', title: `T${id}`, year: null, poster: null, slug: null, runtime: null, status: 'watching', rating: null, ratedAt: null, addedAt: null, lastWatchedAt: null, watchedEpisodes: 0, totalEpisodes: 0, notAiredEpisodes: 0, nextToWatch: null, animeType: null, memo: null, nextTitle: null, nextDate: null, simklRating: null, simklVotes: null, imdbRating: null, imdbVotes: null, malRating: null, rank: null, ...over });
+  const items = [
+    item(1, { nextToWatch: 'S01E05', nextDate: iso(16) }),
+    item(2, { status: 'completed' }),
+    item(3, { nextToWatch: 'S02E01', nextDate: iso(1) }),
+    item(4, { type: 'movie', status: 'plantowatch' }),
+  ];
+  const follow = followedIds(items);
+  assert.deepEqual([...follow].sort(), [1, 3, 4]);
+  const row = (id, d, label = null) => ({ simklId: id, type: 'show', title: `T${id}`, year: null, poster: null, slug: null, date: iso(d), episodeLabel: label });
+  const rows = [row(1, 21, 'S01E07'), row(2, 21), row(3, 19, 'S02E02'), row(4, 18), row(3, 30)];
+  const week = weekAhead(rows, follow, now);
+  assert.equal(week.length, 7);
+  assert.deepEqual(week[0].rows.map((r) => r.simklId), [3]);
+  assert.deepEqual(week[2].rows.map((r) => r.simklId), [1]);
+  // Followed only, and only the next seven days.
+  assert.equal(week.flatMap((d) => d.rows).length, 2);
+  const fresh = newThisWeek(items, rows, follow, now);
+  // Show 1's unwatched episode from Friday, the movie released yesterday; show 3's episode is from weeks ago.
+  assert.deepEqual(fresh.map((x) => [x.simklId, x.label]), [[4, null], [1, 'S01E05']]);
 });

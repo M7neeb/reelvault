@@ -73,7 +73,7 @@ const TAG_SETS: string[][] = [
   ['funny'],
   ['nature'],
   ['holiday'],
-  [],
+  ['holiday'],
 ];
 
 const STATUS_SET: (UiStatus | null)[] = [
@@ -371,6 +371,25 @@ export const FIXTURE_OVERVIEW: OverviewData = {
     { videoId: 'fixture-7', seriesId: 'fixture-series-2', position: 3, label: null },
   ],
 };
+
+/** Overview extras for the preview: a review, rewatches, a Plan to Watch order and ratings over time. */
+export function fixtureOvExtra(): import('../ovExtra').OvExtra {
+  const day = 86_400_000;
+  const now = Date.UTC(2026, 9, 15);
+  return {
+    reviews: { 's:fixture-series-1': { text: 'Slow start, then it really grips you. The third episode is the best one.', at: now - 4 * day } },
+    rewatches: { 's:fixture-series-1': [now - 60 * day, now - 9 * day] },
+    planOrder: [],
+    ratingLog: [
+      { key: 's:fixture-series-1', rating: 5, at: now - 150 * day },
+      { key: 'v:fixture-2', rating: 6, at: now - 120 * day },
+      { key: 'v:fixture-3', rating: 8, at: now - 90 * day },
+      { key: 'v:fixture-4', rating: 7, at: now - 60 * day },
+      { key: 's:fixture-series-1', rating: 7, at: now - 20 * day },
+      { key: 'v:fixture-6', rating: 9, at: now - 10 * day },
+    ],
+  };
+}
 
 /** A HashPhotos metadata export for the preview: six files, one not in the vault. */
 export const FIXTURE_META: MetaFile = parseMetadataFile(

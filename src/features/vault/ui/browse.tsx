@@ -10,7 +10,7 @@ import { fmtSize, fmtTotalDuration } from './format';
 import { countByDay, dayKey, groupItems, libraryOverview, monthGrid, monthName } from './logic';
 import { Section, SheetFrame } from './sheets';
 import { sheet, useStyles, type Palette } from './theme';
-import type { GroupBy, VaultItem } from './types';
+import type { DateGroup, VaultItem } from './types';
 import Glyph from './Glyph';
 
 const WEEK = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
@@ -108,7 +108,7 @@ export function TimelineSheet({
   onClose,
 }: {
   items: VaultItem[];
-  onJump: (key: string, by: Exclude<GroupBy, 'none'>) => void;
+  onJump: (key: string, by: DateGroup) => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);

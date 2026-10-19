@@ -1,3 +1,10 @@
+
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
 /**
  * HashPhotos' "Export Metadata" file (CSV, JSON or XML) read back into
  * ReelVault: keywords, rating, title, caption and pick/reject for each file,
@@ -211,7 +218,7 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
   const byStem = new Map<string, MetaTarget[]>();
   for (const v of library) {
     byName.set(lower(v.filename), v);
-    byStem.set(stem(v.filename), [...(byStem.get(stem(v.filename)) ?? []), v]);
+    pushTo(byStem, stem(v.filename), v);
   }
   const changes = new Map<string, MetaChange>();
   const unmatched: string[] = [];

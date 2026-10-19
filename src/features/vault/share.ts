@@ -22,6 +22,12 @@ export async function shareFile(uri: string): Promise<void> {
 export async function extractFrame(video: Video, timeMs: number): Promise<void> {
   const frame = await VideoThumbnails.getThumbnailAsync(video.uri, { time: Math.max(0, Math.round(timeMs)), quality: 1 });
   await shareFile(frame.uri);
+  // The full-size still was only for sharing: don't keep it in the cache.
+  try {
+    new File(frame.uri).delete();
+  } catch {
+    // already gone
+  }
 }
 
 function extOf(name: string): string {

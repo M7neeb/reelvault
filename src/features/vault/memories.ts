@@ -3,13 +3,21 @@
  * On this day in earlier years, a year ago this month, your very first videos,
  * your 100th / 500th / 1000th video, after dark, trips away from home (from the videos' GPS),
  * days you filmed a lot, the best of a month, seasons, themes from your tags,
- * favourites, forgotten gems, whole years and what's on repeat. Each memory
+ * favourites, forgotten gems, whole years and what's on repeat, and then and
+ * now (a keyword or a place filmed years apart, old and new side by side). Each memory
  * picks its best videos (rating, plays) and plays them in the order they were
  * filmed, as short clips. Everything is worked out on the phone. Pure, so it
  * is tested in Node.
  */
 
 import { highlightAt, type RPlay, type RVideo } from './recap.ts';
+
+/** Adds to a list in a map (in place: building lists by copying gets slow with thousands of videos). */
+function push<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
 
 export type MVideo = RVideo & { location?: { lat: number; lon: number } | null; albumIds?: number[] };
 
@@ -30,7 +38,8 @@ export type MemoryKind =
   | 'theme'
   | 'favourites'
   | 'gems'
-  | 'year';
+  | 'year'
+  | 'thenNow';
 
 /** How a memory plays: slow and warm, quick cuts, or wide and cinematic. */
 export type Mood = 'gentle' | 'upbeat' | 'epic';
@@ -54,6 +63,8 @@ export type Memory = {
   tone: number;
   /** Higher = shown first in For you. */
   score: number;
+  /** Then and now: [old, new] videos played side by side. */
+  pairs?: [string, string][];
 };
 
 const DAY = 86_400_000;
@@ -156,7 +167,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
     const years = today.getFullYear() - d.getFullYear();
     if (years < 1) continue;
     const same = new Date(today.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
-    if (Math.abs(same - sod(now) - 12 * HOUR) <= 3 * DAY + HOUR) byYear.set(years, [...(byYear.get(years) ?? []), v]);
+    if (Math.abs(same - sod(now) - 12 * HOUR) <= 3 * DAY + HOUR) push(byYear, years, v);
   }
   for (const [years, list] of byYear) {
     const exact = list.some((v) => new Date(v.createdAt).getDate() === today.getDate() && new Date(v.createdAt).getMonth() === today.getMonth());
@@ -300,7 +311,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   for (const v of all) {
     const d = new Date(v.createdAt);
     const k = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-    if (ageDays(k) <= 18 * 31) monthGroups.set(k, [...(monthGroups.get(k) ?? []), v]);
+    if (ageDays(k) <= 18 * 31) push(monthGroups, k, v);
   }
   for (const [k, list] of monthGroups) {
     if (list.length < 4) continue;
@@ -339,7 +350,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
 
   // Themes from your tags.
   const tagGroups = new Map<string, MVideo[]>();
-  for (const v of all) for (const t of v.tagNames) tagGroups.set(t, [...(tagGroups.get(t) ?? []), v]);
+  for (const v of all) for (const t of v.tagNames) push(tagGroups, t, v);
   for (const [tag, list] of [...tagGroups.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 8)) {
     if (list.length < 3) continue;
     const y1 = new Date(list[0].createdAt).getFullYear();
@@ -364,7 +375,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
 
   // Whole years.
   const years = new Map<number, MVideo[]>();
-  for (const v of all) years.set(new Date(v.createdAt).getFullYear(), [...(years.get(new Date(v.createdAt).getFullYear()) ?? []), v]);
+  for (const v of all) push(years, new Date(v.createdAt).getFullYear(), v);
   for (const [y, list] of years) {
     if (list.length < 6) continue;
     add('year', `year:${y}`, list, {
@@ -377,7 +388,76 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
     }, 16);
   }
 
+  out.push(...thenAndNow(all, playsOf));
+
   return out.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Then and now: a keyword, or a place (~1 km), filmed in years at least one
+ * year apart. The best videos of the first year are paired with the best of
+ * the last one, to play side by side. The three strongest are kept.
+ */
+export function thenAndNow(all: MVideo[], playsOf: Map<string, number>): Memory[] {
+  const rank = (list: MVideo[]) =>
+    [...list].sort((a, b) => b.rating - a.rating || (playsOf.get(b.id) ?? 0) - (playsOf.get(a.id) ?? 0) || (b.durationMs ?? 0) - (a.durationMs ?? 0));
+  const groups: { id: string; name: string | null; list: MVideo[] }[] = [];
+  const tags = new Map<string, { name: string; list: MVideo[] }>();
+  for (const v of all)
+    for (const t of v.tagNames) {
+      const g = tags.get(t.toLowerCase()) ?? { name: t, list: [] };
+      g.list.push(v);
+      tags.set(t.toLowerCase(), g);
+    }
+  for (const [k, g] of tags) groups.push({ id: `thennow:tag:${k}`, name: cap(g.name.includes('/') ? g.name.slice(g.name.lastIndexOf('/') + 1).trim() : g.name), list: g.list });
+  const places = new Map<string, MVideo[]>();
+  for (const v of all) {
+    if (!v.location) continue;
+    const k = `${Math.round(v.location.lat * 100)}:${Math.round(v.location.lon * 100)}`;
+    push(places, k, v);
+  }
+  for (const [k, list] of places) groups.push({ id: `thennow:place:${k}`, name: null, list });
+
+  const out: Memory[] = [];
+  const used = new Set<string>();
+  for (const g of groups) {
+    const years = new Map<number, MVideo[]>();
+    for (const v of g.list) {
+      const y = new Date(v.createdAt).getFullYear();
+      push(years, y, v);
+    }
+    if (years.size < 2) continue;
+    const ys = [...years.keys()].sort((a, b) => a - b);
+    const y1 = ys[0];
+    const y2 = ys[ys.length - 1];
+    const gap = y2 - y1;
+    const then = rank(years.get(y1)!).slice(0, 4);
+    const now = rank(years.get(y2)!).slice(0, 4);
+    const n = Math.min(then.length, now.length);
+    if (n < 2 && gap < 2) continue;
+    const pairs: [string, string][] = Array.from({ length: n }, (_, i) => [then[i].id, now[i].id]);
+    const key = pairs.map((x) => x.join('>')).join('|');
+    if (used.has(key)) continue;
+    used.add(key);
+    const both = [...years.get(y1)!, ...years.get(y2)!];
+    out.push({
+      id: g.id,
+      kind: 'thenNow',
+      kicker: 'THEN AND NOW',
+      title: g.name ? `${g.name}, then and now` : `The same spot, ${y1} and ${y2}`,
+      subtitle: `${y1} and ${y2} · ${plural(gap, 'year')} apart`,
+      videoIds: pairs.flat(),
+      pairs,
+      coverId: now[0].id,
+      total: both.length,
+      start: Math.min(...both.map((v) => v.createdAt)),
+      end: Math.max(...both.map((v) => v.createdAt)),
+      mood: 'gentle',
+      tone: 4,
+      score: 44 + Math.min(10, gap * 2) + n,
+    });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 3);
 }
 
 /** Clip length and the gap between clips for each mood. */
@@ -387,11 +467,20 @@ export const MOODS: Record<Mood, { label: string; clipMs: number; fadeMs: number
   epic: { label: 'Epic', clipMs: 4500, fadeMs: 500, blurb: 'Wide and cinematic' },
 };
 
-export type Clip = { videoId: string; startMs: number; ms: number };
+export type Clip = { videoId: string; startMs: number; ms: number; /** Then and now: the newer video, played beside it. */ pair?: { videoId: string; startMs: number } };
 
 /** The clips a memory plays: each video once, from its highlight, short videos in full. */
 export function memoryClips(m: Memory, videos: Map<string, Pick<MVideo, 'durationMs'>>, mood: Mood, bookmarks: Map<string, number[]> = new Map()): Clip[] {
   const clipMs = MOODS[mood].clipMs;
+  if (m.pairs?.length) {
+    // Two videos at once need a little longer to take in.
+    const ms = Math.round(clipMs * 1.6);
+    const at = (id: string) => {
+      const d = videos.get(id)!.durationMs;
+      return d && d <= ms ? 0 : highlightAt(d, bookmarks.get(id) ?? [], ms);
+    };
+    return m.pairs.filter(([a, b]) => videos.has(a) && videos.has(b)).map(([a, b]) => ({ videoId: a, startMs: at(a), ms, pair: { videoId: b, startMs: at(b) } }));
+  }
   return m.videoIds
     .filter((id) => videos.has(id))
     .map((id) => {
@@ -416,7 +505,7 @@ export function memorySections(list: Memory[], hidden: string[], favs: string[])
     favourites: shown.filter((m) => favs.includes(m.id)),
     mine: of('custom'),
     onThisDay: of('onThisDay'),
-    lookingBack: of('yearAgo', 'first', 'milestone', 'night'),
+    lookingBack: of('thenNow', 'yearAgo', 'first', 'milestone', 'night'),
     moments: of('trip', 'day', 'recent').sort((a, b) => b.start - a.start),
     themes: of('theme', 'favourites', 'gems', 'repeat'),
     months: of('month', 'season').sort((a, b) => b.start - a.start),

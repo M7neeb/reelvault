@@ -82,6 +82,7 @@ export const ICONS = {
   paint: { sf: 'paintpalette', ion: 'color-palette-outline' },
   layout: { sf: 'rectangle.3.group', ion: 'grid-outline' },
   arrowUp: { sf: 'arrow.up.right', ion: 'trending-up' },
+  toTop: { sf: 'arrow.up.to.line', ion: 'arrow-up' },
   arrowDown: { sf: 'arrow.down.right', ion: 'trending-down' },
   medal: { sf: 'medal.fill', ion: 'medal' },
   moon: { sf: 'moon.stars.fill', ion: 'moon' },

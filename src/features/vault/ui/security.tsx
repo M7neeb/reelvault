@@ -7,7 +7,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Modal, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal } from './screen';
 
 import { QUALITIES } from '../smaller';
 import { Chip, Section, SheetFrame, ToggleRow, Wrap } from './sheets';
@@ -221,8 +222,15 @@ export function SettingsSheet({
   onPersonalise,
   loadPasscodeLog,
   onClearPasscodeLog,
+  backups,
   onClose,
 }: {
+  /** The automatic weekly backups (list, make one now, restore one). */
+  backups?: {
+    list: () => Promise<{ name: string; uri: string; at: number; size: number }[]>;
+    now: () => Promise<unknown>;
+    restore: (uri: string) => Promise<{ matched: number; total: number; plays: number } | null>;
+  };
   security: SecurityState | null;
   /** Wrong and fake passcodes typed at Private (newest first). */
   loadPasscodeLog?: () => Promise<{ at: number; kind: 'wrong' | 'fake' | 'faceid-failed' }[]>;
@@ -362,6 +370,7 @@ export function SettingsSheet({
           your settings (goals, memories, badges, pins, the player). It does not contain the videos, and leaves out
           private ones. Restoring adds to what is here and never deletes anything; videos are matched even if renamed.
         </Text>
+        {backups && <AutoBackups backups={backups} />}
       </Section>
     </SheetFrame>
   );
@@ -371,6 +380,10 @@ const makeStyles = (p: Palette) =>
   sheet({
     body: { color: p.textSoft, fontSize: 14 },
     subLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', paddingTop: 8 },
+    backupRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: p.card, borderRadius: 12, padding: 10 },
+    backupDay: { color: p.text, fontSize: 15, fontWeight: '700' },
+    backupBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.elevated },
+    backupBtnText: { color: p.link, fontSize: 13, fontWeight: '800' },
     hint: { color: p.textSecondary, fontSize: 12 },
     logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
     logDot: { width: 8, height: 8, borderRadius: 4 },
@@ -406,3 +419,73 @@ const makeStyles = (p: Palette) =>
     faceId: { marginTop: 30, padding: 10 },
     faceIdText: { color: p.link, fontSize: 16, fontWeight: '600' },
   });
+
+/** The weekly copies of your info kept on the phone: when, restore one, or make one now. */
+function AutoBackups({ backups }: { backups: NonNullable<Parameters<typeof SettingsSheet>[0]['backups']> }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const [list, setList] = useState<{ name: string; uri: string; at: number; size: number }[] | null>(null);
+  const [note, setNote] = useState('');
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const load = () =>
+    backups
+      .list()
+      .then(setList)
+      .catch(() => setList([]));
+  useEffect(() => {
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const day = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return (
+    <View style={{ gap: 8, marginTop: 6 }}>
+      <Text style={styles.subLabel}>Automatic weekly backups</Text>
+      {list === null ? null : list.length === 0 ? (
+        <Text style={styles.hint}>None yet. The first one is made a few seconds after the app opens.</Text>
+      ) : (
+        list.map((b) => (
+          <View key={b.uri} style={styles.backupRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.backupDay}>{day(b.at)}</Text>
+              <Text style={styles.hint}>{Math.max(1, Math.round(b.size / 1024))} KB</Text>
+            </View>
+            {confirm === b.uri ? (
+              <TouchableOpacity
+                style={[styles.backupBtn, { backgroundColor: p.accent }]}
+                onPress={() => {
+                  setConfirm(null);
+                  setNote('Restoring…');
+                  backups
+                    .restore(b.uri)
+                    .then((r) => setNote(r ? `Restored info for ${r.matched} of ${r.total} videos${r.plays ? `, with ${r.plays} plays of history` : ''}.` : 'Nothing restored.'))
+                    .catch((e) => setNote(`That did not work: ${String(e)}`));
+                }}>
+                <Text style={[styles.backupBtnText, { color: '#fff' }]}>Tap again to restore</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.backupBtn} onPress={() => setConfirm(b.uri)}>
+                <Text style={styles.backupBtnText}>Restore</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ))
+      )}
+      <Chip
+        label="Back up now"
+        onPress={() => {
+          setNote('Backing up…');
+          backups
+            .now()
+            .then(() => {
+              setNote('Backed up.');
+              return load();
+            })
+            .catch((e) => setNote(`That did not work: ${String(e)}`));
+        }}
+      />
+      {!!note && <Text style={[styles.hint, { color: p.text }]}>{note}</Text>}
+      <Text style={styles.hint}>
+        Made once a week, the last four kept. They live inside ReelVault; on a PC, the Apple Devices app shows them under Files › ReelVault › Backups, so you can copy them off the phone.
+      </Text>
+    </View>
+  );
+}

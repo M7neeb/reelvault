@@ -3,19 +3,27 @@
  * own) or a single video. Rate it, set its status, change its name, picture
  * and description, group videos into a series, reorder and rename episodes.
  * Removed videos show what is kept and can be forgotten.
+ *
+ * The page opens on a big picture that plays the video (the next episode),
+ * then your rating, your review, how many times you watched it all again,
+ * a chart of every episode's rating, and the episodes with their progress.
  * Presentational only (see the note at the top of types.ts).
  */
 
 import { useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fmtAgo } from '@/features/simkl/ui/time';
 
 import { episodeOrder, guessSeriesName, moveEpisode, OV_STATUS_LABELS, playable, videoName, type OvEntry, type OvEpisode, type OvMember, type OvSeries, type OvStatus, type OvVideo } from '../overview';
+import { addRewatch, logRating, removeLastRewatch, setReview, type OvExtra } from '../ovExtra';
 import { fmtMs, ratingLabel, type RatingLabels } from '../stats';
 import Fade from './Fade';
+import { LiveCard, LiveProvider, useLiveScope } from './live';
+import { GrowColumn } from './storyKit';
 import { success, tick } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
@@ -40,10 +48,22 @@ export default function OverviewDetail({
   labels,
   actions,
   devSheet,
+  extra,
+  onExtra,
+  enableVideo = false,
+  liveSound,
+  onLiveSound,
   onPlay,
   onOpen,
   onClose,
 }: {
+  /** Reviews, rewatches and rating history (all titles). */
+  extra: OvExtra;
+  onExtra: (change: (x: OvExtra) => OvExtra) => void;
+  /** Play the video in the big picture (off in the browser preview). */
+  enableVideo?: boolean;
+  liveSound: boolean;
+  onLiveSound: (on: boolean) => void;
   entry: OvEntry;
   entries: OvEntry[];
   videos: OvVideo[];
@@ -68,6 +88,8 @@ export default function OverviewDetail({
   const [editing, setEditing] = useState(devSheet === 'edit');
   const [adding, setAdding] = useState<'add' | 'make' | null>(devSheet === 'add' ? (series ? 'add' : 'make') : null);
   const [note, setNote] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+  const live = useLiveScope({ enableVideo, sound: liveSound, onSound: onLiveSound, paused: editing || !!adding || !!rating || !!options || !!prompt || reviewing });
 
   const fail = (e: unknown) => setNote(String((e as Error)?.message ?? e));
   const allSeries = entries.filter((e) => e.kind === 'series' && e.id !== entry.id);
@@ -81,6 +103,7 @@ export default function OverviewDetail({
 
   function rateEntry(r: number | null) {
     success();
+    onExtra((x) => logRating(x, entry.key, r ?? 0, Date.now()));
     if (series) actions.ovUpdateSeries(entry.id, { rating: r ?? 0 }).catch(fail);
     else if (single) void rateVideo(single.video, r);
   }
@@ -191,6 +214,10 @@ export default function OverviewDetail({
   const inTrash = single?.video.where === 'trash';
   const playTarget = playable(entry);
   const canPlay = playTarget?.video.where === 'library';
+  const heroItem = canPlay && playTarget ? items.find((i) => i.id === playTarget.video.id) : undefined;
+  const review = extra.reviews[entry.key];
+  const rewatches = extra.rewatches[entry.key] ?? [];
+  const progress = series && entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
   const facts: [string, string][] = [
     ['Plays', String(entry.plays)],
     ['Watched', fmtMs(entry.watchedMs)],
@@ -201,12 +228,30 @@ export default function OverviewDetail({
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <LiveProvider value={live.value}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
+        <ScrollView {...live.scrollProps} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
           <View style={styles.hero}>
-            {entry.cover ? <Image source={entry.cover} style={styles.fill} contentFit="cover" blurRadius={28} /> : <View style={[styles.fill, { backgroundColor: p.elevated }]} />}
-            <Fade color="0,0,0" from={0.15} to={0.55} style={styles.fill} />
-            <Fade color={hexRgb(p.bg)} from={0} to={1} style={[styles.fill, { top: '45%' }]} />
+            {heroItem ? (
+              <LiveCard
+                id={`ov-detail-${entry.key}`}
+                uri={heroItem.uri}
+                durationMs={heroItem.durationMs}
+                cover={heroItem.thumbSource}
+                video={heroItem}
+                radius={0}
+                priority={5}
+                clipMs={20_000}
+                style={styles.fill}
+                soundStyle={{ top: 12, left: 14, right: undefined }}
+              />
+            ) : entry.cover ? (
+              <Image source={entry.cover} style={styles.fill} contentFit="cover" blurRadius={28} />
+            ) : (
+              <View style={[styles.fill, { backgroundColor: p.elevated }]} />
+            )}
+            <Fade color="0,0,0" from={0.1} to={0.5} style={styles.fill} />
+            <Fade color={hexRgb(p.bg)} from={0} to={1} style={[styles.fill, { top: '52%' }]} />
             <View style={styles.heroBody}>
               <Cover source={entry.cover} title={entry.title} width={118} height={168} radius={12} />
               <View style={styles.heroText}>
@@ -218,7 +263,17 @@ export default function OverviewDetail({
                   {OV_STATUS_LABELS[entry.status]}
                   {!entry.statusSet ? <Text style={styles.heroAuto}> · from what you watched</Text> : null}
                 </Text>
-                {series && <Text style={styles.heroMeta}>{entry.watchedCount} of {entry.episodes.length} watched</Text>}
+                {series && (
+                  <View style={{ gap: 5 }}>
+                    <Text style={styles.heroMeta}>
+                      {entry.watchedCount} of {entry.episodes.length} watched{rewatches.length ? ` · watched again ${rewatches.length}×` : ''}
+                    </Text>
+                    <View style={styles.heroTrack}>
+                      <View style={[styles.heroBar, { width: `${Math.round(progress * 100)}%` }]} />
+                    </View>
+                  </View>
+                )}
+                {!series && entry.rating > 0 && <Text style={styles.heroMeta}>★ {fmtStars(entry.rating)}{word ? ` · ${word}` : ''}</Text>}
               </View>
             </View>
             <View style={[styles.close, { top: 12 }]}>
@@ -288,6 +343,62 @@ export default function OverviewDetail({
             <Icon name="forward" size={14} color={p.textMuted} />
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.reviewCard} onPress={() => setReviewing(true)} accessibilityLabel={review ? 'Edit your review' : 'Write a review'}>
+            {review ? (
+              <>
+                <Text style={styles.reviewQuote}>“</Text>
+                <Text style={styles.reviewText}>{review.text}</Text>
+                <Text style={styles.reviewDate}>Your review · {day(review.at)}</Text>
+              </>
+            ) : (
+              <View style={styles.reviewEmpty}>
+                <Icon name="edit" size={16} color={p.link} />
+                <Text style={styles.reviewAdd}>Write a review</Text>
+                <Text style={styles.reviewAddHint}>What did you think? It shows on the card and in Wrapped.</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {series && entry.watchedCount > 0 && (
+            <View style={styles.rewatchCard}>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.ratingLabel}>Rewatches</Text>
+                <Text style={styles.rewatchValue}>{rewatches.length === 0 ? 'Not yet' : rewatches.length === 1 ? 'Once' : `${rewatches.length} times`}</Text>
+                {rewatches.length > 0 && (
+                  <Text style={styles.rewatchDates} numberOfLines={2}>
+                    {rewatches
+                      .slice(-4)
+                      .reverse()
+                      .map((t) => day(t))
+                      .join(' · ')}
+                  </Text>
+                )}
+              </View>
+              <View style={{ gap: 8, alignItems: 'flex-end' }}>
+                <TouchableOpacity
+                  style={styles.rewatchBtn}
+                  onPress={() => {
+                    success();
+                    onExtra((x) => addRewatch(x, entry.key, Date.now()));
+                  }}
+                  accessibilityLabel="I watched it all again">
+                  <Icon name="rewatch" size={14} color="#fff" />
+                  <Text style={styles.rewatchBtnText}>Watched it again</Text>
+                </TouchableOpacity>
+                {rewatches.length > 0 && (
+                  <TouchableOpacity
+                    hitSlop={8}
+                    onPress={() => {
+                      tick();
+                      onExtra((x) => removeLastRewatch(x, entry.key));
+                    }}>
+                    <Text style={styles.rewatchUndo}>Take the last one back</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
           <View style={styles.facts}>
             {facts.map(([k, v]) => (
               <View key={k} style={styles.fact}>
@@ -330,6 +441,13 @@ export default function OverviewDetail({
                 </TouchableOpacity>
               </View>
               {entry.episodes.length === 0 && <Text style={styles.hint}>No episodes yet. Add videos to this series.</Text>}
+              {entry.episodes.length > 1 && (
+                <EpisodeChart
+                  episodes={entry.episodes}
+                  seriesRating={entry.rating}
+                  onRate={(ep) => setRating({ title: `Episode ${ep.number}`, value: ep.video.rating, onPick: (r) => void rateVideo(ep.video, r) })}
+                />
+              )}
               {entry.episodes.map((ep) => (
                 <EpisodeRow
                   key={ep.video.id}
@@ -413,6 +531,17 @@ export default function OverviewDetail({
             }}
           />
         )}
+        {reviewing && (
+          <ReviewSheet
+            title={entry.title}
+            initial={review?.text ?? ''}
+            onSave={(text) => {
+              success();
+              onExtra((x) => setReview(x, entry.key, text, Date.now()));
+            }}
+            onClose={() => setReviewing(false)}
+          />
+        )}
         {rating && <RatingPicker title={rating.title} value={rating.value} onPick={rating.onPick} onClose={() => setRating(null)} />}
         {options && <OptionsSheet title={options.title} options={options.options} onClose={() => setOptions(null)} />}
         {prompt && (
@@ -426,7 +555,97 @@ export default function OverviewDetail({
           />
         )}
       </View>
+      </LiveProvider>
     </Modal>
+  );
+}
+
+/** Every episode's rating as a bar (tap one to rate it), with the series' own rating as a line. */
+function EpisodeChart({ episodes, seriesRating, onRate }: { episodes: OvEpisode[]; seriesRating: number; onRate: (ep: OvEpisode) => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const H = 96;
+  const rated = episodes.filter((e) => e.video.rating > 0);
+  const best = rated.length ? rated.reduce((a, b) => (b.video.rating > a.video.rating ? b : a)) : null;
+  const { width } = useWindowDimensions();
+  const col = Math.max(22, Math.min(64, Math.floor((width - SIDE * 2 - 28) / episodes.length) - 4));
+  return (
+    <View style={styles.chart}>
+      <View style={styles.chartHead}>
+        <Text style={styles.ratingLabel}>Episode ratings</Text>
+        <Text style={styles.chartSub}>
+          {rated.length ? `${rated.length} of ${episodes.length} rated${best ? ` · best: Ep ${best.number} (★ ${fmtStars(best.video.rating)})` : ''}` : 'Tap a bar to rate that episode'}
+        </Text>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 8 }}>
+        <View style={{ height: H + 34, flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
+          {seriesRating > 0 && (
+            <View pointerEvents="none" style={[styles.chartLine, { bottom: 18 + (seriesRating / 10) * H, width: episodes.length * (col + 4) }]}>
+              <Text style={styles.chartLineText}>series ★ {fmtStars(seriesRating)}</Text>
+            </View>
+          )}
+          {episodes.map((ep, i) => {
+            const r = ep.video.rating;
+            return (
+              <TouchableOpacity key={ep.video.id} onPress={() => onRate(ep)} style={{ width: col, alignItems: 'center' }} accessibilityLabel={`Episode ${ep.number}, ${r ? `rated ${fmtStars(r)}` : 'not rated'}`}>
+                <Text style={[styles.chartValue, !r && { color: p.textMuted }]}>{r ? fmtStars(r) : '–'}</Text>
+                {r ? (
+                  <GrowColumn ratio={r / 10} height={H} width="72%" radius={4} delay={120 + i * 30} color={r >= 8 ? p.rating : r >= 5 ? `${p.rating}AA` : `${p.rating}66`} />
+                ) : (
+                  <View style={[styles.chartEmpty, { height: 6 }]} />
+                )}
+                <Text style={[styles.chartNum, ep.watched && { color: p.text }]}>{ep.number}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/** A short review of the title. Empty and saved = no review. */
+function ReviewSheet({ title, initial, onSave, onClose }: { title: string; initial: string; onSave: (text: string) => void; onClose: () => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const [text, setText] = useState(initial);
+  return (
+    <SheetFrame
+      title={initial ? 'Your review' : 'Write a review'}
+      onClose={onClose}
+      action={{
+        label: 'Save',
+        disabled: text.trim() === initial.trim(),
+        onPress: () => {
+          onSave(text);
+          onClose();
+        },
+      }}>
+      <Section label={title}>
+        <TextInput
+          style={[styles.input, styles.inputMulti, { minHeight: 150 }]}
+          value={text}
+          onChangeText={setText}
+          placeholder="What did you think of it? What stood out?"
+          placeholderTextColor={p.textMuted}
+          keyboardAppearance={p.scheme}
+          multiline
+          autoFocus
+          maxLength={2000}
+        />
+        <Text style={styles.hint}>{text.trim().length} / 2000 · it shows on the card and in Wrapped</Text>
+      </Section>
+      {!!initial && (
+        <TouchableOpacity
+          onPress={() => {
+            onSave('');
+            onClose();
+          }}
+          style={{ paddingHorizontal: 4, paddingTop: 6 }}>
+          <Text style={styles.dangerText}>Delete review</Text>
+        </TouchableOpacity>
+      )}
+    </SheetFrame>
   );
 }
 
@@ -459,6 +678,11 @@ function EpisodeRow({
       <View style={styles.epThumb}>
         <Cover source={ep.video.thumb} title={ep.name} width={104} height={58} radius={8} hideTitle>
           {gone && <View style={styles.epGone} />}
+          {!gone && (ep.watched || ep.watchedMs > 0) && (
+            <View style={styles.epTrack}>
+              <View style={[styles.epBar, { width: `${ep.watched ? 100 : Math.min(100, Math.round((ep.watchedMs / Math.max(1, ep.video.durationMs ?? ep.watchedMs)) * 100))}%` }]} />
+            </View>
+          )}
           {!!ep.video.durationMs && (
             <View style={styles.epDur}>
               <Text style={styles.epDurText}>{fmtMs(ep.video.durationMs)}</Text>
@@ -729,7 +953,33 @@ const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
     fill: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-    hero: { minHeight: 290, justifyContent: 'flex-end', overflow: 'hidden' },
+    hero: { minHeight: 360, justifyContent: 'flex-end', overflow: 'hidden' },
+    heroTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden', marginTop: 2 },
+    heroBar: { height: 4, borderRadius: 2, backgroundColor: p.success },
+
+    reviewCard: { marginHorizontal: SIDE, marginTop: 10, padding: 16, borderRadius: 16, backgroundColor: p.elevated },
+    reviewQuote: { color: p.rating, fontSize: 40, fontWeight: '900', lineHeight: 36, height: 26 },
+    reviewText: { color: p.text, fontSize: 15, lineHeight: 22, fontStyle: 'italic' },
+    reviewDate: { color: p.textSecondary, fontSize: 12, fontWeight: '600', marginTop: 8 },
+    reviewEmpty: { gap: 3 },
+    reviewAdd: { color: p.link, fontSize: 16, fontWeight: '800' },
+    reviewAddHint: { color: p.textSecondary, fontSize: 12 },
+
+    rewatchCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: SIDE, marginTop: 10, padding: 16, borderRadius: 16, backgroundColor: p.elevated },
+    rewatchValue: { color: p.text, fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
+    rewatchDates: { color: p.textSecondary, fontSize: 12 },
+    rewatchBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+    rewatchBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+    rewatchUndo: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
+
+    chart: { marginHorizontal: SIDE, marginBottom: 8, padding: 14, borderRadius: 16, backgroundColor: p.elevated, gap: 10 },
+    chartHead: { gap: 2 },
+    chartSub: { color: p.textSecondary, fontSize: 12 },
+    chartValue: { color: p.text, fontSize: 10, fontWeight: '800', marginBottom: 3 },
+    chartEmpty: { width: '72%', borderRadius: 3, backgroundColor: p.card },
+    chartNum: { color: p.textSecondary, fontSize: 11, fontWeight: '700', marginTop: 4, height: 14 },
+    chartLine: { position: 'absolute', left: 0, borderTopWidth: 1, borderStyle: 'dashed', borderTopColor: p.textSecondary, zIndex: 2 },
+    chartLineText: { position: 'absolute', right: 0, top: -15, color: p.textSecondary, fontSize: 10, fontWeight: '700' },
     heroBody: { flexDirection: 'row', gap: 16, alignItems: 'flex-end', paddingHorizontal: SIDE, paddingTop: 70, paddingBottom: 6 },
     heroText: { flex: 1, gap: 4, paddingBottom: 4 },
     kind: { color: p.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
@@ -783,6 +1033,8 @@ const makeStyles = (p: Palette) =>
     epNumText: { color: p.textSoft, fontSize: 12, fontWeight: '800' },
     epThumb: {},
     epGone: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' },
+    epTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.3)' },
+    epBar: { height: 3, backgroundColor: p.accent },
     epDur: { position: 'absolute', right: 4, bottom: 4, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 5, paddingHorizontal: 4, paddingVertical: 1 },
     epDurText: { color: '#fff', fontSize: 10, fontWeight: '800' },
     epName: { color: p.text, fontSize: 14, fontWeight: '700' },

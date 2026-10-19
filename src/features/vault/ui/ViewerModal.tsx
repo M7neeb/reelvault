@@ -44,7 +44,7 @@
 // The one native view the viewer uses besides the player: Apple's AirPlay button (renders nothing where missing).
 import { AirPlayButton, hasAirPlay } from '../../../../modules/reelvault-airplay';
 // Turning sideways (does nothing in builds before 1.9.1 and the browser preview).
-import { allowRotation, canRotate, lockSideways, lockUpright } from '../rotate';
+import { allowRotation, canRotate, lockSideways, lockUpright, restoreRotation } from '../rotate';
 import { CoverPicker } from './coverPicker';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
@@ -1774,10 +1774,10 @@ export default function ViewerModal({
     [next, prev, onChangeItem] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // The viewer turns with the phone; everywhere else stays upright.
+  // The viewer turns with the phone; closing it goes back to how the rest of the app turns.
   useEffect(() => {
     allowRotation();
-    return lockUpright;
+    return restoreRotation;
   }, []);
 
   const dismiss = useCallback(() => {

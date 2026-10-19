@@ -1,6 +1,5 @@
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import { File } from 'expo-file-system';
 
 import { contentKeyOf } from './contentKey';
@@ -8,6 +7,7 @@ import { readVideoMeta } from './metadata';
 import { findByContentKey, insertVideo } from './repo';
 import { probeDurationMs } from './duration';
 import { ensureDirs, thumbsDir, videosDir } from './storage';
+import { COVER_SIDE, frameTo } from './frames';
 import { addTagToVideo } from './tags';
 import type { Video } from './types';
 
@@ -89,10 +89,10 @@ export async function importAssets(
       let width: number | null = null;
       let height: number | null = null;
       try {
-        const thumb = await VideoThumbnails.getThumbnailAsync(destination.uri, { time: 1000 });
-        width = thumb.width;
-        height = thumb.height;
-        await new File(thumb.uri).copy(new File(thumbsDir, `${id}.jpg`));
+        // A small cover (720 px), written in place: nothing left over in the cache.
+        const size = await frameTo(destination.uri, 1000, new File(thumbsDir, `${id}.jpg`), COVER_SIDE);
+        width = size?.width ?? null;
+        height = size?.height ?? null;
       } catch (e) {
         console.log(`[IMPORT] thumbnail skipped for ${asset.name}: ${String(e)}`);
       }

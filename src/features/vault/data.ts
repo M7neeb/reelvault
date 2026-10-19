@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Appearance, Linking } from 'react-native';
+import { Alert, AppState, Appearance, Linking } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Paths } from 'expo-file-system';
 
@@ -29,7 +29,9 @@ import {
   renameFolder,
   updateAlbum,
 } from '@/features/vault/albums';
-import { exportLibraryInfo, importLibraryInfo } from '@/features/vault/backup';
+import { getDb } from '@/db';
+import { autoBackup, exportLibraryInfo, importLibraryInfo, listAutoBackups } from '@/features/vault/backup';
+import { appStorage, tidy } from '@/features/vault/housekeeping';
 import { incomingName, onIncoming } from '@/features/vault/incoming';
 import { contentKeyOf } from '@/features/vault/contentKey';
 import { probeDurationMs } from '@/features/vault/duration';
@@ -81,7 +83,7 @@ import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share'
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
 import { cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
 import { planForQuality } from '@/features/vault/edit';
-import { parseRatingLabels } from '@/features/vault/stats';
+import { fmtMs, parseRatingLabels } from '@/features/vault/stats';
 import {
   addBookmark,
   allVaultPlays,
@@ -111,6 +113,7 @@ import {
   updateSeries,
 } from '@/features/vault/overviewStore';
 import type { OvMember, OvSeries, OvVideo } from '@/features/vault/overview';
+import { OV_EXTRA_KEY, parseOvExtra } from '@/features/vault/ovExtra';
 import {
   onOpenRequestTap,
   onThisDayReminderOn,
@@ -120,6 +123,9 @@ import {
   scheduleMonthWrapped,
   monthWrappedReminderOn,
   setMonthWrappedReminder,
+  scheduleWeeklySummary,
+  setWeeklySummary,
+  weeklySummaryOn,
   setOnThisDayReminder,
   setWrappedReminder,
   setYearWrappedReminder,
@@ -130,6 +136,11 @@ import {
 import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
 import { DEFAULT_PLAYER, DEFAULT_SLIDESHOW, DEFAULT_VAULT_PREFS, PLAYER_SPEEDS, WATCH_SORTS, type PlayerOptions, type SlideshowOptions, type VaultPrefs } from '@/features/vault/ui/types';
 import { onThisDayPlan } from '@/features/vault/recap';
+import { weeklySummary } from '@/features/vault/yearHeat';
+import { ReelVaultMedia } from '../../../modules/reelvault-media';
+
+import { friendlyName } from '@/features/vault/names';
+import { frozenTimes } from '@/features/vault/streakFreeze';
 import { applyMetadata, pickMetadataFile } from '@/features/vault/metaImport';
 import { clearPasscodeLog, logPasscodeAttempt, passcodeLog } from '@/features/vault/passcodeLog';
 import { wifiBridge } from '@/features/vault/wifi';
@@ -144,7 +155,7 @@ import {
 } from '@/features/vault/sources';
 import { isHttpUrl, looksLikeVideoFile } from '@/features/vault/sourceNames';
 import { thumbnailUri } from '@/features/vault/storage';
-import { addTagToVideo, listTags, removeTagFromVideo, tagsForVideo, type Tag } from '@/features/vault/tags';
+import { addTagToVideo, listTags, removeTagFromVideo, tagsForVideo, type Tag, deleteTag, deleteUnusedTags, mergeTags, renameTag, setTagColor } from '@/features/vault/tags';
 import type { Video } from '@/features/vault/types';
 
 import { gbFromBytes } from './ui/format';
@@ -165,7 +176,7 @@ const VIEW_OPTIONS_KEY = 'viewOptions';
 /** Make Smaller quality applied to every import; missing = off. */
 const IMPORT_QUALITY_KEY = 'importQuality';
 
-const asUiTag = (t: Tag): UiTag => ({ id: t.id, name: t.name, pinned: t.pinned === 1 });
+const asUiTag = (t: Tag): UiTag => ({ id: t.id, name: t.name, pinned: t.pinned === 1, color: t.color });
 
 /** A DB row plus the display-only bits the UI needs. */
 function toVaultItem(
@@ -326,7 +337,10 @@ function parsePrefs(json: string | null): VaultPrefs {
       liveSound: typeof r?.liveSound === 'boolean' ? r.liveSound : DEFAULT_VAULT_PREFS.liveSound,
       slideshow: parseSlideshow(r?.slideshow),
       albumSort: r?.albumSort === 'watched' || r?.albumSort === 'recent' ? r.albumSort : 'name',
+      homeRows: typeof r?.homeRows === 'boolean' ? r.homeRows : DEFAULT_VAULT_PREFS.homeRows,
+      recentSearches: Array.isArray(r?.recentSearches) ? r.recentSearches.filter((x: unknown) => typeof x === 'string').slice(0, 10) : [],
       player: parsePlayer(r?.player),
+      trashDays: [1, 3, 7, 14, 30].includes(r?.trashDays) ? r.trashDays : DEFAULT_VAULT_PREFS.trashDays,
       pinned: Array.isArray(r?.pinned) ? [...new Set<string>(r.pinned.filter((x: unknown) => typeof x === 'string'))].slice(0, 60) : [],
       freezes: {
         banked: typeof r?.freezes?.banked === 'number' ? Math.max(0, Math.min(3, Math.round(r.freezes.banked))) : DEFAULT_VAULT_PREFS.freezes.banked,
@@ -440,6 +454,14 @@ export function useVaultData(): VaultData {
     refresh().catch((e) => console.log(`[VAULT] refresh failed: ${String(e)}`));
   }, [viewOptions.sort, refresh]);
 
+  /** The Sunday summary from what you watched this week (private videos left out). */
+  const weeklyPlan = async () => {
+    const names = new Map(videosRef.current.filter((v) => !v.isPrivate).map((v) => [v.id, friendlyName(v)]));
+    const prefsNow = parsePrefs(await getSetting(PREFS_KEY));
+    return weeklySummary(await allVaultPlays(), Date.now(), { nameOf: (id) => names.get(id) ?? null, fmt: fmtMs, extraDays: frozenTimes(prefsNow.freezes) });
+  };
+  const planWeekly = async () => scheduleWeeklySummary(await weeklyPlan());
+
   // Plan the next two weeks of On this day notifications (and the yearly Wrapped) once the library is loaded.
   const planned = useRef(false);
   useEffect(() => {
@@ -448,13 +470,37 @@ export function useVaultData(): VaultData {
     scheduleOnThisDay(onThisDayPlan(videos.filter((v) => !v.isPrivate).map(asRVideo), Date.now())).catch((e) => console.log(`[OTD] ${String(e)}`));
     scheduleYearWrapped().catch((e) => console.log(`[YEAR] ${String(e)}`));
     scheduleMonthWrapped().catch((e) => console.log(`[MONTH] ${String(e)}`));
-  }, [videos]);
+    planWeekly().catch((e) => console.log(`[WEEK] ${String(e)}`));
+  }, [videos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The Sunday summary's words are worked out again whenever you leave the app, so they include what you just watched.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'background') planWeekly().catch((e) => console.log(`[WEEK] ${String(e)}`));
+    });
+    return () => sub.remove();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A little after start, clear what ReelVault no longer needs (temporary files, leftovers, old filmstrips).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      tidy(false)
+        .then(() => setFreeGb(readFreeGb()))
+        .catch((e) => console.log(`[TIDY] ${String(e)}`))
+        // Then the weekly copy of your info (ratings, keywords, history…).
+        .then(() => autoBackup(false))
+        .catch((e) => console.log(`[BACKUP] ${String(e)}`));
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, []);
 
   // On start: empty what has been in Recently Deleted for 30 days, then backfill
   // durations, duplicate fingerprints and file metadata for older rows.
   useEffect(() => {
     (async () => {
-      const purged = await purgeExpired();
+      // Recently Deleted keeps videos as long as you chose (30 days unless you changed it).
+      const savedPrefs = parsePrefs(await getSetting(PREFS_KEY));
+      const purged = await purgeExpired(Date.now(), savedPrefs.trashDays);
       if (purged) console.log(`[PURGE] ${purged} expired videos removed`);
 
       const missing = await videosMissingDuration();
@@ -680,6 +726,15 @@ export function useVaultData(): VaultData {
       onAddTag: andRefresh((id: string, name: string) => addTagToVideo(id, name)),
       onRemoveTag: andRefresh((id: string, tagId: number) => removeTagFromVideo(id, tagId)),
       onPinTag: andRefresh(setTagPinned),
+      renameTag: andRefresh(renameTag),
+      mergeTags: andRefresh(mergeTags),
+      deleteTag: andRefresh(deleteTag),
+      setTagColor: andRefresh(setTagColor),
+      deleteUnusedTags: async () => {
+        const n = await deleteUnusedTags();
+        await refresh();
+        return n;
+      },
       onDeleteOne: async (item) => {
         await trashVideos(resolve([item]));
         await refresh();
@@ -785,6 +840,35 @@ export function useVaultData(): VaultData {
         return result;
       },
       onCancelMakeSmaller: cancelMakeSmaller,
+      listAutoBackups: async () => listAutoBackups(),
+      backupNow: () => autoBackup(true),
+      restoreAutoBackup: async (uri) => {
+        const res = await importLibraryInfo(uri);
+        await refresh();
+        setPrefsState(parsePrefs(await getSetting(PREFS_KEY)));
+        setResume(await resumePoints());
+        return res;
+      },
+      searchBookmarks: async (q) => {
+        const t = q.trim();
+        if (t.length < 2) return [];
+        const db = await getDb();
+        const rows = await db.getAllAsync<{ video_id: string }>('SELECT DISTINCT video_id FROM vault_bookmarks WHERE label LIKE ? LIMIT 200;', [`%${t}%`]);
+        return rows.map((r) => r.video_id);
+      },
+      getAppStorage: appStorage,
+      tidyStorage: async (deep) => {
+        const r = await tidy(deep);
+        setFreeGb(readFreeGb());
+        return r;
+      },
+      emptyRecentlyDeleted: async () => {
+        const all = await listDeleted();
+        await purgeVideos(all);
+        await refresh();
+        setFreeGb(readFreeGb());
+        return all.length;
+      },
       getImportQuality: async () => parseQuality(await getSetting(IMPORT_QUALITY_KEY)),
       setImportQuality: async (quality) => {
         await setSetting(IMPORT_QUALITY_KEY, quality ?? 'off');
@@ -858,6 +942,15 @@ export function useVaultData(): VaultData {
       setYearWrappedReminder,
       getMonthWrappedReminder: monthWrappedReminderOn,
       setMonthWrappedReminder,
+      colorsOf: async (item) => {
+        const src = item.thumbSource as unknown;
+        const uri = typeof src === 'object' && src && 'uri' in src ? String((src as { uri: string }).uri) : null;
+        if (!uri || !ReelVaultMedia) return null;
+        const c = await ReelVaultMedia.colors(uri).catch(() => null);
+        return c && c.dominant ? c : null;
+      },
+      getWeeklySummary: weeklySummaryOn,
+      setWeeklySummary: async (on) => setWeeklySummary(on, await weeklyPlan()),
       onRemoveTagMany: andRefresh(removeTagMany),
       deletePlays,
       pickMetadataFile,
@@ -886,6 +979,10 @@ export function useVaultData(): VaultData {
         return ok;
       },
       ovForget: andRefresh(forgetKept),
+      loadOvExtra: async () => parseOvExtra(await getSetting(OV_EXTRA_KEY)),
+      saveOvExtra: async (x) => {
+        await setSetting(OV_EXTRA_KEY, JSON.stringify(x));
+      },
     }),
     [onImport, onImportFolder, onImportLink, runImport, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );

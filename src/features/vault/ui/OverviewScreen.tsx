@@ -14,8 +14,9 @@
  * Presentational only (see the note at the top of types.ts).
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,6 +44,7 @@ import {
   type OvSort,
   type OvVideo,
 } from '../overview';
+import { EMPTY_OV_EXTRA, logRating, orderPlanned, ovStats, type OvExtra } from '../ovExtra';
 import { fmtMs, ratingLabel } from '../stats';
 import { useTabBarSpace } from './chrome';
 import Fade from './Fade';
@@ -51,6 +53,7 @@ import { tick } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
 import OverviewDetail, { SeriesMaker } from './OverviewDetail';
+import PlanOrder from './planOrder';
 import { Cover, fmtStars, ModeSwitch, statusColor, toOvVideo } from './overviewParts';
 import { gradient, Ring } from './insightParts';
 import { LiveCard, LiveProvider, useLiveScope } from './live';
@@ -91,7 +94,7 @@ export default function OverviewScreen({
   onStats: () => void;
   onPersonalise: () => void;
   devKey?: string;
-  devSheet?: 'new' | 'edit' | 'add';
+  devSheet?: 'new' | 'edit' | 'add' | 'order';
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -107,6 +110,29 @@ export default function OverviewScreen({
   const [openKey, setOpenKey] = useState<string | null>(devKey ?? null);
   const [maker, setMaker] = useState<{ name: string; ids: string[] } | null>(devSheet === 'new' ? { name: '', ids: [] } : null);
   const [plays, setPlays] = useState<{ videoId: string; startedAt: number; watchedMs: number }[]>([]);
+  const [extra, setExtra] = useState<OvExtra>(EMPTY_OV_EXTRA);
+  const [ordering, setOrdering] = useState(devSheet === 'order');
+  const extraRef = useRef(extra);
+  extraRef.current = extra;
+  useEffect(() => {
+    let on = true;
+    actions
+      .loadOvExtra()
+      .then((x) => on && setExtra(x))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [actions]);
+  const changeExtra = useCallback(
+    (change: (x: OvExtra) => OvExtra) => {
+      const next = change(extraRef.current);
+      extraRef.current = next;
+      setExtra(next);
+      actions.saveOvExtra(next).catch(() => undefined);
+    },
+    [actions]
+  );
 
   useEffect(() => {
     let live = true;
@@ -135,7 +161,19 @@ export default function OverviewScreen({
     [entries, filter, query, sort]
   );
   const open = openKey ? (entries.find((e) => e.key === openKey) ?? null) : null;
-  const live = useLiveScope({ enableVideo, sound: prefs.liveSound, onSound: (on) => void actions.setPrefs({ ...prefs, liveSound: on }), paused: !!open || !!maker });
+  const live = useLiveScope({ enableVideo, sound: prefs.liveSound, onSound: (on) => void actions.setPrefs({ ...prefs, liveSound: on }), paused: !!open || !!maker || ordering });
+  const planned = useMemo(() => orderPlanned(entries.filter((e) => !e.gone && e.status === 'plantowatch'), extra.planOrder), [entries, extra.planOrder]);
+  const firstPlay = useMemo(() => {
+    const first = new Map<string, number>();
+    for (const pl of plays) if (!first.has(pl.videoId) || pl.startedAt < first.get(pl.videoId)!) first.set(pl.videoId, pl.startedAt);
+    const out = new Map<string, number>();
+    for (const e of entries) {
+      const times = e.episodes.map((ep) => first.get(ep.video.id)).filter((t): t is number => typeof t === 'number');
+      if (times.length) out.set(e.key, Math.min(...times));
+    }
+    return out;
+  }, [plays, entries]);
+  const story = useMemo(() => ovStats(entries, extra, firstPlay), [entries, extra, firstPlay]);
   const itemById = useMemo(() => new Map(items.map((v) => [v.id, v])), [items]);
   /** The video a title plays: the next episode, or the video itself. */
   const videoOf = (e: OvEntry) => {
@@ -167,6 +205,7 @@ export default function OverviewScreen({
   const rate = (e: OvEntry, n: number) => {
     tick();
     setJustRated((r) => new Set([...r, e.key]));
+    changeExtra((x) => logRating(x, e.key, n, Date.now()));
     const job = e.kind === 'series' ? actions.ovUpdateSeries(e.id, { rating: n }) : actions.onRate(e.id, n);
     job.catch(() => setJustRated((r) => new Set([...r].filter((k) => k !== e.key))));
   };
@@ -409,22 +448,32 @@ export default function OverviewScreen({
         </>
       )}
 
-      {rich && ins.planned.length > 0 && (
+      {rich && planned.length > 0 && (
         <>
-          <SectionHead title="Plan to Watch" detail={`${ins.planned.length}`} />
+          <SectionHead
+            title="Plan to Watch"
+            detail={`${planned.length}`}
+            action={planned.length > 1 ? 'Reorder' : undefined}
+            actionIcon="sort"
+            onAction={() => {
+              tick();
+              setOrdering(true);
+            }}
+          />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
-            {ins.planned.map((e, i) => (
+            {planned.slice(0, 20).map((e, i) => (
               <Animated.View key={e.key} entering={FadeInDown.delay(i * 50).duration(DUR.base).easing(EASE_OUT)}>
                 <PressableScale style={{ width: 132 }} onPress={() => setOpenKey(e.key)} accessibilityLabel={e.title}>
                   <Cover source={e.cover} title={e.title} width={132} height={88}>
                     <View style={styles.planTag}>
-                      <Icon name="bookmark" size={10} color="#fff" />
+                      {i === 0 ? <Icon name="bookmark" size={10} color="#fff" /> : <Text style={styles.planNum}>{i + 1}</Text>}
                     </View>
                   </Cover>
                   <Text style={styles.shelfTitle} numberOfLines={1}>
                     {e.title}
                   </Text>
                   <Text style={styles.shelfSub} numberOfLines={1}>
+                    {i === 0 ? 'Next up · ' : ''}
                     {e.kind === 'series' ? `${e.episodes.length} episodes` : fmtMs(e.totalMs)}
                   </Text>
                 </PressableScale>
@@ -459,6 +508,8 @@ export default function OverviewScreen({
           </ScrollView>
         </>
       )}
+
+      {rich && <OverviewStory story={story} onOpen={setOpenKey} />}
 
       <SectionHead
         title="Library"
@@ -549,7 +600,7 @@ export default function OverviewScreen({
           keyboardShouldPersistTaps="handled"
           renderItem={({ item, index }) => (
             <Animated.View entering={index < 24 ? FadeInDown.delay(Math.min(index, 18) * 35).duration(DUR.base).easing(EASE_OUT) : undefined}>
-              <GridPoster entry={item} width={posterW} height={posterH} bare={look === 'simple'} onPress={() => setOpenKey(item.key)} />
+              <GridPoster entry={item} width={posterW} height={posterH} bare={look === 'simple'} reviewed={!!extra.reviews[item.key]} onPress={() => setOpenKey(item.key)} />
             </Animated.View>
           )}
         />
@@ -568,7 +619,7 @@ export default function OverviewScreen({
             ) : look === 'compact' ? (
               <CompactRow entry={item} onPress={() => setOpenKey(item.key)} />
             ) : (
-              <Row entry={item} detailed={look === 'detailed'} labels={labels} onPress={() => setOpenKey(item.key)} />
+              <Row entry={item} detailed={look === 'detailed'} labels={labels} review={extra.reviews[item.key]?.text} onPress={() => setOpenKey(item.key)} />
             )
           }
         />
@@ -592,11 +643,18 @@ export default function OverviewScreen({
           labels={labels}
           actions={actions}
           devSheet={devSheet === 'edit' || devSheet === 'add' ? devSheet : undefined}
+          extra={extra}
+          onExtra={changeExtra}
+          enableVideo={enableVideo}
+          liveSound={prefs.liveSound}
+          onLiveSound={(on) => void actions.setPrefs({ ...prefs, liveSound: on })}
           onPlay={onPlay}
           onOpen={setOpenKey}
           onClose={() => setOpenKey(null)}
         />
       )}
+
+      {ordering && <PlanOrder planned={planned} onSave={(keys) => changeExtra((x) => ({ ...x, planOrder: keys }))} onClose={() => setOrdering(false)} />}
 
       {maker && (
         <SeriesMaker
@@ -645,13 +703,14 @@ function StatusBar({ parts, total }: { parts: { key: string; count: number }[]; 
 
 /** The title at the top: its picture moving slowly, what it is, and play. */
 function Spotlight({ entry, video, width, onOpen, onPlay }: { entry: OvEntry; video?: VaultItem; width: number; onOpen: () => void; onPlay: () => void }) {
+  const { height: screenH } = useWindowDimensions();
   const styles = useStyles(makeStyles);
   const canPlay = !!playable(entry);
   const kicker = entry.status === 'watching' && entry.next ? 'CONTINUE WATCHING' : entry.rating > 0 ? 'ONE OF YOUR BEST' : 'SPOTLIGHT';
   const progress = entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
   return (
     <Animated.View entering={enterUp(0)}>
-      <PressableScale style={[styles.spot, { width, height: Math.min(330, width * 0.82) }]} onPress={onOpen} scaleTo={0.98} accessibilityLabel={`${entry.title}. Open`}>
+      <PressableScale style={[styles.spot, { width, height: Math.min(330, width * 0.82, Math.max(220, screenH * 0.62)) }]} onPress={onOpen} scaleTo={0.98} accessibilityLabel={`${entry.title}. Open`}>
         <LiveCard
           id={`ov-spot-${entry.key}`}
           uri={video?.uri}
@@ -720,7 +779,7 @@ function SectionHead({
   title: string;
   detail?: string;
   action?: string;
-  actionIcon?: 'grid' | 'list';
+  actionIcon?: 'grid' | 'list' | 'sort';
   onAction?: () => void;
 }) {
   const styles = useStyles(makeStyles);
@@ -793,7 +852,7 @@ function ContinueCard({ entry, video, width, onOpen, onPlay }: { entry: OvEntry;
   );
 }
 
-function GridPoster({ entry, width, height, bare, onPress }: { entry: OvEntry; width: number; height: number; bare?: boolean; onPress: () => void }) {
+function GridPoster({ entry, width, height, bare, reviewed, onPress }: { entry: OvEntry; width: number; height: number; bare?: boolean; reviewed?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const series = entry.kind === 'series';
   const progress = series && entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
@@ -822,6 +881,11 @@ function GridPoster({ entry, width, height, bare, onPress }: { entry: OvEntry; w
             <Text style={styles.epBadgeText}>{entry.episodes.length}</Text>
           </View>
         )}
+        {!bare && reviewed && (
+          <View style={[styles.epBadge, series ? { top: 30 } : null]} accessibilityLabel="Reviewed">
+            <Text style={styles.reviewMark}>“</Text>
+          </View>
+        )}
         {series && progress > 0 && (
           <View style={styles.gridTrack}>
             <View style={[styles.gridFill, { width: `${Math.round(progress * 100)}%` }]} />
@@ -842,7 +906,7 @@ function GridPoster({ entry, width, height, bare, onPress }: { entry: OvEntry; w
   );
 }
 
-function Row({ entry, detailed, labels, onPress }: { entry: OvEntry; detailed?: boolean; labels: VaultPrefs['ratingLabels']; onPress: () => void }) {
+function Row({ entry, detailed, labels, review, onPress }: { entry: OvEntry; detailed?: boolean; labels: VaultPrefs['ratingLabels']; review?: string; onPress: () => void }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const series = entry.kind === 'series';
@@ -884,6 +948,11 @@ function Row({ entry, detailed, labels, onPress }: { entry: OvEntry; detailed?: 
               .join(' · ')}
           </Text>
         )}
+        {!!review && (
+          <Text style={styles.rowReview} numberOfLines={detailed ? 3 : 1}>
+            “{review}”
+          </Text>
+        )}
         {detailed && !!entry.description && (
           <Text style={styles.rowMemo} numberOfLines={2}>
             {entry.description}
@@ -891,6 +960,73 @@ function Row({ entry, detailed, labels, onPress }: { entry: OvEntry; detailed?: 
         )}
       </View>
     </PressableScale>
+  );
+}
+
+/**
+ * Your Overview in numbers: how your ratings moved month by month, what you
+ * finished fastest, what you watched again the most, and where you changed
+ * your mind. Hidden until there is something to show.
+ */
+function OverviewStory({ story, onOpen }: { story: ReturnType<typeof ovStats>; onOpen: (key: string) => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const months = story.ratingsByMonth;
+  const lists: { title: string; icon: 'fast' | 'rewatch' | 'sparkle'; rows: { key: string; title: string; value: string }[] }[] = [
+    { title: 'Finished fastest', icon: 'fast' as const, rows: story.fastest.slice(0, 3).map((f) => ({ key: f.key, title: f.title, value: f.days <= 1 ? 'in a day' : `${f.days} days` })) },
+    { title: 'Watched again the most', icon: 'rewatch' as const, rows: story.mostRewatched.slice(0, 3).map((r) => ({ key: r.key, title: r.title, value: `${r.times}×` })) },
+    { title: 'Changed your mind', icon: 'sparkle' as const, rows: story.changedMinds.slice(0, 3).map((c) => ({ key: c.key, title: c.title, value: `${fmtStars(c.from)} → ${fmtStars(c.to)}` })) },
+  ].filter((l) => l.rows.length > 0);
+  if (months.length < 2 && !lists.length && !story.finished) return null;
+  const max = 10;
+  return (
+    <>
+      <SectionHead title="Your stats" />
+      <Animated.View entering={enterUp(1)} style={styles.storyCard}>
+        <View style={styles.storyNums}>
+          <Stat value={String(story.finished)} label="series finished" />
+          <Stat value={String(story.inProgress)} label="in progress" />
+          <Stat value={String(story.reviewed)} label={story.reviewed === 1 ? 'review' : 'reviews'} />
+        </View>
+        {months.length >= 2 && (
+          <View style={{ gap: 6 }}>
+            <Text style={styles.storyLabel}>Your average rating, month by month</Text>
+            <View style={styles.storyChart}>
+              {months.map((m, i) => (
+                <View key={m.key} style={styles.storyCol} accessibilityLabel={`${m.label}: average ${m.avg} from ${m.count} ratings`}>
+                  <Text style={styles.histoCount}>{fmtStars(m.avg)}</Text>
+                  <GrowColumn ratio={m.avg / max} height={64} width="62%" radius={4} delay={150 + i * 50} color={i === months.length - 1 ? p.rating : `${p.rating}88`} />
+                  <Text style={styles.histoLabel}>{m.label}</Text>
+                </View>
+              ))}
+            </View>
+            {(() => {
+              const a = months[months.length - 2].avg;
+              const b = months[months.length - 1].avg;
+              const d = Math.round((b - a) * 10) / 10;
+              return <Text style={styles.storyNote}>{d === 0 ? 'Rating just like last month.' : d > 0 ? `Rating ${fmtStars(d)} higher than the month before.` : `Rating ${fmtStars(-d)} lower than the month before - tougher crowd.`}</Text>;
+            })()}
+          </View>
+        )}
+        {lists.map((l) => (
+          <View key={l.title} style={{ gap: 4 }}>
+            <View style={styles.storyListHead}>
+              <Icon name={l.icon} size={13} color={p.textSecondary} />
+              <Text style={styles.storyLabel}>{l.title}</Text>
+            </View>
+            {l.rows.map((r, i) => (
+              <TouchableOpacity key={r.key} style={styles.storyRow} onPress={() => onOpen(r.key)} accessibilityLabel={`${r.title}, ${r.value}`}>
+                <Text style={styles.storyRank}>{i + 1}</Text>
+                <Text style={styles.storyName} numberOfLines={1}>
+                  {r.title}
+                </Text>
+                <Text style={styles.storyValue}>{r.value}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ))}
+      </Animated.View>
+    </>
   );
 }
 
@@ -1011,6 +1147,20 @@ const makeStyles = (p: Palette) =>
     smallBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
     shelf: { gap: 12, paddingHorizontal: SIDE },
+    planNum: { color: '#fff', fontSize: 10, fontWeight: '900' },
+    reviewMark: { color: '#fff', fontSize: 16, fontWeight: '900', lineHeight: 18, height: 12 },
+    rowReview: { color: p.textSoft, fontSize: 12, fontStyle: 'italic' },
+    storyCard: { marginHorizontal: SIDE, padding: 16, borderRadius: 18, backgroundColor: p.elevated, gap: 16 },
+    storyNums: { flexDirection: 'row', gap: 8 },
+    storyLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700' },
+    storyChart: { flexDirection: 'row', alignItems: 'flex-end', height: 100 },
+    storyCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
+    storyNote: { color: p.textSoft, fontSize: 12 },
+    storyListHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    storyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+    storyRank: { width: 16, color: p.textMuted, fontSize: 13, fontWeight: '800' },
+    storyName: { flex: 1, color: p.text, fontSize: 14, fontWeight: '700' },
+    storyValue: { color: p.rating, fontSize: 13, fontWeight: '800' },
     shelfTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
     shelfSub: { color: p.textSecondary, fontSize: 12 },
     rank: { position: 'absolute', bottom: 6, left: 6, minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 5, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', justifyContent: 'center' },

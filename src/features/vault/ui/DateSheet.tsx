@@ -5,7 +5,8 @@
  */
 
 import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal } from './screen';
 
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import Glyph from './Glyph';
