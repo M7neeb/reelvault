@@ -24,6 +24,11 @@ export const thumbsDir = canUseFs
   ? new Directory(Paths.document, 'thumbs')
   : (undefined as unknown as Directory);
 
+/** The videos folder's address now (it can change when iOS moves the app's folder on an update). */
+export function videosDirUri(): string {
+  return canUseFs ? videosDir.uri : '';
+}
+
 export function ensureDirs(): void {
   if (!canUseFs) return;
   if (!videosDir.exists) videosDir.create({ intermediates: true });

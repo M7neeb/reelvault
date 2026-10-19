@@ -12,6 +12,9 @@ const VIDEO = /\.(mp4|mov|m4v|3gp|avi|mkv|webm|mts|m2ts|hevc)$/i;
 const queue: string[] = [];
 const listeners = new Set<(uris: string[]) => void>();
 
+/** True for a file name that looks like a video ("IMG_1234.MOV"). */
+export const isVideoName = (name: string) => VIDEO.test(name);
+
 /** True for a file address that looks like a video. */
 export function isIncomingVideo(path: string | null | undefined): boolean {
   if (!path || !/^file:\/\//i.test(path)) return false;

@@ -243,6 +243,8 @@ function ViewerPage({
   const [resumedFrom, setResumedFrom] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   const [skip, setSkip] = useState<{ dir: -1 | 1; n: number } | null>(null);
+  /** The file could not be opened (missing or unreadable): said plainly instead of a cover that never plays. */
+  const [failed, setFailed] = useState(false);
   const resumeDone = useRef(false);
   /** While the bar is being dragged (and just after), player time updates are ignored. */
   const scrubbing = useRef(false);
@@ -253,8 +255,10 @@ function ViewerPage({
   // The cover stays on top until the first frame is ready, so changing videos never flashes black.
   useEffect(() => {
     if (player.status === 'readyToPlay') setReady(true);
+    setFailed(player.status === 'error');
     const sub = player.addListener('statusChange', ({ status }) => {
       if (status === 'readyToPlay') setReady(true);
+      setFailed(status === 'error');
     });
     const play = player.addListener('playingChange', ({ isPlaying }) => setPlaying(isPlaying));
     return () => {
@@ -774,6 +778,12 @@ function ViewerPage({
                   <Animated.View style={fill} exiting={FadeOut.duration(DUR.fast)} pointerEvents="none">
                     <Image source={item.thumbSource} style={styles.video} contentFit="contain" />
                   </Animated.View>
+                )}
+                {failed && enableVideo && (
+                  <View style={styles.failed} pointerEvents="none">
+                    <Text style={styles.failedTitle}>This video won't open</Text>
+                    <Text style={styles.failedText}>Its file couldn't be read. Close the app fully and open it again; if it still won't play, the file is missing.</Text>
+                  </View>
                 )}
                 {next && <Image source={next.thumbSource} style={[styles.neighbour, { left: W + PAGE_GAP, width: W }]} contentFit="contain" />}
               </Animated.View>
@@ -1834,6 +1844,9 @@ function MenuRow({
 
 const makeStyles = (p: Palette) =>
   sheet({
+    failed: { position: 'absolute', left: 24, right: 24, top: '42%', backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 16, padding: 16, gap: 6, alignItems: 'center' },
+    failedTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
+    failedText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, textAlign: 'center' },
     viewer: { flex: 1 },
     stage: { flex: 1, overflow: 'visible' },
     stageTouch: { flex: 1 },
