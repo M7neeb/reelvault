@@ -40,3 +40,32 @@ test('JSON and XML exports', () => {
   assert.equal(x.records[1].caption, 'Waves & sand');
   assert.equal(parseMetadataFile('nothing useful'), null);
 });
+
+test('finding the video when Files or Windows changed its name, and counting pictures apart', async () => {
+  const { looseName } = await import('../src/features/vault/hashphotos.ts');
+  assert.equal(looseName('Clip: the "best" one?.mp4'), looseName('Clip the best one.mp4'));
+  assert.equal(looseName('IMG_0001 2.MOV'), looseName('IMG_0001.MOV'));
+  const t = (id, filename, extra = {}) => ({ id, filename, title: null, notes: null, rating: 0, tagNames: [], flag: 0, ...extra });
+  const library = [
+    t('a', 'IMG_0001.MOV'),
+    t('b', 'IMG_0001 2.MOV'),
+    t('c', 'What_ a day.mp4'),
+    t('d', 'renamed.mp4', { sizeBytes: 5000 }),
+    t('e', 'Part 1.mp4'),
+    t('f', 'Part 2.mp4'),
+  ];
+  const f = parseMetadataFile(
+    'Filename,Keywords,File Size\nIMG_0001.MOV,one,\nIMG_0001.MOV,two,\nWhat? a day.mp4,x,\noriginal.mp4,y,5000\nPart 1.mp4,,\nPart 2.mp4,,\nphoto.JPG,z,\nnot-here.mp4,,\n'
+  );
+  const plan = planMetadata(f, library);
+  assert.equal(plan.matched, 6);
+  assert.deepEqual(plan.unmatched, ['not-here.mp4']);
+  assert.deepEqual(plan.pictures, ['photo.JPG']);
+  // The two rows called IMG_0001.MOV went to the two videos, one each.
+  assert.deepEqual(plan.changes.find((c) => c.videoId === 'a').addKeywords, ['one']);
+  assert.deepEqual(plan.changes.find((c) => c.videoId === 'b').addKeywords, ['two']);
+  assert.deepEqual(plan.changes.find((c) => c.videoId === 'd').addKeywords, ['y']);
+  // A loose name shared by two videos is never guessed.
+  const g = parseMetadataFile('Filename\nPart 3.mp4\n');
+  assert.deepEqual(planMetadata(g, library).unmatched, ['Part 3.mp4']);
+});

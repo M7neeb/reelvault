@@ -23,20 +23,49 @@ export type MetaRecord = {
   title: string | null;
   caption: string | null;
   flag: -1 | 0 | 1 | null;
+  /** The file's size in bytes and its length, when the export has them (a second way to find the video). */
+  size?: number | null;
+  durationMs?: number | null;
 };
 
 export type MetaFile = { format: 'csv' | 'json' | 'xml'; records: MetaRecord[]; columns: string[]; recognised: string[] };
 
 const norm = (k: string) => k.toLowerCase().replace(/[^a-z]/g, '');
 
-const FIELDS: Record<keyof Omit<MetaRecord, 'rating' | 'flag'> | 'rating' | 'flag', string[]> = {
+const FIELDS: Record<keyof MetaRecord, string[]> = {
   filename: ['filename', 'name', 'file', 'originalfilename', 'originalname', 'path', 'filepath', 'sourcefile', 'url'],
   keywords: ['keywords', 'keyword', 'tags', 'tag', 'subject', 'labels'],
   rating: ['rating', 'stars', 'starrating', 'score'],
   title: ['title', 'headline', 'objectname'],
   caption: ['caption', 'description', 'comment', 'comments', 'notes', 'note', 'captionabstract'],
   flag: ['flag', 'pick', 'flagged', 'status'],
+  size: ['size', 'filesize', 'bytes', 'sizebytes', 'filesizebytes', 'filelength'],
+  durationMs: ['duration', 'length', 'videoduration', 'durationseconds', 'seconds', 'runtime'],
 };
+
+/** "12345", "12,345" or "14.2 MB" into bytes. */
+function bytesOf(v: unknown): number | null {
+  const m = /^\s*([\d.,]+)\s*([kmgt]?i?b)?\s*$/i.exec(String(v ?? ''));
+  if (!m) return null;
+  const unit = (m[2] ?? '').toLowerCase();
+  const n = Number(unit ? m[1].replace(',', '.') : m[1].replace(/[.,]/g, ''));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const pow = { '': 0, b: 0, kb: 1, kib: 1, mb: 2, mib: 2, gb: 3, gib: 3, tb: 4, tib: 4 }[unit] ?? 0;
+  return Math.round(n * 1024 ** pow);
+}
+
+/** "83", "83.4", "1:23" or "01:02:03" into milliseconds. */
+function msOf(v: unknown): number | null {
+  const t = String(v ?? '').trim();
+  if (!t) return null;
+  if (t.includes(':')) {
+    const parts = t.split(':').map(Number);
+    if (parts.some((x) => !Number.isFinite(x))) return null;
+    return Math.round(parts.reduce((a, x) => a * 60 + x, 0) * 1000);
+  }
+  const n = Number(t.replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1000) : null;
+}
 
 function fieldOf(key: string): keyof MetaRecord | null {
   const k = norm(key);
@@ -78,6 +107,8 @@ function toRecords(rows: Record<string, unknown>[]): { records: MetaRecord[]; co
       } else if (f === 'title' && !rec.title) rec.title = String(value).trim() || null;
       else if (f === 'caption' && !rec.caption) rec.caption = String(value).trim() || null;
       else if (f === 'flag') rec.flag = flagOf(value);
+      else if (f === 'size' && !rec.size) rec.size = bytesOf(value);
+      else if (f === 'durationMs' && !rec.durationMs) rec.durationMs = msOf(value);
     }
     return rec;
   });
@@ -192,7 +223,17 @@ export function parseMetadataFile(text: string): MetaFile | null {
   return { format, records, columns, recognised };
 }
 
-export type MetaTarget = { id: string; filename: string; title: string | null; notes: string | null; rating: number; tagNames: string[]; flag: number };
+export type MetaTarget = {
+  id: string;
+  filename: string;
+  title: string | null;
+  notes: string | null;
+  rating: number;
+  tagNames: string[];
+  flag: number;
+  sizeBytes?: number | null;
+  durationMs?: number | null;
+};
 
 export type MetaChange = {
   videoId: string;
@@ -203,7 +244,31 @@ export type MetaChange = {
   flag: -1 | 1 | null;
 };
 
-export type MetaPlan = { changes: MetaChange[]; matched: number; unmatched: string[]; keywords: number; ratings: number };
+export type MetaPlan = {
+  changes: MetaChange[];
+  matched: number;
+  /** Rows of the file with no video in ReelVault (videos only; pictures are counted in `pictures`). */
+  unmatched: string[];
+  /** Rows that are pictures (ReelVault keeps videos only). */
+  pictures: string[];
+  keywords: number;
+  ratings: number;
+};
+
+const PICTURE = /\.(jpe?g|png|heic|heif|gif|webp|tiff?|bmp|dng|raw|cr2|nef|arw)$/i;
+
+/**
+ * A name with what Files and Windows change when they save it: the extension, a
+ * " 2" or " (1)" added when the name was taken, and characters a folder can't hold.
+ */
+export function looseName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{2,5}$/, '')
+    .replace(/(?:\s+\d{1,2}|\s*\(\d{1,3}\)|[-_ ]copy)$/, '')
+    // Spaces and punctuation (kept letters of every language).
+    .replace(/[\s\-_.,:;!?'"`’‘“”()[\]{}|\\/<>*+=~#@$%^&＿：？｜]+/g, '');
+}
 
 /**
  * What would change: keywords are added (never removed); a rating, title,
@@ -214,19 +279,53 @@ export type MetaPlan = { changes: MetaChange[]; matched: number; unmatched: stri
 export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = false): MetaPlan {
   const lower = (s: string) => s.toLowerCase();
   const stem = (s: string) => lower(s).replace(/\.[a-z0-9]{2,5}$/, '');
-  const byName = new Map<string, MetaTarget>();
-  const byStem = new Map<string, MetaTarget[]>();
-  for (const v of library) {
-    byName.set(lower(v.filename), v);
-    pushTo(byStem, stem(v.filename), v);
-  }
+  const pictures = file.records.filter((r) => PICTURE.test(r.filename)).map((r) => r.filename);
+  const records = file.records.filter((r) => !PICTURE.test(r.filename));
+
+  // Each video goes to one row. Rows are matched in passes, surest first; a later pass only
+  // looks at rows and videos still free, and takes a match only when it is the only one.
+  const found = new Map<number, MetaTarget>();
+  const taken = new Set<string>();
+  const pass = (keyOfRecord: (r: MetaRecord) => string | null, keyOfVideo: (v: MetaTarget) => string | null, uniqueOnly: boolean) => {
+    const index = new Map<string, MetaTarget[]>();
+    for (const v of library) {
+      if (taken.has(v.id)) continue;
+      const k = keyOfVideo(v);
+      if (k) pushTo(index, k, v);
+    }
+    const wanted = new Map<string, number[]>();
+    records.forEach((r, i) => {
+      if (found.has(i)) return;
+      const k = keyOfRecord(r);
+      if (k) pushTo(wanted, k, i);
+    });
+    for (const [k, rows] of wanted) {
+      const free = (index.get(k) ?? []).filter((v) => !taken.has(v.id));
+      if (uniqueOnly && (free.length !== 1 || rows.length !== 1)) continue;
+      // Several rows of one name and as many videos of it: paired in order.
+      rows.forEach((i, n) => {
+        const v = free[n];
+        if (!v) return;
+        found.set(i, v);
+        taken.add(v.id);
+      });
+    }
+  };
+  // 1. The same name (any case). 2. The same name without the extension.
+  pass((r) => lower(r.filename), (v) => lower(v.filename), false);
+  pass((r) => stem(r.filename), (v) => stem(v.filename), true);
+  // 3. The name as Files or Windows may have changed it (" 2", "(1)", ":" or "?" dropped).
+  pass((r) => looseName(r.filename) || null, (v) => looseName(v.filename) || null, true);
+  // 4. The same size to the byte, when the export has sizes.
+  pass((r) => (r.size ? String(r.size) : null), (v) => (v.sizeBytes ? String(v.sizeBytes) : null), true);
+  // 5. The same length to the second, when the export has lengths.
+  pass((r) => (r.durationMs ? String(Math.round(r.durationMs / 1000)) : null), (v) => (v.durationMs ? String(Math.round(v.durationMs / 1000)) : null), true);
+
   const changes = new Map<string, MetaChange>();
   const unmatched: string[] = [];
   let matched = 0;
-  for (const r of file.records) {
-    const exact = byName.get(lower(r.filename));
-    const stems = byStem.get(stem(r.filename)) ?? [];
-    const v = exact ?? (stems.length === 1 ? stems[0] : undefined);
+  for (const [i, r] of records.entries()) {
+    const v = found.get(i);
     if (!v) {
       unmatched.push(r.filename);
       continue;
@@ -246,6 +345,7 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
     changes: list,
     matched,
     unmatched,
+    pictures,
     keywords: list.reduce((a, c) => a + c.addKeywords.length, 0),
     ratings: list.filter((c) => c.rating !== null).length,
   };
