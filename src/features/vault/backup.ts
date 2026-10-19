@@ -5,7 +5,7 @@
  */
 
 import * as DocumentPicker from 'expo-document-picker';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 
 import { getDb } from '@/db';
 
@@ -13,10 +13,18 @@ import { getDb } from '@/db';
 import { addToAlbums, createAlbum, createFolder, listAlbums, listFolders } from './albums';
 import { BACKUP_KIND, BACKUP_VERSION, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupSeries } from './backupFormat';
 import { getSetting, saveSmartFilter, setSetting, setTagPinned } from './library';
+import { mergeOvExtra, OV_EXTRA_KEY, ovExtraForBackup, parseOvExtra } from './ovExtra';
 import { addToSeries, createSeries, listSeries, setEpisodeLabel, updateSeries } from './overviewStore';
 import type { OvStatus } from './overview';
 import { shareFile } from './share';
 import { addTagToVideo, listTags } from './tags';
+
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
 
 const PREFS_KEY = 'vault.prefs';
 
@@ -34,7 +42,8 @@ type VideoRow = {
   created_at: number;
 };
 
-export async function exportLibraryInfo(): Promise<number> {
+/** Everything the backup file holds, as JSON, and how many videos it covers. */
+async function buildBackup(): Promise<{ json: string; videos: number }> {
   const db = await getDb();
   const videos = await db.getAllAsync<VideoRow>(
     `SELECT id, content_key, filename, size, title, notes, rating, status, flag, created_at, in_tray
@@ -47,7 +56,7 @@ export async function exportLibraryInfo(): Promise<number> {
   const linkRows = await db.getAllAsync<Record<string, unknown> & { video_id: string }>('SELECT * FROM vault_simkl_links;');
   const by = <T extends { video_id: string }>(rows: T[]) => {
     const m = new Map<string, T[]>();
-    for (const r of rows) m.set(r.video_id, [...(m.get(r.video_id) ?? []), r]);
+    for (const r of rows) pushTo(m, r.video_id, r);
     return m;
   };
   const playsBy = by(playRows);
@@ -94,6 +103,11 @@ export async function exportLibraryInfo(): Promise<number> {
     'SELECT video_id, series_id, label FROM vault_series_items ORDER BY series_id, position;'
   );
   const videoIndex = new Map(videos.map((v, i) => [v.id, i]));
+  const overview = ovExtraForBackup(
+    parseOvExtra(await getSetting(OV_EXTRA_KEY)),
+    new Map(seriesRows.map((s) => [s.id, s.name])),
+    (k) => videoIndex.has(k.slice(2)) || kept.some((x) => x.video_id === k.slice(2))
+  );
   const keptIds = new Set(kept.map((k) => k.video_id));
   const keywordsOf = (json: string | null): string[] => {
     try {
@@ -106,7 +120,7 @@ export async function exportLibraryInfo(): Promise<number> {
 
   const group = (rows: { video_id: string; name: string }[]) => {
     const m = new Map<string, string[]>();
-    for (const r of rows) m.set(r.video_id, [...(m.get(r.video_id) ?? []), r.name]);
+    for (const r of rows) pushTo(m, r.video_id, r.name);
     return m;
   };
   const tagsBy = group(tagRows);
@@ -136,6 +150,7 @@ export async function exportLibraryInfo(): Promise<number> {
       link: linkBy.has(v.id) ? (({ video_id: _drop, ...rest }) => rest)(linkBy.get(v.id)!) : null,
     })),
     prefs,
+    overview,
     albums: albums.map((a) => ({ name: a.name, folder: folderName(a.folder_id), pinned: a.pinned === 1 })),
     folders: folders.map((f) => f.name),
     smartFilters: smart.map((s) => ({
@@ -176,20 +191,81 @@ export async function exportLibraryInfo(): Promise<number> {
     })),
   };
 
+  return { json: JSON.stringify(backup), videos: videos.length };
+}
+
+export async function exportLibraryInfo(): Promise<number> {
+  const { json, videos } = await buildBackup();
   const day = new Date().toISOString().slice(0, 10);
   const file = new File(Paths.cache, `ReelVault library info ${day}.json`);
   if (file.exists) file.delete();
   file.create();
-  file.write(JSON.stringify(backup, null, 1));
+  file.write(json);
   await shareFile(file.uri);
-  return videos.length;
+  return videos;
 }
 
-/** Applies a backup on top of the library. Nothing is deleted; matching videos get the saved info. */
-export async function importLibraryInfo(): Promise<{ matched: number; total: number; plays: number } | null> {
-  const picked = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
-  if (picked.canceled || !picked.assets?.length) return null;
-  const backup = parseBackup(await new File(picked.assets[0].uri).text());
+/* -------------------------------------------------------- automatic backups */
+
+const AUTO_KEY = 'vault.lastAutoBackup';
+const KEEP_AUTO = 4;
+const WEEK = 7 * 86_400_000;
+/** Inside the app's Documents: also reachable from a PC in the Apple Devices app (Files tab). */
+export const backupsDir = () => new Directory(Paths.document, 'Backups');
+
+export type AutoBackup = { name: string; uri: string; at: number; size: number };
+
+/** The automatic backups on the phone, newest first. */
+export function listAutoBackups(): AutoBackup[] {
+  const dir = backupsDir();
+  if (!dir.exists) return [];
+  return dir
+    .list()
+    .filter((f): f is File => f instanceof File && f.name.endsWith('.json'))
+    .map((f) => {
+      const m = /(\d{4})-(\d{2})-(\d{2})/.exec(f.name);
+      return { name: f.name, uri: f.uri, at: m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : 0, size: f.size ?? 0 };
+    })
+    .sort((a, b) => b.at - a.at || b.name.localeCompare(a.name));
+}
+
+/** Once a week (or now, when `force`): a copy of all your info, keeping the last four. */
+export async function autoBackup(force = false): Promise<AutoBackup | null> {
+  const last = Number((await getSetting(AUTO_KEY)) ?? 0);
+  if (!force && Date.now() - last < WEEK) return null;
+  const { json, videos } = await buildBackup();
+  if (!videos && !force) return null;
+  const dir = backupsDir();
+  if (!dir.exists) dir.create({ intermediates: true });
+  const day = new Date().toISOString().slice(0, 10);
+  const file = new File(dir, `ReelVault info ${day}.json`);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(json);
+  for (const old of listAutoBackups().slice(KEEP_AUTO)) {
+    try {
+      new File(old.uri).delete();
+    } catch {
+      // already gone
+    }
+  }
+  await setSetting(AUTO_KEY, String(Date.now()));
+  console.log(`[BACKUP] automatic backup of ${videos} videos`);
+  return listAutoBackups()[0] ?? null;
+}
+
+/**
+ * Applies a backup on top of the library. Nothing is deleted; matching videos
+ * get the saved info. Without `uri` it asks for a file.
+ */
+export async function importLibraryInfo(uri?: string): Promise<{ matched: number; total: number; plays: number } | null> {
+  let source = uri;
+  if (!source) {
+    const picked = await DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true });
+    if (picked.canceled || !picked.assets?.length) return null;
+    source = picked.assets[0].uri;
+  }
+  const backup = parseBackup(await new File(source).text());
   if (!backup) throw new Error('This is not a ReelVault library-info file.');
 
   const db = await getDb();
@@ -294,6 +370,22 @@ export async function importLibraryInfo(): Promise<{ matched: number; total: num
     else id = await createSeries(series.name, ids);
     await updateSeries(id, { description: series.description, rating: series.rating, status: (series.status as OvStatus | null) ?? null });
     for (const e of episodes) if (e.label) await setEpisodeLabel(e.videoId, e.label);
+  }
+
+  // Overview reviews, rewatches, order and rating history, on this phone's ids.
+  if (backup.overview) {
+    const seriesId = new Map((await listSeries()).map((x) => [x.name, x.id]));
+    const incoming = parseOvExtra(JSON.stringify(backup.overview));
+    const mapKey = (k: string): string | null => {
+      if (k.startsWith('S:')) {
+        const id = seriesId.get(k.slice(2));
+        return id ? `s:${id}` : null;
+      }
+      if (k.startsWith('v:')) return `v:${idMap.get(k.slice(2)) ?? k.slice(2)}`;
+      return null;
+    };
+    const current = parseOvExtra(await getSetting(OV_EXTRA_KEY));
+    await setSetting(OV_EXTRA_KEY, JSON.stringify(mergeOvExtra(current, incoming, mapKey)));
   }
 
   return { matched: matches.size, total: backup.videos.length, plays: playsAdded };

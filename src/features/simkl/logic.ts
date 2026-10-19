@@ -1,3 +1,10 @@
+
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
 /**
  * Simkl rules without any native code (tested in Node): turning API responses
  * into local rows, deciding what a sync must fetch, poster and page URLs,
@@ -302,7 +309,7 @@ export function parseEpisodes(json: any, type: SimklType): CatalogEpisode[] {
 
 export function groupBySeason(episodes: CatalogEpisode[]): { season: number; label: string; episodes: CatalogEpisode[] }[] {
   const map = new Map<number, CatalogEpisode[]>();
-  for (const e of episodes) map.set(e.season, [...(map.get(e.season) ?? []), e]);
+  for (const e of episodes) pushTo(map, e.season, e);
   return [...map.entries()].map(([season, eps]) => ({
     season,
     label: season === 0 ? 'Specials' : eps[0] && episodes.every((x) => x.season <= 1) ? 'Episodes' : `Season ${season}`,
@@ -570,4 +577,50 @@ export function myCalendar(rows: CatalogTitle[], libraryIds: Set<number>, now: n
   return rows
     .filter((r) => libraryIds.has(r.simklId) && r.date && Date.parse(r.date) >= now - 12 * 3600 * 1000)
     .sort((a, b) => Date.parse(a.date ?? '') - Date.parse(b.date ?? ''));
+}
+
+/* ------------------------------------------------------------- home screen */
+
+const HOME_DAY = 86_400_000;
+const startOfDay = (t: number) => {
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+
+/** What you follow: watching, plan to watch, on hold (movies: plan to watch). */
+export function followedIds(items: SimklItem[]): Set<number> {
+  return new Set(items.filter((i) => (i.type === 'movie' ? i.status === 'plantowatch' : i.status !== 'completed' && i.status !== 'dropped')).map((i) => i.simklId));
+}
+
+/** The next seven days for the home screen's calendar, each day with what airs for titles you follow. */
+export function weekAhead(rows: CatalogTitle[], following: Set<number>, now: number): { day: number; rows: CatalogTitle[] }[] {
+  const start = startOfDay(now);
+  const mine = rows.filter((r) => following.has(r.simklId) && r.date && !Number.isNaN(Date.parse(r.date)));
+  return Array.from({ length: 7 }, (_, i) => {
+    const day = startOfDay(start + i * HOME_DAY + 2 * 3_600_000);
+    return { day, rows: mine.filter((r) => startOfDay(Date.parse(r.date!)) === day).sort((a, b) => Date.parse(a.date!) - Date.parse(b.date!)) };
+  });
+}
+
+export type NewThing = { simklId: number; type: SimklType; title: string; poster: string | null; label: string | null; date: string };
+
+/**
+ * New this week for what you follow: episodes that came out in the last
+ * seven days and you haven't watched yet, and releases from the calendar.
+ * Newest first, one per title.
+ */
+export function newThisWeek(items: SimklItem[], rows: CatalogTitle[], following: Set<number>, now: number): NewThing[] {
+  const from = now - 7 * HOME_DAY;
+  const inWeek = (d: string | null | undefined) => {
+    const t = d ? Date.parse(d) : NaN;
+    return !Number.isNaN(t) && t >= from && t <= now;
+  };
+  const out = new Map<number, NewThing>();
+  for (const i of items)
+    if (following.has(i.simklId) && i.nextToWatch && inWeek(i.nextDate))
+      out.set(i.simklId, { simklId: i.simklId, type: i.type, title: i.title, poster: i.poster, label: i.nextToWatch, date: i.nextDate! });
+  for (const r of rows)
+    if (following.has(r.simklId) && !out.has(r.simklId) && inWeek(r.date))
+      out.set(r.simklId, { simklId: r.simklId, type: r.type, title: r.title, poster: r.poster, label: r.episodeLabel ?? null, date: r.date! });
+  return [...out.values()].sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
 }

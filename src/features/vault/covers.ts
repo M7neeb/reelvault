@@ -6,16 +6,19 @@
  */
 
 import * as DocumentPicker from 'expo-document-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import { File } from 'expo-file-system';
 
 import { setCoverAt } from './repo';
 import { coverFileName, thumbsDir } from './storage';
+import { COVER_SIDE, frameTo, shrinkPicture } from './frames';
 import type { Video } from './types';
 
 async function useCoverFile(video: Video, sourceUri: string): Promise<void> {
   const coverAt = Date.now();
-  await new File(sourceUri).copy(new File(thumbsDir, coverFileName(video.id, coverAt)));
+  const dest = new File(thumbsDir, coverFileName(video.id, coverAt));
+  // A photo from the library can be 12 MP; the cover only needs 720 px.
+  new File(sourceUri).move(dest);
+  await shrinkPicture(dest);
   await setCoverAt(video.id, coverAt);
   removeOldCustom(video);
   console.log(`[COVER] new cover for ${video.filename}`);
@@ -33,8 +36,10 @@ function removeOldCustom(video: Video): void {
 
 /** The frame at `timeMs` becomes the cover. */
 export async function setCoverFromFrame(video: Video, timeMs: number): Promise<void> {
-  const frame = await VideoThumbnails.getThumbnailAsync(video.uri, { time: Math.max(0, Math.round(timeMs)), quality: 0.8 });
-  await useCoverFile(video, frame.uri);
+  const coverAt = Date.now();
+  await frameTo(video.uri, timeMs, new File(thumbsDir, coverFileName(video.id, coverAt)), COVER_SIDE);
+  await setCoverAt(video.id, coverAt);
+  removeOldCustom(video);
 }
 
 /** A picked photo becomes the cover. Returns false when the picker was cancelled. */

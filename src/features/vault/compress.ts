@@ -7,7 +7,6 @@
 
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Crypto from 'expo-crypto';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 
 import { ReelVaultCompress } from '../../../modules/reelvault-compress';
 import { contentKeyOf } from './contentKey';
@@ -16,6 +15,7 @@ import { readVideoMeta } from './metadata';
 import { copyLinks, insertVideo, recordReplaced, setCoverAt } from './repo';
 import { mergeMeta, spaceNeeded, worthKeeping } from './smaller';
 import { coverFileName, filmstripDir, thumbsDir, videosDir } from './storage';
+import { COVER_SIDE, frameTo } from './frames';
 import type { Video } from './types';
 
 export type EditResult =
@@ -49,9 +49,8 @@ function editedName(filename: string): string {
 /** A fresh cover from the new file (the old one may show a part that was cut away). */
 async function freshCover(videoId: string, uri: string): Promise<number | null> {
   try {
-    const shot = await VideoThumbnails.getThumbnailAsync(uri, { time: 500 });
     const coverAt = Date.now();
-    await new File(shot.uri).copy(new File(thumbsDir, coverFileName(videoId, coverAt)));
+    await frameTo(uri, 500, new File(thumbsDir, coverFileName(videoId, coverAt)), COVER_SIDE);
     return coverAt;
   } catch (e) {
     console.log(`[EDIT] new cover failed: ${String(e)}`);

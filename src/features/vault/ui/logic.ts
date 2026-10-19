@@ -5,6 +5,7 @@
 
 import type {
   GroupBy,
+  DateGroup,
   LayoutStyle,
   Orientation,
   SmartRule,
@@ -17,6 +18,13 @@ import type {
   VaultSort,
   ViewOptions,
 } from './types';
+
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
 
 const MB = 1024 * 1024;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -275,7 +283,7 @@ const INFO_KEYS: ThumbInfo[] = [
   'albums',
   'device',
 ];
-const GROUP_KEYS: GroupBy[] = ['none', 'day', 'month', 'year'];
+const GROUP_KEYS: GroupBy[] = ['none', 'day', 'week', 'month', 'year', 'rating', 'keyword', 'series', 'length'];
 const THEME_KEYS: ThemeMode[] = ['system', 'light', 'dark'];
 
 /** The thumbnail sizes the first version saved as a column count. */
@@ -326,6 +334,14 @@ export function parseViewOptions(json: string | null, defaults: ViewOptions): Vi
     showRating: bool(r.showRating, defaults.showRating),
     showKeywords: bool(r.showKeywords, defaults.showKeywords),
     theme: oneOf(r.theme, THEME_KEYS, defaults.theme),
+    colors: oneOf(r.colors, ['standard', 'midnight', 'graphite', 'forest', 'rose', 'ember', 'video'] as const, defaults.colors),
+    videoColor: typeof r.videoColor === 'string' && /^#[0-9a-f]{6}$/i.test(r.videoColor) ? r.videoColor : defaults.videoColor,
+    videoColorFrom: typeof r.videoColorFrom === 'string' ? r.videoColorFrom : defaults.videoColorFrom,
+    font: oneOf(r.font, ['system', 'avenir', 'futura', 'georgia', 'menlo'] as const, defaults.font),
+    glass: oneOf(r.glass, ['regular', 'clear', 'solid'] as const, defaults.glass),
+    corners: oneOf(r.corners, ['standard', 'round', 'square'] as const, defaults.corners),
+    outlined: bool(r.outlined, defaults.outlined),
+    rotate: bool(r.rotate, defaults.rotate),
   };
 }
 
@@ -346,13 +362,13 @@ const DAY = 24 * 60 * 60 * 1000;
 export const RECENTLY_DELETED_DAYS = 30;
 
 /** Anything deleted before this moment is due to be removed for good. */
-export function purgeCutoff(now: number): number {
-  return now - RECENTLY_DELETED_DAYS * DAY;
+export function purgeCutoff(now: number, days = RECENTLY_DELETED_DAYS): number {
+  return now - days * DAY;
 }
 
 /** Whole days left before a deleted video is removed. Never below 0. */
-export function daysLeft(deletedAt: number, now: number): number {
-  const left = deletedAt + RECENTLY_DELETED_DAYS * DAY - now;
+export function daysLeft(deletedAt: number, now: number, days = RECENTLY_DELETED_DAYS): number {
+  const left = deletedAt + days * DAY - now;
   return Math.max(0, Math.ceil(left / DAY));
 }
 
@@ -437,7 +453,7 @@ export function groupSimilar<T extends SimilarTarget>(items: T[]): string[][] {
     // Skip videos whose date is only the import time (no filming date in the file).
     if (seen.has(v.id) || !v.createdAt || v.createdAt <= 0 || Math.abs(v.createdAt - v.importedAt) < 60_000) continue;
     const k = Math.round(v.createdAt / 1000);
-    byMoment.set(k, [...(byMoment.get(k) ?? []), v]);
+    pushTo(byMoment, k, v);
   }
   for (const list of byMoment.values()) {
     const distinct = list.filter((v, i) => !v.contentKey || list.findIndex((x) => x.contentKey === v.contentKey) === i);
@@ -491,18 +507,52 @@ export function dayKey(ms: number): string {
 /** `2026-10` */
 export const monthKey = (ms: number): string => dayKey(ms).slice(0, 7);
 
-export function periodKey(ms: number, by: Exclude<GroupBy, 'none'>): string {
+export function periodKey(ms: number, by: DateGroup): string {
+  if (by === 'week') {
+    const d = new Date(ms);
+    return `w${dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime())}`;
+  }
   const day = dayKey(ms);
   return by === 'day' ? day : by === 'month' ? day.slice(0, 7) : day.slice(0, 4);
 }
 
-/** `Mon, 13 Oct 2026` / `October 2026` / `2026` */
-export function periodTitle(key: string, by: Exclude<GroupBy, 'none'>): string {
-  const [y, m, d] = key.split('-').map(Number);
+/** `Mon, 13 Oct 2026` / `Week of 12 Oct 2026` / `October 2026` / `2026` */
+export function periodTitle(key: string, by: DateGroup): string {
+  const week = key.startsWith('w');
+  const [y, m, d] = (week ? key.slice(1) : key).split('-').map(Number);
   if (by === 'year') return String(y);
   if (by === 'month') return `${MONTHS[m - 1]} ${y}`;
+  if (week) return `Week of ${d} ${MONTHS_SHORT[m - 1]} ${y}`;
   const date = new Date(y, m - 1, d);
   return `${WEEKDAYS[date.getDay()]}, ${d} ${MONTHS_SHORT[m - 1]} ${y}`;
+}
+
+const LENGTHS: { key: string; title: string; max: number }[] = [
+  { key: 'l1', title: 'Under a minute', max: 60_000 },
+  { key: 'l2', title: '1 to 5 minutes', max: 5 * 60_000 },
+  { key: 'l3', title: '5 to 20 minutes', max: 20 * 60_000 },
+  { key: 'l4', title: '20 minutes or longer', max: Infinity },
+];
+
+type GroupTarget = { id?: string; createdAt: number; rating?: number; tagNames?: string[]; durationMs?: number | null };
+
+/** Which section a video falls into for the groupings that are not by date. */
+function otherKey(item: GroupTarget, by: 'rating' | 'keyword' | 'series' | 'length', seriesOf?: Map<string, string>): { key: string; title: string; order: number } {
+  if (by === 'rating') {
+    const r = Math.round(item.rating ?? 0);
+    return r > 0 ? { key: `r${r}`, title: `★ ${r}`, order: 10 - r } : { key: 'r0', title: 'Not rated', order: 99 };
+  }
+  if (by === 'keyword') {
+    const first = [...(item.tagNames ?? [])].sort((a, b) => a.localeCompare(b))[0];
+    return first ? { key: `k${first}`, title: `#${first}`, order: 0 } : { key: 'k', title: 'No keyword', order: 1 };
+  }
+  if (by === 'series') {
+    const name = item.id ? seriesOf?.get(item.id) : undefined;
+    return name ? { key: `s${name}`, title: name, order: 0 } : { key: 's', title: 'Not in a series', order: 1 };
+  }
+  if (!item.durationMs) return { key: 'l0', title: 'Length unknown', order: 9 };
+  const i = LENGTHS.findIndex((l) => (item.durationMs as number) < l.max);
+  return { key: LENGTHS[i].key, title: LENGTHS[i].title, order: i };
 }
 
 export type Section<T> = { key: string; title: string; items: T[] };
@@ -512,8 +562,24 @@ export type Section<T> = { key: string; title: string; items: T[] };
  * order the periods first appear (so the current sort decides the order).
  * With 'none' there is one untitled section.
  */
-export function groupItems<T extends { createdAt: number }>(items: T[], by: GroupBy): Section<T>[] {
+export function groupItems<T extends GroupTarget>(items: T[], by: GroupBy, seriesOf?: Map<string, string>): Section<T>[] {
   if (by === 'none') return items.length ? [{ key: 'all', title: '', items }] : [];
+  if (by === 'rating' || by === 'keyword' || by === 'series' || by === 'length') {
+    const index = new Map<string, Section<T> & { order: number }>();
+    for (const item of items) {
+      const k = otherKey(item, by, seriesOf);
+      let s = index.get(k.key);
+      if (!s) {
+        s = { key: k.key, title: k.title, items: [], order: k.order };
+        index.set(k.key, s);
+      }
+      s.items.push(item);
+    }
+    // Rating and length in their own order; keywords and series biggest first, the leftovers last.
+    return [...index.values()]
+      .sort((a, b) => a.order - b.order || (by === 'keyword' || by === 'series' ? b.items.length - a.items.length || a.title.localeCompare(b.title) : 0))
+      .map(({ order: _o, ...s }) => s);
+  }
   const sections: Section<T>[] = [];
   const index = new Map<string, Section<T>>();
   for (const item of items) {

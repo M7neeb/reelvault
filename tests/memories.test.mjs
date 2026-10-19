@@ -162,3 +162,32 @@ test('the saved memories mix joins the memories you saved', async () => {
   const saved = memoryMixes(list, videos, ['m1', 'm2'], 10_000, () => 0).find((m) => m.id === 'mix:saved');
   assert.deepEqual(saved.videoIds, ['a', 'b', 'c']);
 });
+
+test('then and now: a keyword years apart, old and new side by side', async () => {
+  const { thenAndNow, memoryClips } = await import('../src/features/vault/memories.ts');
+  const v = (id, y, tags, rating = 0, location = null) => ({ id, title: null, filename: `${id}.mov`, durationMs: 30_000, sizeBytes: 1, rating, tagNames: tags, createdAt: new Date(y, 5, 1).getTime(), importedAt: 0, location });
+  const all = [
+    v('a1', 2019, ['Beach'], 9),
+    v('a2', 2019, ['Beach'], 5),
+    v('b1', 2024, ['Beach'], 7),
+    v('b2', 2024, ['Beach'], 8),
+    v('c1', 2024, ['Food']),
+    v('c2', 2024, ['Food']),
+    v('p1', 2020, [], 0, { lat: 51.5001, lon: -0.1201 }),
+    v('p2', 2025, [], 0, { lat: 51.5003, lon: -0.1199 }),
+  ].sort((a, b) => a.createdAt - b.createdAt);
+  const list = thenAndNow(all, new Map());
+  const beach = list.find((m) => m.id === 'thennow:tag:beach');
+  assert.ok(beach);
+  assert.equal(beach.title, 'Beach, then and now');
+  // Best of 2019 with the best of 2024.
+  assert.deepEqual(beach.pairs, [['a1', 'b2'], ['a2', 'b1']]);
+  assert.equal(beach.subtitle, '2019 and 2024 · 5 years apart');
+  // Same place, five years apart, even with one video each.
+  assert.ok(list.some((m) => m.id.startsWith('thennow:place:') && m.pairs.length === 1));
+  // One year only: nothing.
+  assert.ok(!list.some((m) => m.id === 'thennow:tag:food'));
+  const clips = memoryClips(beach, new Map(all.map((x) => [x.id, x])), 'gentle');
+  assert.equal(clips.length, 2);
+  assert.equal(clips[0].pair.videoId, 'b2');
+});

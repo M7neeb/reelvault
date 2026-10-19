@@ -17,6 +17,13 @@ import { countdown, myCalendar, SIMKL_TYPES } from '../logic';
 import Poster from './Poster';
 import type { CatalogTitle, ReminderSettings, SimklActions, SimklItem, SimklType } from './types';
 
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
+
 const DAY = 86_400_000;
 const sod = (t: number) => {
   const d = new Date(t);
@@ -97,7 +104,7 @@ export function CalendarModal({
     const map = new Map<number, CatalogTitle[]>();
     for (const r of shown) {
       const key = sod(Date.parse(r.date ?? ''));
-      map.set(key, [...(map.get(key) ?? []), r]);
+      pushTo(map, key, r);
     }
     return [...map.entries()];
   }, [shown]);

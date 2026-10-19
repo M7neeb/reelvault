@@ -8,7 +8,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Modal, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 

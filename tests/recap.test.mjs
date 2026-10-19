@@ -204,3 +204,19 @@ test('on this day notifications: only dates with videos from earlier years', asy
   assert.match(plan[0].title, /2 years of memories/);
   assert.equal(plan[0].count, 2);
 });
+
+test('space planner: gentlest steps first, no video counted twice, stops at the target', async () => {
+  const { spacePlan } = await import('../src/features/vault/recap.ts');
+  const idea = (key, ids, bytes) => ({ key, title: key, detail: '', bytes, count: ids.length, action: key, ids });
+  const ideas = [idea('cold', ['c1', 'c2'], 800), idea('smaller', ['a', 'b'], 100), idea('rarely', ['b', 'c1'], 400), idea('deleted', ['d'], 50)];
+  const small = spacePlan(ideas, 120);
+  assert.deepEqual(small.steps.map((s) => s.key), ['deleted', 'smaller']);
+  assert.equal(small.reached, true);
+  const all = spacePlan(ideas, 10_000);
+  assert.deepEqual(all.steps.map((s) => s.key), ['deleted', 'smaller', 'rarely', 'cold']);
+  // "rarely" only counts c1 (b was in "smaller"); "cold" only c2.
+  assert.deepEqual(all.steps[2].ids, ['c1']);
+  assert.equal(all.steps[2].counted, 200);
+  assert.deepEqual(all.steps[3].ids, ['c2']);
+  assert.equal(all.reached, false);
+});

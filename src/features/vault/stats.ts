@@ -10,6 +10,13 @@ import type { SimklItem } from '../simkl/logic';
 import { friendlyName } from './names.ts';
 import type { Meta, WatchEvent } from '../simkl/insights';
 
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
+
 /** The parts of a video these numbers need (a subset of VaultItem). */
 export type StatVideo = {
   id: string;
@@ -167,7 +174,7 @@ export function storageStats(items: StatVideo[], deleted: StatVideo[] = []): Sto
   const sum = (list: StatVideo[]) => list.reduce((a, v) => a + v.sizeBytes, 0);
   const group = (key: (v: StatVideo) => string) => {
     const m = new Map<string, StatVideo[]>();
-    for (const v of items) m.set(key(v), [...(m.get(key(v)) ?? []), v]);
+    for (const v of items) pushTo(m, key(v), v);
     return [...m.entries()]
       .map(([k, list]) => ({ key: k, label: k, value: sum(list), sub: `${list.length} ${list.length === 1 ? 'video' : 'videos'}` }))
       .sort((a, b) => b.value - a.value);

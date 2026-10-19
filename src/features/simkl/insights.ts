@@ -404,3 +404,94 @@ export function fmtChange(now: number, before: number): string | null {
   const pct = Math.round(((now - before) / before) * 100);
   return `${pct >= 0 ? '+' : '−'}${Math.abs(pct)}%`;
 }
+
+/* ------------------------------------------------------------- more stats */
+
+export type GenreMonth = { key: string; label: string; total: number; parts: { genre: string; minutes: number }[] };
+
+/**
+ * Your genres month by month (the last `months` months): the five you
+ * watched most in that time, and Other. A title with several genres shares
+ * its minutes between them, so each month adds up to what you watched.
+ */
+export function genresOverTime(events: WatchEvent[], meta: Map<number, Meta>, now: number, months = 12): { genres: string[]; months: GenreMonth[] } {
+  const d = new Date(now);
+  const keys = Array.from({ length: months }, (_, i) => new Date(d.getFullYear(), d.getMonth() - (months - 1 - i), 1));
+  const start = keys[0].getTime();
+  const inWindow = events.filter((e) => e.at >= start && e.at <= now);
+  const share = (e: WatchEvent) => {
+    const g = meta.get(e.simklId)?.genres ?? [];
+    return g.length ? g.map((x) => [x, e.minutes / g.length] as const) : [['Other', e.minutes] as const];
+  };
+  const totals = new Map<string, number>();
+  for (const e of inWindow) for (const [g, m] of share(e)) if (g !== 'Other') totals.set(g, (totals.get(g) ?? 0) + m);
+  const genres = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([g]) => g);
+  const out: GenreMonth[] = keys.map((k) => {
+    const end = new Date(k.getFullYear(), k.getMonth() + 1, 1).getTime();
+    const per = new Map<string, number>();
+    for (const e of inWindow)
+      if (e.at >= k.getTime() && e.at < end)
+        for (const [g, m] of share(e)) {
+          const key = genres.includes(g) ? g : 'Other';
+          per.set(key, (per.get(key) ?? 0) + m);
+        }
+    const parts = [...genres, 'Other'].map((g) => ({ genre: g, minutes: Math.round(per.get(g) ?? 0) })).filter((x) => x.minutes > 0);
+    return { key: `${k.getFullYear()}-${k.getMonth() + 1}`, label: k.toLocaleDateString('en-GB', { month: 'short' }), total: parts.reduce((a, x) => a + x.minutes, 0), parts };
+  });
+  return { genres, months: out };
+}
+
+/** Shows and anime by the time you spent on them. */
+export function hoursPerShow(events: WatchEvent[], items: SimklItem[], top = 10): { simklId: number; title: string; minutes: number; episodes: number }[] {
+  const byId = new Map(items.map((i) => [i.simklId, i]));
+  const per = new Map<number, { minutes: number; episodes: number }>();
+  for (const e of events) {
+    if (e.type === 'movie') continue;
+    const x = per.get(e.simklId) ?? { minutes: 0, episodes: 0 };
+    x.minutes += e.minutes;
+    x.episodes++;
+    per.set(e.simklId, x);
+  }
+  return [...per.entries()]
+    .filter(([id]) => byId.has(id))
+    .map(([id, x]) => ({ simklId: id, title: byId.get(id)!.title, ...x }))
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, top);
+}
+
+/** How many shows and anime you finish: of the ones you started, finished, still going, on hold, dropped; how long a finished one takes. */
+export function finishing(items: SimklItem[], events: WatchEvent[]): {
+  started: number;
+  finished: number;
+  watching: number;
+  hold: number;
+  dropped: number;
+  rate: number | null;
+  avgDays: number | null;
+  fastest: { title: string; days: number }[];
+} {
+  const series = items.filter((i) => i.type !== 'movie' && i.status !== 'plantowatch');
+  const span = new Map<number, { first: number; last: number }>();
+  for (const e of events) {
+    if (e.type === 'movie' || e.rewatch) continue;
+    const s = span.get(e.simklId);
+    span.set(e.simklId, s ? { first: Math.min(s.first, e.at), last: Math.max(s.last, e.at) } : { first: e.at, last: e.at });
+  }
+  const done = series.filter((i) => i.status === 'completed');
+  const took = done
+    .map((i) => {
+      const s = span.get(i.simklId);
+      return s ? { title: i.title, days: Math.max(1, Math.ceil((s.last - s.first) / 86_400_000)) } : null;
+    })
+    .filter((x): x is { title: string; days: number } => !!x);
+  return {
+    started: series.length,
+    finished: done.length,
+    watching: series.filter((i) => i.status === 'watching').length,
+    hold: series.filter((i) => i.status === 'hold').length,
+    dropped: series.filter((i) => i.status === 'dropped').length,
+    rate: series.length ? Math.round((done.length / series.length) * 100) : null,
+    avgDays: took.length ? Math.round(took.reduce((a, x) => a + x.days, 0) / took.length) : null,
+    fastest: [...took].sort((a, b) => a.days - b.days).slice(0, 3),
+  };
+}

@@ -2,24 +2,20 @@
  * Search: a bottom sheet with the query box and the keyword cloud. Tapping a
  * keyword adds it to the query. Words that mean filters ("2024", "8+",
  * "long", "#holiday", "unwatched"...) show as chips under the box, with how
- * many videos match. Presentational only (see the rule in types.ts).
+ * many videos match. Below the box: what you searched lately, and as you type,
+ * videos whose names come close (typos too) and matching keywords.
+ * Presentational only (see the rule in types.ts).
  */
 
 import { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal } from './screen';
 
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { SEARCH_EXAMPLES, type SearchChip } from './query';
-import type { UiTag } from './types';
+import type { UiTag, VaultItem } from './types';
+import { Image } from 'expo-image';
+import { friendlyName } from '../names';
 import Glyph from './Glyph';
 
 export default function SearchSheet({
@@ -31,7 +27,15 @@ export default function SearchSheet({
   onClose,
   onSaveSmart,
   onFilters,
+  recent = [],
+  suggestions = { videos: [], tags: [] },
+  onOpenVideo,
+  onClearRecent,
 }: {
+  recent?: string[];
+  suggestions?: { videos: VaultItem[]; tags: string[] };
+  onOpenVideo?: (v: VaultItem) => void;
+  onClearRecent?: () => void;
   value: string;
   tags: UiTag[];
   /** What the query was understood as (empty for plain text). */
@@ -97,6 +101,47 @@ export default function SearchSheet({
                     {matches} {matches === 1 ? 'video' : 'videos'}
                   </Text>
                 )}
+              </View>
+            )}
+            {!!draft.trim() && (suggestions.videos.length > 0 || suggestions.tags.length > 0) && (
+              <View style={styles.understood}>
+                {suggestions.videos.map((v) => (
+                  <TouchableOpacity key={v.id} style={styles.sugRow} onPress={() => onOpenVideo?.(v)} accessibilityLabel={`Play ${friendlyName(v)}`}>
+                    <Image source={v.thumbSource} style={styles.sugThumb} contentFit="cover" />
+                    <Text style={styles.sugText} numberOfLines={1}>
+                      {friendlyName(v)}
+                    </Text>
+                    {v.rating > 0 && <Text style={styles.sugRate}>★ {v.rating}</Text>}
+                  </TouchableOpacity>
+                ))}
+                {suggestions.tags.length > 0 && (
+                  <View style={styles.chipRow}>
+                    {suggestions.tags.map((t) => (
+                      <TouchableOpacity key={t} style={styles.cloudChip} onPress={() => commit(`#${t}`)}>
+                        <Text style={styles.cloudChipText}>#{t}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+            {!draft.trim() && recent.length > 0 && (
+              <View style={styles.understood}>
+                <View style={styles.recentHead}>
+                  <Text style={styles.understoodLabel}>Recent</Text>
+                  {onClearRecent && (
+                    <TouchableOpacity onPress={onClearRecent} hitSlop={8}>
+                      <Text style={styles.clearText}>Clear</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={styles.chipRow}>
+                  {recent.map((r) => (
+                    <TouchableOpacity key={r} style={styles.exChip} onPress={() => commit(r)}>
+                      <Text style={styles.exChipText}>{r}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
             )}
             {!draft.trim() && (
@@ -203,4 +248,10 @@ const makeStyles = (p: Palette) =>
     matches: { color: p.text, fontSize: 13, fontWeight: '800' },
     exChip: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
     exChipText: { color: p.textSoft, fontSize: 13, fontWeight: '600' },
+    sugRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
+    sugThumb: { width: 54, height: 34, borderRadius: 7, backgroundColor: p.card },
+    sugText: { color: p.text, fontSize: 15, fontWeight: '600', flex: 1 },
+    sugRate: { color: p.rating, fontSize: 12, fontWeight: '800' },
+    recentHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    clearText: { color: p.link, fontSize: 12, fontWeight: '700' },
   });

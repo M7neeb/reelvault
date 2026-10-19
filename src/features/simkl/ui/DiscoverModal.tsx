@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from '@/features/vault/ui/screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Icon from '@/features/vault/ui/Icon';

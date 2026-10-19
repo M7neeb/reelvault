@@ -14,7 +14,8 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import Animated, { FadeIn } from 'react-native-reanimated';
 

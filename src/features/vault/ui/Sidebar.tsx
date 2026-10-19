@@ -98,6 +98,10 @@ export type SidebarProps = {
   onFolderOptions: (folder: UiFolder) => void;
   onSmartOptions: (filter: SmartFilter) => void;
   onTagOptions: (tag: UiTag) => void;
+  /** Open the keyword manager. */
+  onManageKeywords?: () => void;
+  /** Tidy up: quick tagging (untagged count) and keep or delete (rarely watched count). */
+  tidy?: { untagged: number; cold: number; onQuickTag: () => void; onKeepOrDelete: () => void };
   onCalendar: () => void;
   onTimeline: () => void;
   onOverview: () => void;
@@ -294,6 +298,7 @@ export default function Sidebar(props: SidebarProps) {
 
           <Text style={styles.section}>Keywords</Text>
           {tags.length === 0 && <Text style={styles.muted}>No keywords yet.</Text>}
+          {tags.length > 0 && props.onManageKeywords && <ActionRow label="Manage keywords…" onPress={props.onManageKeywords} />}
           {tags.map((t) => (
             <DrawerRow
               {...row}
@@ -305,6 +310,14 @@ export default function Sidebar(props: SidebarProps) {
               onLongPress={() => props.onTagOptions(t)}
             />
           ))}
+
+          {props.tidy && (props.tidy.untagged > 0 || props.tidy.cold > 0) && (
+            <>
+              <Text style={styles.section}>Tidy up</Text>
+              {props.tidy.untagged > 0 && <ActionRow label={`Quick tagging · ${props.tidy.untagged} without keywords`} onPress={props.tidy.onQuickTag} />}
+              {props.tidy.cold > 0 && <ActionRow label={`Keep or delete · ${props.tidy.cold} you never watch`} onPress={props.tidy.onKeepOrDelete} />}
+            </>
+          )}
 
           <Text style={styles.section}>Browse</Text>
           <ActionRow label="Calendar" onPress={props.onCalendar} />

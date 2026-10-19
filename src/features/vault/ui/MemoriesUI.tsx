@@ -16,14 +16,17 @@
  * sound), and the card most in view in a row plays its cover video. Quick
  * mixes (your saved memories, only the best, this month through the years, a
  * random handful) play in one tap; Looking back gathers a year ago, your
- * first videos, milestones and late nights. The end card shows every clip
+ * first videos, milestones and late nights. Then and now plays an old video
+ * above a new one of the same keyword or place, the sound passing from the
+ * first to the second halfway through. The end card shows every clip
  * (tap one to jump back to it) and the memory that comes next.
  * Presentational only.
  */
 
 import { LiveCard } from './live';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -370,7 +373,8 @@ function Dot({ on }: { on: boolean }) {
 function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, onFav }: { m: Memory; width: number; thumbs: Thumbs; items: Map<string, VaultItem>; fav: boolean; fresh: boolean; active: boolean; onPress: () => void; onFav: () => void }) {
   const styles = useStyles(makeStyles);
   const [a, b] = toneOf(m);
-  const h = Math.min(480, width * 1.22);
+  const { height: screenH } = useWindowDimensions();
+  const h = Math.min(480, width * 1.22, Math.max(260, screenH * 0.72));
   const num = bigNumber(m);
   const extra = m.videoIds.filter((id) => id !== m.coverId).slice(0, 3);
   // A trailer: while the card is in front it moves through up to six of its clips.
@@ -450,7 +454,7 @@ function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, on
         </View>
         {items.get(m.coverId) && (
           <Text style={styles.featuredCaption} numberOfLines={1}>
-            {MOODS[m.mood].label} mood · {m.videoIds.length} {m.videoIds.length === 1 ? 'clip' : 'clips'}
+            {MOODS[m.mood].label} mood · {m.pairs ? `${m.pairs.length} side by side` : `${m.videoIds.length} ${m.videoIds.length === 1 ? 'clip' : 'clips'}`}
           </Text>
         )}
       </View>
@@ -623,6 +627,80 @@ function ClipMedia({ clip, item, thumb, enableVideo, muted, paused, mood, seed }
   );
 }
 
+/**
+ * Then and now: the old video on top, the new one below, each shown whole.
+ * The sound starts with the old one and passes to the new one halfway.
+ */
+function PairMedia({ clip, items, thumbs, enableVideo, muted, paused, elapsed }: { clip: Clip & { pair: NonNullable<Clip['pair']> }; items: Map<string, VaultItem>; thumbs: Thumbs; enableVideo: boolean; muted: boolean; paused: boolean; elapsed: number }) {
+  const { width, height } = useWindowDimensions();
+  const half = height / 2;
+  const first = elapsed < clip.ms / 2;
+  const a = items.get(clip.videoId);
+  const b = items.get(clip.pair.videoId);
+  const year = (v: VaultItem | undefined) => (v ? new Date(v.createdAt).getFullYear() : null);
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <HalfClip item={a} thumb={thumbs.get(clip.videoId)} startMs={clip.startMs} top={0} height={half} width={width} enableVideo={enableVideo} paused={paused} sound={!muted && first} label={`THEN · ${year(a) ?? ''}`} />
+      <HalfClip item={b} thumb={thumbs.get(clip.pair.videoId)} startMs={clip.pair.startMs} top={half} height={half} width={width} enableVideo={enableVideo} paused={paused} sound={!muted && !first} label={`NOW · ${year(b) ?? ''}`} />
+      <View style={[styles2.pairLine, { top: half - 1 }]} />
+    </View>
+  );
+}
+
+function HalfClip({ item, thumb, startMs, top, height, width, enableVideo, paused, sound, label }: { item: VaultItem | undefined; thumb: VaultItem['thumbSource'] | undefined; startMs: number; top: number; height: number; width: number; enableVideo: boolean; paused: boolean; sound: boolean; label: string }) {
+  const player = useVideoPlayer(null, (pl) => {
+    pl.loop = true;
+  });
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    setReady(false);
+    if (!enableVideo || !item?.uri) return;
+    let live = true;
+    player
+      .replaceAsync({ uri: item.uri })
+      .then(() => {
+        if (!live) return;
+        player.currentTime = startMs / 1000;
+        if (!paused) player.play();
+        setTimeout(() => live && setReady(true), 220);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [item?.uri, startMs, enableVideo]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!enableVideo || !item?.uri) return;
+    if (paused) player.pause();
+    else player.play();
+  }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    player.muted = !sound;
+  }, [sound, player]);
+  const fit = fitFor(aspectOf(item), width / height);
+  return (
+    <View style={{ position: 'absolute', left: 0, right: 0, top, height, overflow: 'hidden' }}>
+      <Backdrop source={thumb} dim={0.25} />
+      {enableVideo && <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />}
+      {(!enableVideo || !ready) && (
+        <Animated.View entering={FadeIn.duration(400)} style={StyleSheet.absoluteFill}>
+          <KenBurns source={thumb} ms={9000} seed={top ? 2 : 1} />
+        </Animated.View>
+      )}
+      <View style={[styles2.pairChip, top === 0 ? { bottom: 12 } : { top: 12 }]}>
+        {sound && <Icon name="sound" size={11} color="#000" />}
+        <Text style={styles2.pairChipText}>{label}</Text>
+      </View>
+    </View>
+  );
+}
+
+const styles2 = StyleSheet.create({
+  pairLine: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: 'rgba(255,255,255,0.85)' },
+  pairChip: { position: 'absolute', left: 14, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  pairChipText: { color: '#000', fontSize: 12, fontWeight: '900', letterSpacing: 0.6 },
+});
+
 export function MemoryPlayer({
   memory: m,
   items,
@@ -760,7 +838,11 @@ export function MemoryPlayer({
         <GestureDetector gesture={gestures}>
           <Animated.View style={[styles.player, sheetStyle]}>
             <Aurora colors={[a, b]} width={width} height={height} />
-            <ClipMedia clip={clip} item={item} thumb={clip ? thumbs.get(clip.videoId) : undefined} enableVideo={enableVideo} muted={muted} paused={paused} mood={mood} seed={i} />
+            {clip?.pair ? (
+              <PairMedia clip={clip as Clip & { pair: NonNullable<Clip['pair']> }} items={items} thumbs={thumbs} enableVideo={enableVideo} muted={muted} paused={paused} elapsed={elapsed} />
+            ) : (
+              <ClipMedia clip={clip} item={item} thumb={clip ? thumbs.get(clip.videoId) : undefined} enableVideo={enableVideo} muted={muted} paused={paused} mood={mood} seed={i} />
+            )}
             {mood === 'gentle' && clip && <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,160,80,0.08)' }]} />}
             {clip && <Fade color="0,0,0" from={0} to={0.75} style={[StyleSheet.absoluteFill, { top: '55%' }]} />}
             <Fade color="0,0,0" from={0.45} to={0} style={[StyleSheet.absoluteFill, { bottom: '78%' }]} />
@@ -788,8 +870,25 @@ export function MemoryPlayer({
               </View>
             )}
 
+            {/* caption over a then-and-now pair */}
+            {clip?.pair && item && items.get(clip.pair.videoId) && (
+              <View style={[styles.caption, { bottom: insets.bottom + 28 }]} pointerEvents="none">
+                <Animated.View key={clip.videoId} entering={FadeInDown.duration(DUR.slow).easing(EASE_OUT)} style={{ flex: 1, gap: 2 }}>
+                  <Text style={[styles.capWhen, { color: a }]}>
+                    {Math.max(1, new Date(items.get(clip.pair.videoId)!.createdAt).getFullYear() - new Date(item.createdAt).getFullYear())} YEARS APART
+                  </Text>
+                  <Text style={[styles.capTitle, titleFont]} numberOfLines={2}>
+                    {m.title}
+                  </Text>
+                  <Text style={styles.capDate}>
+                    {longDate(item.createdAt)} → {longDate(items.get(clip.pair.videoId)!.createdAt)}
+                  </Text>
+                </Animated.View>
+              </View>
+            )}
+
             {/* caption over a clip */}
-            {clip && item && (
+            {clip && !clip.pair && item && (
               <View style={[styles.caption, { bottom: insets.bottom + (epic ? height * 0.085 + 12 : 28) }]} pointerEvents="box-none">
                 <Animated.View key={clip.videoId} entering={FadeInDown.duration(DUR.slow).easing(EASE_OUT)} style={{ flex: 1, gap: 2 }}>
                   <Text style={[styles.capWhen, { color: a }]}>{agoText(item.createdAt).toUpperCase()}</Text>

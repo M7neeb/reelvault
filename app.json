@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.9.1",
+    "version": "1.9.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -14,6 +14,7 @@
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "ReelVault receives videos you send from your computer over Wi-Fi.",
         "LSSupportsOpeningDocumentsInPlace": false,
+        "UIFileSharingEnabled": true,
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "Video",
@@ -193,7 +194,7 @@
         ]
       ]
     ],
-    "runtimeVersion": "1.9.1",
+    "runtimeVersion": "1.9.2",
     "updates": {
       "url": "https://u.expo.dev/f9139cd3-bb87-46bf-8a97-a60c2665423d",
       "requestHeaders": {

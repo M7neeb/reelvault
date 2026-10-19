@@ -8,7 +8,8 @@
 
 import { friendlyName } from '../names';
 import { useEffect, useState } from 'react';
-import { Modal, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { Modal } from './screen';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -70,7 +71,7 @@ export function CompareModal({
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal fullBleed visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={[styles.dark, { paddingTop: insets.top }]}>
         <View style={styles.compareHeader}>
           <TouchableOpacity onPress={onClose}>

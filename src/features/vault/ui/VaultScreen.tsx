@@ -45,6 +45,12 @@ import {
 import { setWatchInfo, watchInfoOf } from './logic';
 import { CompareModal } from './playback';
 import { SlideshowModal } from './slideshow';
+import { LiveProvider, useLiveScope } from './live';
+import { HomeRows } from './homeRowsUI';
+import { KeywordManager } from './keywordManager';
+import { Triage, type TriageMode } from './triage';
+import { homeRows } from '../homeRows';
+import { fuzzyFind, rememberSearch } from '../fuzzy';
 import { DuplicateReview } from './dupReview';
 import { MetaImportSheet } from './metaImportUI';
 import { WifiScreen } from './wifiUI';
@@ -57,12 +63,13 @@ import SearchSheet from './SearchSheet';
 import { PasscodeSheet, SettingsSheet, type PasscodeMode } from './security';
 import { BulkEditSheet, newSmartFilterDraft, SmartFilterSheet, ViewOptionsSheet } from './sheets';
 import Sidebar from './Sidebar';
-import { paletteFor, rgbOf, sheet, ThemeContext, usePalette, useStyles, withAccent, type Palette } from './theme';
+import { rgbOf, sheet, themeFor, ThemeContext, usePalette, useStyles, type Palette } from './theme';
 import {
   SORTS,
   WATCH_SORTS,
   type CompressQuality,
   type GroupBy,
+  type DateGroup,
   type ImportSource,
   type OverviewData,
   type PasscodeKind,
@@ -80,6 +87,7 @@ import {
 import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
+import { onQuick, pickFavourite, type QuickKind } from '../quickOpen';
 import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
 import OverviewScreen from './OverviewScreen';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -98,7 +106,7 @@ const EMPTY_OVERVIEW: OverviewData = { kept: [], series: [], members: [] };
 /** Picks the light or dark colours, then renders the screen inside them. */
 export default function VaultScreen(props: VaultScreenProps) {
   const system = useColorScheme();
-  const palette = withAccent(paletteFor(resolveScheme(props.viewOptions.theme, system)), props.viewOptions.accent);
+  const palette = themeFor(resolveScheme(props.viewOptions.theme, system), props.viewOptions);
   return (
     <ThemeContext.Provider value={palette}>
       <StatusBar style={palette.scheme === 'dark' ? 'light' : 'dark'} />
@@ -195,9 +203,10 @@ function VaultScreenBody({
   }, [wrappedRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // An On this day or yearly Wrapped notification was tapped.
-  const [memoryKind, setMemoryKind] = useState<'onThisDay' | undefined>(undefined);
+  const [memoryKind, setMemoryKind] = useState<'onThisDay' | 'today' | undefined>(undefined);
   const [openYear, setOpenYear] = useState(false);
   const [openMonth, setOpenMonth] = useState(false);
+  const [openWeek, setOpenWeek] = useState(false);
   useEffect(() => {
     if (!openRequest) return;
     if (openRequest === 'onThisDay') {
@@ -205,6 +214,7 @@ function VaultScreenBody({
       setInsights('memories');
     } else {
       if (openRequest === 'monthWrapped') setOpenMonth(true);
+      else if (openRequest === 'weekWrapped') setOpenWeek(true);
       else setOpenYear(true);
       setOpenWrapped(true);
       setInsights('wrapped');
@@ -240,6 +250,8 @@ function VaultScreenBody({
   const [options, setOptions] = useState<{ title: string; options: OptionItem[] } | null>(null);
   const [dateFor, setDateFor] = useState<string[] | null>(null);
   const [slideshow, setSlideshow] = useState<{ items: VaultItem[]; start: number } | null>(null);
+  const [keywordsOpen, setKeywordsOpen] = useState(dev?.keywordsOpen ?? false);
+  const [triage, setTriage] = useState<{ mode: TriageMode; queue: VaultItem[] } | null>(null);
   const [compare, setCompare] = useState<[VaultItem, VaultItem] | null>(null);
   const [dupReview, setDupReview] = useState<'duplicates' | 'similar' | null>(dev?.dupReviewOpen ? 'similar' : null);
   const [metaOpen, setMetaOpen] = useState(dev?.metaImportOpen ?? false);
@@ -264,6 +276,13 @@ function VaultScreenBody({
   const [playing, setPlaying] = useState<VaultItem | null>(
     () => items.find((i) => i.id === dev?.viewerId) ?? null
   );
+  // Cards on the home rows play their video (the one most in view); everything stops while something opens on top.
+  const live = useLiveScope({
+    enableVideo,
+    sound: prefs.liveSound,
+    onSound: (on) => actions.setPrefs({ ...prefs, liveSound: on }).catch(() => undefined),
+    paused: !!playing || !!slideshow || !!insights,
+  });
   /** What swiping in the viewer moves through: a series' episodes, else the list on screen. */
   const [playList, setPlayList] = useState<VaultItem[] | null>(null);
 
@@ -285,7 +304,24 @@ function VaultScreenBody({
     let cancelled = false;
     const smart = isSmartSearch(parsedSearch);
     const t = setTimeout(() => {
-      (parsedSearch.text ? actions.search(parsedSearch.text) : Promise.resolve(items))
+      (parsedSearch.text
+        ? Promise.all([actions.search(parsedSearch.text).catch(() => [] as VaultItem[]), actions.searchBookmarks(parsedSearch.text).catch(() => [] as string[])]).then(([found, marked]) => {
+            // Word matches first; then bookmark names, keywords, and near misses ("famly" finds "family").
+            const seen = new Set(found.map((v) => v.id));
+            const extra: VaultItem[] = [];
+            const add = (v: VaultItem | undefined) => {
+              if (v && !seen.has(v.id)) {
+                seen.add(v.id);
+                extra.push(v);
+              }
+            };
+            const byId = new Map(items.map((v) => [v.id, v]));
+            for (const id of marked) add(byId.get(id));
+            for (const v of fuzzyFind(parsedSearch.text, items, (x) => `${friendlyName(x)} ${x.title ?? ''} ${x.filename} ${x.tagNames.join(' ')} ${x.notes ?? ''}`)) add(v);
+            return [...found, ...extra];
+          })
+        : Promise.resolve(items)
+      )
         .then((r) => {
           const out = smart
             ? r.filter(
@@ -317,6 +353,24 @@ function VaultScreenBody({
   // Private videos never appear anywhere except the unlocked Private area:
   // not in lists, counts, search, duplicates, smart filters or albums.
   const publicItems = useMemo(() => items.filter((v) => !v.isPrivate), [items]);
+
+  // A quick link (a Control Center button): a random favourite, any video, or today's memory.
+  // Opened before the library is loaded, it waits for it.
+  const [quick, setQuick] = useState<QuickKind | null>(null);
+  useEffect(() => onQuick(setQuick), []);
+  useEffect(() => {
+    if (!quick) return;
+    if (quick === 'memory') {
+      setQuick(null);
+      setMemoryKind('today');
+      setInsights('memories');
+      return;
+    }
+    if (!publicItems.length) return;
+    const v = quick === 'favourite' ? pickFavourite(publicItems) : publicItems[Math.floor(Math.random() * publicItems.length)];
+    setQuick(null);
+    if (v) setPlaying(v);
+  }, [quick, publicItems]); // eslint-disable-line react-hooks/exhaustive-deps
   const privateOpen = privateUnlocked && !decoy;
   const privateItems = useMemo(() => (privateOpen ? items.filter((v) => v.isPrivate) : []), [items, privateOpen]);
   const publicIds = useMemo(() => new Set(publicItems.map((v) => v.id)), [publicItems]);
@@ -475,6 +529,22 @@ function VaultScreenBody({
   function setViewOptions(next: ViewOptions) {
     actions.onViewOptionsChange(next).catch(fail('VIEW'));
   }
+
+  /** Pinch on the grid: one tile size bigger (1) or smaller (-1). */
+  function pinchSize(dir: 1 | -1) {
+    const order: ViewOptions['size'][] = ['small', 'medium', 'large', 'xlarge'];
+    const at = Math.max(0, order.indexOf(viewOptions.size === 'fit' ? 'large' : viewOptions.size));
+    const next = order[Math.min(order.length - 1, Math.max(0, at + dir))];
+    if (next === viewOptions.size) return;
+    tick();
+    setViewOptions({ ...viewOptions, size: next });
+  }
+
+  // Video id -> series name, for "Group by series".
+  const seriesOf = useMemo(() => {
+    const names = new Map(overview.series.map((x) => [x.id, x.name]));
+    return new Map(overview.members.map((m) => [m.videoId, names.get(m.seriesId) ?? 'Series']));
+  }, [overview]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -811,6 +881,14 @@ function VaultScreenBody({
       options: [
         { label: t.pinned ? 'Unpin keyword' : 'Pin keyword to top', onPress: () => actions.onPinTag(t.id, !t.pinned).catch(fail('TAG')) },
         { label: 'Show videos', onPress: () => pickFilter({ kind: 'tag', tag: t.name }) },
+        {
+          label: 'Manage keywords…',
+          hint: 'Rename, merge, colour',
+          onPress: () => {
+            setSidebarOpen(false);
+            setKeywordsOpen(true);
+          },
+        },
       ],
     });
   }
@@ -850,7 +928,7 @@ function VaultScreenBody({
   }
 
   /** Timeline: group the grid by month or day if it isn't, then scroll there. */
-  function jumpToPeriod(key: string, by: Exclude<GroupBy, 'none'>) {
+  function jumpToPeriod(key: string, by: DateGroup) {
     if (filter.kind !== 'all') setFilter({ kind: 'all' });
     if (viewOptions.groupBy !== by) setViewOptions({ ...viewOptions, groupBy: by, sort: 'recent' });
     setTimeout(() => setJumpTo({ key, nonce: Date.now() }), 60);
@@ -907,6 +985,39 @@ function VaultScreenBody({
     if (selectMode) exitSelect();
     actions.setPrefs({ ...prefs, videosMode: m }).catch(fail('MODE'));
   }
+
+  // Quick tagging: videos without a keyword, newest first. Keep or delete: here a month, not played in six, biggest first.
+  const triageQueues = useMemo(() => {
+    const now = Date.now();
+    const last = new Map<string, number>();
+    for (const x of allPlays) last.set(x.videoId, Math.max(last.get(x.videoId) ?? 0, x.startedAt));
+    return {
+      tag: publicItems.filter((v) => v.tagNames.length === 0).sort((a, b) => b.importedAt - a.importedAt),
+      keep: publicItems
+        .filter((v) => v.importedAt < now - 30 * 86_400_000 && (last.get(v.id) ?? 0) < now - 182 * 86_400_000)
+        .sort((a, b) => b.sizeBytes - a.sizeBytes)
+        .slice(0, 150),
+    };
+  }, [publicItems, allPlays]);
+  useEffect(() => {
+    if (dev?.triage) setTriage({ mode: dev.triage, queue: dev.triage === 'tag' ? publicItems.slice(0, 6) : publicItems.slice(0, 6) });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Home rows above the grid (All Videos, nothing searched).
+  const homeList = useMemo(
+    () => (prefs.homeRows && filter.kind === 'all' && !results && look !== 'simple' && look !== 'desktop' && !selectMode ? homeRows(publicItems, allPlays, Date.now()) : []),
+    [prefs.homeRows, filter.kind, results, look, selectMode, publicItems, allPlays]
+  );
+
+  // As you type: videos whose name is close, and keywords that start with what you typed.
+  const searchSuggestions = useMemo(() => {
+    const t = parsedSearch.text.trim();
+    if (!searchOpen || t.length < 2) return { videos: [] as VaultItem[], tags: [] as string[] };
+    return {
+      videos: fuzzyFind(t, items, (x) => `${friendlyName(x)} ${x.title ?? ''}`, 5),
+      tags: allTags.map((g) => g.name).filter((n) => n.toLowerCase().includes(t.toLowerCase())).slice(0, 6),
+    };
+  }, [searchOpen, parsedSearch.text, items, allTags]);
 
   const listHeader = (
     <View style={[styles.listHeader, { paddingTop: look === 'desktop' ? 8 : insets.top + 56 }]}>
@@ -1065,6 +1176,16 @@ function VaultScreenBody({
           </ScrollView>
         </View>
       )}
+      {homeList.length > 0 && (
+        <HomeRows
+          rows={homeList}
+          onPlay={(list, v) => {
+            setPlayList(list);
+            setPlaying(v);
+          }}
+          onHide={() => actions.setPrefs({ ...prefs, homeRows: false }).catch(fail('PREFS'))}
+        />
+      )}
       {!results && !special && look !== 'simple' && look !== 'desktop' && (
         <View style={styles.sortRow}>
           <TouchableOpacity style={styles.chip} onPress={() => setViewOptionsOpen(true)}>
@@ -1109,6 +1230,7 @@ function VaultScreenBody({
   );
 
   return (
+    <LiveProvider value={live.value}>
     <View style={styles.screen}>
       {look === 'detailed' && mode === 'normal' ? (
         <DetailedList
@@ -1163,6 +1285,9 @@ function VaultScreenBody({
           onLongPressTile={mode === 'normal' ? onLongPressTile : undefined}
           linked={look === 'simple' ? undefined : linkedIds}
           resume={look === 'simple' ? undefined : resume}
+          seriesOf={seriesOf}
+          onPinchSize={look === 'simple' || look === 'compact' ? undefined : pinchSize}
+          onScrollExtra={live.scrollProps.onScroll}
         />
       )}
 
@@ -1234,7 +1359,17 @@ function VaultScreenBody({
           chips={query.trim() && isSmartSearch(parsedSearch) ? parsedSearch.chips : []}
           matches={results?.length ?? null}
           onChange={setQuery}
-          onClose={() => setSearchOpen(false)}
+          recent={prefs.recentSearches}
+          suggestions={searchSuggestions}
+          onOpenVideo={(v) => {
+            setSearchOpen(false);
+            setPlaying(v);
+          }}
+          onClearRecent={() => actions.setPrefs({ ...prefs, recentSearches: [] }).catch(fail('PREFS'))}
+          onClose={() => {
+            setSearchOpen(false);
+            if (query.trim()) actions.setPrefs({ ...prefs, recentSearches: rememberSearch(prefs.recentSearches, query) }).catch(fail('PREFS'));
+          }}
           onSaveSmart={() => {
             setSearchOpen(false);
             setEditingSmart({ ...newSmartFilterDraft(query), mode: 'save' });
@@ -1282,6 +1417,22 @@ function VaultScreenBody({
           onFolderOptions={folderOptions}
           onSmartOptions={smartOptions}
           onTagOptions={tagOptions}
+          onManageKeywords={() => {
+            setSidebarOpen(false);
+            setKeywordsOpen(true);
+          }}
+          tidy={{
+            untagged: triageQueues.tag.length,
+            cold: triageQueues.keep.length,
+            onQuickTag: () => {
+              setSidebarOpen(false);
+              setTriage({ mode: 'tag', queue: triageQueues.tag });
+            },
+            onKeepOrDelete: () => {
+              setSidebarOpen(false);
+              setTriage({ mode: 'keep', queue: triageQueues.keep });
+            },
+          }}
           onCalendar={() => {
             setSidebarOpen(false);
             setCalendarOpen(true);
@@ -1457,6 +1608,7 @@ function VaultScreenBody({
           }}
           onExportBackup={() => actions.onExportBackup().catch(fail('BACKUP'))}
           onImportBackup={() => actions.onImportBackup().catch(fail('BACKUP'))}
+          backups={{ list: actions.listAutoBackups, now: actions.backupNow, restore: actions.restoreAutoBackup }}
           canMakeSmaller={actions.canMakeSmaller()}
           importQuality={importQuality}
           onImportQuality={(q) => {
@@ -1505,7 +1657,7 @@ function VaultScreenBody({
       )}
 
       {personalise && (
-        <PersonaliseSheet viewOptions={viewOptions} onViewOptions={setViewOptions} prefs={prefs} actions={actions} onClose={() => setPersonalise(false)} />
+        <PersonaliseSheet viewOptions={viewOptions} onViewOptions={setViewOptions} prefs={prefs} actions={actions} items={publicItems} onClose={() => setPersonalise(false)} />
       )}
 
       {insights && (
@@ -1516,6 +1668,7 @@ function VaultScreenBody({
           initialMemoryKind={memoryKind}
           initialYear={openYear}
           initialMonth={openMonth}
+          initialWeek={openWeek}
           initialHistoryStats={dev?.historyStats}
           items={inPrivate ? privateItems : publicItems}
           deleted={visibleTrash}
@@ -1583,6 +1736,30 @@ function VaultScreenBody({
             setPlayList(null);
             loadPlayCounts();
           }}
+        />
+      )}
+
+      {triage && <Triage mode={triage.mode} queue={triage.queue} tags={allTags} actions={actions} enableVideo={enableVideo} onClose={() => {
+        setTriage(null);
+        loadPlayCounts();
+      }} />}
+
+      {keywordsOpen && (
+        <KeywordManager
+          tags={allTags}
+          counts={tagCounts}
+          actions={actions}
+          onShow={(name) => {
+            setKeywordsOpen(false);
+            pickFilter({ kind: 'tag', tag: name });
+          }}
+          onRenamed={(from, to) => {
+            if (!prefs.customMemories.some((c) => c.tag === from)) return;
+            actions
+              .setPrefs({ ...prefs, customMemories: prefs.customMemories.map((c) => (c.tag === from ? { ...c, tag: to } : c)) })
+              .catch(fail('PREFS'));
+          }}
+          onClose={() => setKeywordsOpen(false)}
         />
       )}
 
@@ -1677,6 +1854,7 @@ function VaultScreenBody({
         />
       )}
     </View>
+    </LiveProvider>
   );
 }
 

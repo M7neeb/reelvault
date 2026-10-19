@@ -9,6 +9,13 @@
 // The .ts extension lets Node run this file directly in the tests.
 import { friendlyName } from './names.ts';
 
+/** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
+function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
+  const list = m.get(k);
+  if (list) list.push(v);
+  else m.set(k, [v]);
+}
+
 export type OvStatus = 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped';
 
 type Thumb = number | string | { uri: string };
@@ -209,7 +216,7 @@ export function buildOverview(
   const visible = videos.filter((v) => opts.includePrivate || !v.isPrivate);
   const byId = new Map(visible.map((v) => [v.id, v]));
   const byVideo = new Map<string, OvPlay[]>();
-  for (const p of plays) byVideo.set(p.videoId, [...(byVideo.get(p.videoId) ?? []), p]);
+  for (const p of plays) pushTo(byVideo, p.videoId, p);
 
   const grouped = new Set<string>();
   const out: OvEntry[] = [];
@@ -380,7 +387,7 @@ export function suggestSeries(videos: OvVideo[], members: OvMember[], max = 6): 
     const base = seriesBase(name);
     // Only names that actually had a number taken off; a plain "Holiday" twice is not a series.
     if (base.length < 2 || base === name.toLowerCase().replace(/[\s._]+/g, ' ')) continue;
-    groups.set(base, [...(groups.get(base) ?? []), v]);
+    pushTo(groups, base, v);
   }
   return [...groups.values()]
     .filter((g) => g.length >= 2)

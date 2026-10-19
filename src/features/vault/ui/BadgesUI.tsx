@@ -11,19 +11,23 @@
  * - Personal records as photos dropped on a table, almost-there rings,
  *   recently earned, every badge by group (filter: all, earned, to do; secret
  *   ones show "???"), challenges won and your journey.
+ * - The badge road: every badge you earned laid out as a winding path, in the
+ *   order you earned them, a "you are here" pin, and the next ones ahead.
  * Tap a badge for its page: tilt the medal with your finger, read what it
  * takes, every step of its ladder and the video behind it.
  * Presentational only; achievements.ts and recap.ts work it out.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { summarize, TIER_NAMES, type AchGroup, type Achievement } from '../achievements';
+import { badgeRoad } from '../badgeRoad';
 import type { Milestone, Record_ } from '../recap';
 import { success, tick } from './haptics';
 import Icon from './Icon';
@@ -557,6 +561,9 @@ export default function Badges({
         </>
       )}
 
+      {/* ── the road ──────────────────────────────────────────── */}
+      <BadgeRoad list={list} onOpen={setOpen} />
+
       {/* ── the trophy room ───────────────────────────────────── */}
       <SectionTitle index={10} title="Trophy room" detail={`${allBadges.filter((a) => a.unlocked).length} of ${allBadges.length}`} />
       <Animated.View entering={enterUp(10)}>
@@ -720,6 +727,93 @@ export default function Badges({
   );
 }
 
+/** Your badges as a winding road: earned ones in order, where you are, what is next. */
+function BadgeRoad({ list, onOpen }: { list: Achievement[]; onOpen: (a: Achievement) => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const reduce = useReducedMotion();
+  const [all, setAll] = useState(false);
+  const [w, setW] = useState(0);
+  const road = useMemo(() => badgeRoad(list, { earnedMax: all ? undefined : 10, ahead: 4 }), [list, all]);
+  if (!road.stops.length) return null;
+  const ROW = 104;
+  const NODE = 56;
+  const amp = Math.max(0, w / 2 - NODE / 2 - 70);
+  const pos = road.stops.map((_, i) => ({ x: w / 2 + Math.sin(i * 1.15) * amp, y: 34 + i * ROW + NODE / 2 }));
+  const lastEarned = road.stops.map((s) => s.state).lastIndexOf('earned');
+  const next = road.stops.find((s) => s.state === 'next');
+
+  // The trail: little dots between the stops, gold where you have been.
+  const dots: { x: number; y: number; done: boolean }[] = [];
+  for (let i = 0; i < pos.length - 1; i++) {
+    const a = pos[i];
+    const b = pos[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.floor((len - NODE) / 11);
+    for (let k = 1; k <= n; k++) {
+      const t = (NODE / 2 + k * 11) / len;
+      dots.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, done: i < lastEarned });
+    }
+  }
+  const here = lastEarned >= 0 && lastEarned < pos.length - 1 ? { x: (pos[lastEarned].x + pos[lastEarned + 1].x) / 2, y: (pos[lastEarned].y + pos[lastEarned + 1].y) / 2 } : null;
+
+  return (
+    <Card index={11} title="Your badge road" sub={`${road.earned} earned${next ? ` · next: ${next.a.title}` : ''}`}>
+      {road.hidden > 0 && !all && (
+        <TouchableOpacity onPress={() => setAll(true)} style={{ paddingBottom: 6 }}>
+          <Text style={styles.link}>Show the whole road ({road.hidden} earlier)</Text>
+        </TouchableOpacity>
+      )}
+      <View style={{ height: w ? pos[pos.length - 1].y + NODE / 2 + 40 : 0 }} onLayout={(e) => setW(e.nativeEvent.layout.width)}>
+        {w > 0 && (
+          <>
+            {dots.map((d, i) => (
+              <View key={i} style={[styles.roadDot, { left: d.x - 3, top: d.y - 3, backgroundColor: d.done ? '#FFD60A' : p.separator }]} />
+            ))}
+            {road.stops.map((s, i) => {
+              const { x, y } = pos[i];
+              const earned = s.state === 'earned';
+              return (
+                <Animated.View
+                  key={s.a.id}
+                  entering={reduce ? undefined : ZoomIn.delay(Math.min(i, 14) * 70).springify().damping(14)}
+                  style={{ position: 'absolute', left: x - NODE / 2, top: y - NODE / 2, width: NODE, height: NODE, opacity: s.state === 'ahead' ? 0.55 : 1 }}>
+                  <TouchableOpacity onPress={() => onOpen(s.a)} accessibilityLabel={`${s.a.title}, ${earned ? 'earned' : progressText(s.a)}`}>
+                    <Medallion icon={s.a.icon} tier={s.a.tier} unlocked={earned} size={NODE} progress={earned ? undefined : s.a.current / s.a.target} />
+                  </TouchableOpacity>
+                </Animated.View>
+              );
+            })}
+            {road.stops.map((s, i) => {
+              const { x, y } = pos[i];
+              const right = x <= w / 2;
+              const earned = s.state === 'earned';
+              const labelW = right ? w - x - NODE / 2 - 10 : x - NODE / 2 - 10;
+              return (
+                <View key={`l${s.a.id}`} pointerEvents="none" style={[styles.roadLabel, { top: y - 22, width: Math.max(80, labelW) }, right ? { left: x + NODE / 2 + 10 } : { left: x - NODE / 2 - 10 - Math.max(80, labelW), alignItems: 'flex-end' }]}>
+                  {!!s.month && <Text style={styles.roadMonth}>{s.month.toUpperCase()}</Text>}
+                  <Text style={[styles.roadTitle, !earned && { color: p.textSoft }, !right && { textAlign: 'right' }]} numberOfLines={2}>
+                    {s.a.title}
+                  </Text>
+                  <Text style={[styles.roadSub, !right && { textAlign: 'right' }]} numberOfLines={1}>
+                    {earned ? `${s.a.kind === 'ladder' ? `${TIER_NAMES[s.a.tier]} · ` : ''}${day(s.a.earnedAt!)}` : `${Math.round((s.a.current / s.a.target) * 100)} % · ${progressText(s.a)}`}
+                  </Text>
+                </View>
+              );
+            })}
+            {here && (
+              <View pointerEvents="none" style={[styles.roadHere, { left: here.x - 52, top: here.y - 12 }]}>
+                <Icon name="mapPin" size={11} color="#000" />
+                <Text style={styles.roadHereText}>YOU ARE HERE</Text>
+              </View>
+            )}
+          </>
+        )}
+      </View>
+    </Card>
+  );
+}
+
 function BadgeSheet({
   a,
   family,
@@ -810,6 +904,13 @@ function BadgeSheet({
 
 const makeStyles = (p: Palette) =>
   sheet({
+    roadDot: { position: 'absolute', width: 6, height: 6, borderRadius: 3 },
+    roadLabel: { position: 'absolute', gap: 1 },
+    roadMonth: { color: p.accent, fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+    roadTitle: { color: p.text, fontSize: 13, fontWeight: '800' },
+    roadSub: { color: p.textSecondary, fontSize: 11 },
+    roadHere: { position: 'absolute', width: 104, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#FFD60A', borderRadius: 999, paddingVertical: 4 },
+    roadHereText: { color: '#000', fontSize: 10, fontWeight: '900', letterSpacing: 0.6 },
     muted: { color: p.textSecondary, fontSize: 12, lineHeight: 16 },
     progress: { color: p.textSoft, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
     link: { color: p.link, fontSize: 14, fontWeight: '700', textAlign: 'center' },

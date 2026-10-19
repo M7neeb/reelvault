@@ -1,7 +1,8 @@
 /**
- * Screen rotation. The app stays upright everywhere except the video viewer
- * and the slideshow, which turn with the phone (and the full-screen button
- * turns a landscape video sideways on its own).
+ * Screen rotation. By default the app stays upright everywhere except the
+ * video viewer and the slideshow, which turn with the phone (and the
+ * full-screen button turns a landscape video sideways on its own). With
+ * "Turn with the phone" on (Settings → Personalise) the whole app turns.
  *
  * Optional like the other native parts: in builds before 1.9.1, Expo Go and
  * the browser preview every call does nothing.
@@ -21,6 +22,20 @@ const quiet = (job: Promise<void> | undefined) => job?.catch(() => undefined);
 /** Turn with the phone (still respects the Control Center rotation lock). */
 export function allowRotation(): void {
   if (SO) void quiet(SO.unlockAsync());
+}
+
+let everywhere = false;
+
+/** Settings → Personalise → Turn with the phone: the whole app turns, not only the player. */
+export function setRotateEverywhere(on: boolean): void {
+  everywhere = on;
+  restoreRotation();
+}
+
+/** After the player or the slideshow closes: back to how the app turns (upright, or with the phone). */
+export function restoreRotation(): void {
+  if (everywhere) allowRotation();
+  else lockUpright();
 }
 
 /** Back to upright. */

@@ -76,6 +76,8 @@ export type Backup = {
   series: BackupSeries[];
   /** v2: your settings (vault.prefs), as saved. */
   prefs?: Record<string, unknown> | null;
+  /** Overview reviews, rewatches, Plan to Watch order and rating history; series as 'S:<name>'. */
+  overview?: unknown;
 };
 
 /** Reads a backup file; null when it isn't one. */
@@ -100,6 +102,7 @@ export function parseBackup(json: string): Backup | null {
     pinnedKeywords: Array.isArray(b.pinnedKeywords) ? b.pinnedKeywords.filter((k) => typeof k === 'string') : [],
     kept: Array.isArray(b.kept) ? b.kept.filter((k) => k && typeof k.id === 'string' && typeof k.filename === 'string') : [],
     prefs: b.prefs && typeof b.prefs === 'object' && !Array.isArray(b.prefs) ? (b.prefs as Record<string, unknown>) : null,
+    overview: b.overview && typeof b.overview === 'object' ? b.overview : null,
     series: Array.isArray(b.series)
       ? b.series
           .filter((x) => x && typeof x.name === 'string' && Array.isArray(x.episodes))

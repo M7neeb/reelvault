@@ -6,7 +6,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, PanResponder, ScrollView, Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
+import { PanResponder, ScrollView, Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
+import { Modal } from './screen';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

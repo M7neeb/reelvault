@@ -20,7 +20,7 @@ export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'dura
 /** Sorts worked out from your plays (the rest come sorted from the database). */
 export const WATCH_SORTS: VaultSort[] = ['mostWatched', 'leastWatched', 'lastWatched'];
 
-export type UiTag = { id: number; name: string; pinned?: boolean };
+export type UiTag = { id: number; name: string; pinned?: boolean; color?: string | null };
 
 /** Watch status. The same values Simkl uses (redeclared from `../types`, see above). */
 export type UiStatus = 'plantowatch' | 'watching' | 'completed' | 'hold' | 'dropped';
@@ -87,13 +87,21 @@ export const THUMB_INFOS: { key: ThumbInfo; label: string }[] = [
 ];
 
 /** HashPhotos' Grouping: section headers above the rows (never tiles inside the grid). */
-export type GroupBy = 'none' | 'day' | 'month' | 'year';
+export type GroupBy = 'none' | 'day' | 'week' | 'month' | 'year' | 'rating' | 'keyword' | 'series' | 'length';
+
+/** The groupings by filming date (the timeline and calendar jump between these). */
+export type DateGroup = 'day' | 'week' | 'month' | 'year';
 
 export const GROUPINGS: { key: GroupBy; label: string }[] = [
   { key: 'none', label: 'None' },
   { key: 'day', label: 'Day' },
+  { key: 'week', label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'year', label: 'Year' },
+  { key: 'rating', label: 'Rating' },
+  { key: 'keyword', label: 'Keyword' },
+  { key: 'series', label: 'Series' },
+  { key: 'length', label: 'Length' },
 ];
 
 export type ThemeMode = 'system' | 'light' | 'dark';
@@ -149,6 +157,18 @@ export type ViewOptions = {
   showRating: boolean;
   showKeywords: boolean;
   theme: ThemeMode;
+  /** A colour set for the whole app; 'video' = tinted from `videoColor`. */
+  colors: import('./paletteMath').ColorSet;
+  /** The colour taken from a video's picture, and which video. */
+  videoColor: string | null;
+  videoColorFrom: string | null;
+  font: import('./paletteMath').FontKey;
+  glass: import('./paletteMath').GlassKey;
+  corners: import('./paletteMath').CornerKey;
+  /** A thin line around cards. */
+  outlined: boolean;
+  /** The whole app turns with the phone, not only the player. */
+  rotate: boolean;
 };
 
 export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
@@ -162,6 +182,14 @@ export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   showRating: true,
   showKeywords: true,
   theme: 'system',
+  colors: 'standard',
+  videoColor: null,
+  videoColorFrom: null,
+  font: 'system',
+  glass: 'regular',
+  corners: 'standard',
+  outlined: false,
+  rotate: false,
 };
 
 export type Orientation = 'landscape' | 'portrait' | 'square';
@@ -350,6 +378,12 @@ export type VaultActions = {
   onAddTag: (videoId: string, name: string) => Promise<void>;
   onRemoveTag: (videoId: string, tagId: number) => Promise<void>;
   onPinTag: (tagId: number, pinned: boolean) => Promise<void>;
+  /** Keyword manager. Renaming onto an existing keyword merges them. */
+  renameTag: (tagId: number, name: string) => Promise<void>;
+  mergeTags: (fromIds: number[], intoId: number) => Promise<void>;
+  deleteTag: (tagId: number) => Promise<void>;
+  setTagColor: (tagId: number, color: string | null) => Promise<void>;
+  deleteUnusedTags: () => Promise<number>;
   /** Bulk edits for the selected videos. `null` status / rating 0 clears it. */
   onRateMany: (videoIds: string[], rating: number) => Promise<void>;
   onAddTagMany: (videoIds: string[], name: string) => Promise<void>;
@@ -407,6 +441,20 @@ export type VaultActions = {
   ) => Promise<UiSmallerResult>;
   onCancelMakeSmaller: () => void;
   /** Make every imported video smaller right away (null = off). */
+  /** The automatic weekly backups of your info, newest first. */
+  listAutoBackups: () => Promise<import('../backup').AutoBackup[]>;
+  /** Makes an automatic backup now. */
+  backupNow: () => Promise<import('../backup').AutoBackup | null>;
+  /** Restores your info from one automatic backup. */
+  restoreAutoBackup: (uri: string) => Promise<{ matched: number; total: number; plays: number } | null>;
+  /** Videos with a bookmark whose name contains `q`. */
+  searchBookmarks: (q: string) => Promise<string[]>;
+  /** What ReelVault takes on the phone, by kind (see housekeeping.ts). */
+  getAppStorage: () => Promise<import('../housekeeping').AppStorage>;
+  /** Clears temporary files, leftovers and old filmstrips; `deep` also empties the picture cache. */
+  tidyStorage: (deep: boolean) => Promise<import('../housekeeping').TidyResult>;
+  /** Removes everything in Recently Deleted for good now. */
+  emptyRecentlyDeleted: () => Promise<number>;
   getImportQuality: () => Promise<CompressQuality | null>;
   setImportQuality: (quality: CompressQuality | null) => Promise<void>;
   /** Open the place a video was filmed in Apple Maps. */
@@ -455,6 +503,9 @@ export type VaultActions = {
   setYearWrappedReminder: (on: boolean) => Promise<boolean>;
   getMonthWrappedReminder: () => Promise<boolean>;
   setMonthWrappedReminder: (on: boolean) => Promise<boolean>;
+  /** Sunday 19:00: your week, your #1 and your run of days. */
+  getWeeklySummary: () => Promise<boolean>;
+  setWeeklySummary: (on: boolean) => Promise<boolean>;
   /** Take one keyword off many videos. */
   onRemoveTagMany: (videoIds: string[], name: string) => Promise<void>;
   /** Remove one sitting from the watch history. */
@@ -467,6 +518,9 @@ export type VaultActions = {
   clearPasscodeLog: () => Promise<void>;
   /** Wi-Fi transfer from a computer (app 1.9+): null when this build has no server. */
   wifi: WifiBridge | null;
+
+  /** A picture's main colours (the video theme); null where it can't be read. */
+  colorsOf: (item: VaultItem) => Promise<{ dominant: string; average: string } | null>;
 
   /* Overview (rate and track your videos like shows). */
   ovCreateSeries: (name: string, videoIds: string[]) => Promise<string>;
@@ -487,6 +541,9 @@ export type VaultActions = {
   ovKeptCover: (id: string) => Promise<boolean>;
   /** Forget removed videos completely. */
   ovForget: (ids: string[]) => Promise<void>;
+  /** Reviews, rewatches, Plan to Watch order and rating history. */
+  loadOvExtra: () => Promise<import('../ovExtra').OvExtra>;
+  saveOvExtra: (x: import('../ovExtra').OvExtra) => Promise<void>;
 };
 
 /** The Wi-Fi transfer server, as the UI sees it. */
@@ -537,10 +594,16 @@ export type VaultPrefs = {
   slideshow: SlideshowOptions;
   /** Albums in the sidebar: A to Z, most watched, or recently used. */
   albumSort: 'name' | 'watched' | 'recent';
+  /** Rows above the library grid (recently added, your best, never watched…). */
+  homeRows: boolean;
+  /** What you searched for lately, newest first. */
+  recentSearches: string[];
   /** How the video player behaves (remembered). */
   player: PlayerOptions;
   /** Videos pinned to the shelf at the top of the library (their ids, in order). */
   pinned: string[];
+  /** Days a video stays in Recently Deleted before it is removed for good. */
+  trashDays: number;
   /** Streak freezes: banked ones, and the days they covered (start of day, ms). */
   freezes: { banked: number; used: number[]; lastEarnedWeek: number | null };
 };
@@ -594,8 +657,11 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   liveSound: true,
   slideshow: DEFAULT_SLIDESHOW,
   albumSort: 'name',
+  homeRows: true,
+  recentSearches: [],
   player: DEFAULT_PLAYER,
   pinned: [],
+  trashDays: 30,
   freezes: { banked: 1, used: [], lastEarnedWeek: null },
 };
 
@@ -616,7 +682,7 @@ export type VaultScreenProps = {
   wrappedRequest?: boolean;
   onWrappedHandled?: () => void;
   /** An On this day or yearly Wrapped notification was tapped. */
-  openRequest?: 'yearWrapped' | 'monthWrapped' | 'onThisDay' | null;
+  openRequest?: 'yearWrapped' | 'monthWrapped' | 'weekWrapped' | 'onThisDay' | null;
   onOpenRequestHandled?: () => void;
   /** Simkl, for linking videos to a movie or episode and scrobbling them. */
   simkl?: import('@/features/simkl/ui/types').SimklBridge;
@@ -650,6 +716,8 @@ export type VaultScreenProps = {
    * Never set by the app.
    */
   devInitialState?: {
+    keywordsOpen?: boolean;
+    triage?: 'tag' | 'keep';
     viewerId?: string;
     sidebarOpen?: boolean;
     searchOpen?: boolean;
@@ -683,7 +751,7 @@ export type VaultScreenProps = {
     personaliseOpen?: boolean;
     /** Overview: open this title ('s:<id>' or 'v:<id>'), or a sheet. */
     overviewKey?: string;
-    overviewSheet?: 'new' | 'edit' | 'add';
+    overviewSheet?: 'new' | 'edit' | 'add' | 'order';
     passcodeOpen?: boolean;
     slideshowOpen?: boolean;
     /** Slideshow: start playing at once (skip the options). */

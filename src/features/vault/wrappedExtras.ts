@@ -75,3 +75,51 @@ export function rewatchMeter(plays: number, videos: number): { perVideo: number;
   const label = perVideo >= 3 ? 'On repeat' : perVideo >= 1.6 ? 'Second helpings' : perVideo > 1.1 ? 'Now and again' : 'Once is enough';
   return { perVideo, label };
 }
+
+/** The club for a story's facts (or a month of them). */
+export function clubFor(f: {
+  plays: number;
+  firsts: number;
+  returns: number;
+  dayparts: ClubInput['dayparts'];
+  completion: number | null;
+  longest: { ms: number } | null;
+  biggestDay: { ms: number } | null;
+}): Club | null {
+  return clubOf({ plays: f.plays, firsts: f.firsts, returns: f.returns, dayparts: f.dayparts, completion: f.completion, longestMs: f.longest?.ms ?? null, biggestDayMs: f.biggestDay?.ms ?? null })?.club ?? null;
+}
+
+/** Your club month by month: how often you switched, where you started and ended, and the one you were in most. */
+export function clubJourney(months: { label: string; club: ClubKey | null }[]): { switches: number; first: Club; last: Club; most: Club; months: number } | null {
+  const seen = months.filter((m): m is { label: string; club: ClubKey } => !!m.club);
+  if (seen.length < 2) return null;
+  let switches = 0;
+  for (let i = 1; i < seen.length; i++) if (seen[i].club !== seen[i - 1].club) switches++;
+  const n = new Map<ClubKey, number>();
+  for (const m of seen) n.set(m.club, (n.get(m.club) ?? 0) + 1);
+  const most = [...n.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const club = (k: ClubKey) => CLUBS.find((c) => c.key === k)!;
+  return { switches, first: club(seen[0].club), last: club(seen[seen.length - 1].club), most: club(most), months: seen.length };
+}
+
+/**
+ * A guess with three answers: the biggest of `list` and two others (one
+ * close, one further down), mixed by `seed`. Null when there is no clear winner.
+ */
+export function quizFrom(list: { id: string; label: string; value: number }[], seed: number): { options: { id: string; label: string }[]; answer: string } | null {
+  const sorted = list.filter((x) => x.value > 0).sort((a, b) => b.value - a.value);
+  if (sorted.length < 3 || sorted[0].value === sorted[1].value) return null;
+  const picks = [sorted[0], sorted[1], sorted[Math.min(sorted.length - 1, 2 + (seed % Math.max(1, sorted.length - 2)))]];
+  const order = [[0, 1, 2], [1, 0, 2], [1, 2, 0], [2, 0, 1], [0, 2, 1], [2, 1, 0]][Math.abs(seed) % 6];
+  return { options: order.map((i) => ({ id: picks[i].id, label: picks[i].label })), answer: sorted[0].id };
+}
+
+/** The same range one year earlier ("October" -> last October). */
+export function yearBefore(r: { start: number; end: number; label: string }): { start: number; end: number; label: string } {
+  const shift = (t: number) => {
+    const d = new Date(t);
+    d.setFullYear(d.getFullYear() - 1);
+    return d.getTime();
+  };
+  return { start: shift(r.start), end: shift(r.end), label: 'a year before' };
+}

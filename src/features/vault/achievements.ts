@@ -102,18 +102,37 @@ const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const GB = 1024 ** 3;
 
-const startOfDay = (t: number) => {
+/**
+ * Calendar maths, remembered per quarter hour: every time zone's day starts
+ * on a quarter hour, so all times in one quarter share their day. With tens of
+ * thousands of plays this saves most of the work the badges do.
+ */
+const QUARTER = 900_000;
+function byQuarter<T>(f: (t: number) => T): (t: number) => T {
+  const cache = new Map<number, T>();
+  return (t: number) => {
+    const q = Math.floor(t / QUARTER);
+    let v = cache.get(q);
+    if (v === undefined) {
+      v = f(t);
+      if (cache.size > 200_000) cache.clear();
+      cache.set(q, v);
+    }
+    return v;
+  };
+}
+const startOfDay = byQuarter((t) => {
   const d = new Date(t);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-};
-const dayKey = (t: number) => {
+});
+const dayKey = byQuarter((t) => {
   const d = new Date(t);
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-};
-const monday = (t: number) => {
+});
+const monday = byQuarter((t) => {
   const d = new Date(t);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime();
-};
+});
 
 /** When a running total first reaches `target` (events in time order), and the event that did it. */
 function whenReached(events: { at: number; add: number; videoId?: string }[], target: number): Hit {
@@ -191,7 +210,16 @@ function km(a: { lat: number; lon: number }, b: { lat: number; lon: number }): n
 }
 
 const watchTimes = (i: AchInput) => i.plays.map((p) => p.startedAt);
-const allTimes = (i: AchInput) => [...watchTimes(i), ...(i.simkl?.times ?? [])];
+const allTimes = (i: AchInput) => once(i, 'allTimes', () => [...watchTimes(i), ...(i.simkl?.times ?? [])]);
+
+/** Worked out once per input: several badge levels ask for the same thing. */
+const onceCache = new WeakMap<AchInput, Map<string, unknown>>();
+function once<T>(i: AchInput, key: string, f: () => T): T {
+  let m = onceCache.get(i);
+  if (!m) onceCache.set(i, (m = new Map()));
+  if (!m.has(key)) m.set(key, f());
+  return m.get(key) as T;
+}
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 const LADDERS: Ladder[] = [
@@ -317,8 +345,8 @@ const LADDERS: Ladder[] = [
     title: (n) => `${n}-day streak`,
     detail: (n) => `Watch something ${n} days in a row`,
     unit: 'days',
-    value: (i) => streaks(allTimes(i), i.now).best,
-    when: (i, n) => dated(streaks(allTimes(i), i.now).reachedAt.get(n)),
+    value: (i) => once(i, 'streaks', () => streaks(allTimes(i), i.now)).best,
+    when: (i, n) => dated(once(i, 'streaks', () => streaks(allTimes(i), i.now)).reachedAt.get(n)),
   },
   {
     family: 'days',
@@ -328,11 +356,8 @@ const LADDERS: Ladder[] = [
     title: (n) => `${n} days watched`,
     detail: (n) => `Watch on ${n} different days`,
     unit: 'days',
-    value: (i) => new Set(allTimes(i).map(dayKey)).size,
-    when: (i, n) => {
-      const days = [...new Set(allTimes(i).map(startOfDay))].sort((a, b) => a - b);
-      return dated(days[n - 1]);
-    },
+    value: (i) => once(i, 'days', () => [...new Set(allTimes(i).map(startOfDay))].sort((a, b) => a - b)).length,
+    when: (i, n) => dated(once(i, 'days', () => [...new Set(allTimes(i).map(startOfDay))].sort((a, b) => a - b))[n - 1]),
   },
   {
     family: 'perfect-week',
@@ -341,8 +366,8 @@ const LADDERS: Ladder[] = [
     tiers: [1, 4, 12, 52],
     title: (n) => (n === 1 ? 'Perfect week' : `${n} perfect weeks`),
     detail: (n) => (n === 1 ? 'Watch something every day from Monday to Sunday' : `Have ${n} weeks with something watched every day`),
-    value: (i) => perfectWeeks(allTimes(i), i.now).length,
-    when: (i, n) => dated(perfectWeeks(allTimes(i), i.now)[n - 1]),
+    value: (i) => once(i, 'perfect', () => perfectWeeks(allTimes(i), i.now)).length,
+    when: (i, n) => dated(once(i, 'perfect', () => perfectWeeks(allTimes(i), i.now))[n - 1]),
   },
   {
     family: 'saver',
@@ -990,26 +1015,56 @@ export function weeklyFor(weekStart: number): Weekly {
   return WEEKLIES[Math.floor((weekStart + 3 * DAY) / (7 * DAY)) % WEEKLIES.length];
 }
 
-function weeklyProgress(i: AchInput, start: number, c: Weekly): { current: number; at: number | null; videoId: string | null } {
+/** Plays in time order, videos by id and memory times, worked out once per input (weeks look them up many times). */
+type WeekCtx = { sorted: AchPlay[]; byId: Map<string, AchVideo>; memories: number[] };
+const weekCtxCache = new WeakMap<AchInput, WeekCtx>();
+function weekCtx(i: AchInput): WeekCtx {
+  let c = weekCtxCache.get(i);
+  if (!c) {
+    c = {
+      sorted: [...i.plays].sort((a, b) => a.startedAt - b.startedAt),
+      byId: new Map(i.videos.map((v) => [v.id, v])),
+      memories: ev(i, 'memory').map((e) => e.at),
+    };
+    weekCtxCache.set(i, c);
+  }
+  return c;
+}
+
+/** The first play at or after `t` (plays in time order). */
+function firstAtOrAfter(sorted: AchPlay[], t: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid].startedAt < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** `before`: videos played before the week (passed in when going through many weeks in a row). */
+function weeklyProgress(i: AchInput, start: number, c: Weekly, before?: Set<string>): { current: number; at: number | null; videoId: string | null } {
+  const ctx = weekCtx(i);
   const s = new Date(start);
   const end = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 7).getTime();
-  const ps = i.plays.filter((p) => p.startedAt >= start && p.startedAt < end).sort((a, b) => a.startedAt - b.startedAt);
+  const from = firstAtOrAfter(ctx.sorted, start);
+  const ps = ctx.sorted.slice(from, firstAtOrAfter(ctx.sorted, end));
   if (c.key === 'memories') {
-    const es = ev(i, 'memory').filter((e) => e.at >= start && e.at < end);
-    return { current: es.length, at: es[c.target - 1]?.at ?? null, videoId: null };
+    const es = ctx.memories.filter((at) => at >= start && at < end);
+    return { current: es.length, at: es[c.target - 1] ?? null, videoId: null };
   }
   if (c.key === 'hours') {
     const hit = whenReached(ps.map((p) => ({ at: p.startedAt, add: p.watchedMs, videoId: p.videoId })), c.target * HOUR);
     return { current: Math.round((ps.reduce((a, p) => a + p.watchedMs, 0) / HOUR) * 10) / 10, at: hit?.at ?? null, videoId: hit?.videoId ?? null };
   }
-  const byId = new Map(i.videos.map((v) => [v.id, v]));
-  const before = new Set(i.plays.filter((p) => p.startedAt < start).map((p) => p.videoId));
+  const earlier = c.key === 'new' ? (before ?? new Set(ctx.sorted.slice(0, from).map((p) => p.videoId))) : null;
   const seen = new Set<string>();
   let at: number | null = null;
   let videoId: string | null = null;
   for (const p of ps) {
-    const v = byId.get(p.videoId);
-    if (c.key === 'new' && before.has(p.videoId)) continue;
+    const v = ctx.byId.get(p.videoId);
+    if (earlier && earlier.has(p.videoId)) continue;
     if (c.key === 'old' && (!v || p.startedAt - v.createdAt < 365 * DAY)) continue;
     seen.add(c.key === 'days' ? dayKey(p.startedAt) : p.videoId);
     if (at === null && seen.size >= c.target) {
@@ -1020,14 +1075,19 @@ function weeklyProgress(i: AchInput, start: number, c: Weekly): { current: numbe
   return { current: seen.size, at, videoId };
 }
 
-/** When each weekly challenge you won was won, oldest first. */
+/** When each weekly challenge you won was won, oldest first. One pass through the weeks. */
 export function weeklyWins(i: AchInput): number[] {
-  const times = [...i.plays.map((p) => p.startedAt), ...ev(i, 'memory').map((e) => e.at)];
-  if (!times.length) return [];
+  const ctx = weekCtx(i);
+  const first = Math.min(ctx.sorted[0]?.startedAt ?? Infinity, ctx.memories[0] ?? Infinity);
+  if (!Number.isFinite(first)) return [];
   const out: number[] = [];
-  for (let w = monday(Math.min(...times)); w <= i.now; w = monday(w + 8 * DAY)) {
-    const r = weeklyProgress(i, w, weeklyFor(w));
-    if (r.current >= weeklyFor(w).target && r.at !== null) out.push(r.at);
+  const before = new Set<string>();
+  let k = 0;
+  for (let w = monday(first); w <= i.now; w = monday(w + 8 * DAY)) {
+    while (k < ctx.sorted.length && ctx.sorted[k].startedAt < w) before.add(ctx.sorted[k++].videoId);
+    const c = weeklyFor(w);
+    const r = weeklyProgress(i, w, c, before);
+    if (r.current >= c.target && r.at !== null) out.push(r.at);
   }
   return out;
 }

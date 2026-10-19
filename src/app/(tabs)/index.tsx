@@ -11,12 +11,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useHome } from '@/features/home/HomeData';
 import { TAB_BAR_HEIGHT, TabBarSpace } from '@/features/vault/ui/chrome';
+import { SideSafe } from '@/features/vault/ui/screen';
+import { ThemeContext } from '@/features/vault/ui/theme';
 import VaultScreen from '@/features/vault/ui/VaultScreen';
 
 export default function VideosRoute() {
-  const { vault, simkl } = useHome();
+  const { vault, simkl, palette } = useHome();
   const insets = useSafeAreaInsets();
   return (
+    <ThemeContext.Provider value={palette}>
+    <SideSafe>
     <TabBarSpace.Provider value={insets.bottom + TAB_BAR_HEIGHT}>
       <VaultScreen
         items={vault.items}
@@ -42,5 +46,7 @@ export default function VideosRoute() {
         overview={{ kept: vault.kept, series: vault.series, members: vault.members }}
       />
     </TabBarSpace.Provider>
+    </SideSafe>
+    </ThemeContext.Provider>
   );
 }

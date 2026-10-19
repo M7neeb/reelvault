@@ -1,15 +1,17 @@
 import { Directory, File } from 'expo-file-system';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 
+import { frameTo, STRIP_SIDE } from './frames';
 import { filmstripDir } from './storage';
 
-const FRAME_COUNT = 8;
+/** Enough frames that the scrub preview matches where your finger is (they are small: about 10 KB each). */
+export const FRAME_COUNT = 24;
 
 /**
  * Build (or reuse) a row of evenly-spaced stills for the scrubber under the player.
- * Cached in thumbs/<id>/<size>-f0.jpg … so it is generated once per video, not per
+ * Cached in thumbs/<id>/<size>-s<i>.jpg … so it is generated once per video, not per
  * open. The file size is in the name so an edited (trimmed, re-encoded) video gets
- * fresh frames instead of cached old ones.
+ * fresh frames instead of cached old ones. Frames are 240 px; old full-size ones
+ * (<size>-f<i>.jpg) are removed when the new set is made.
  */
 export async function ensureFilmstrip(video: {
   id: string;
@@ -22,7 +24,7 @@ export async function ensureFilmstrip(video: {
   let allCached = true;
 
   for (let i = 0; i < FRAME_COUNT; i++) {
-    const file = new File(dir, `${video.size}-f${i}.jpg`);
+    const file = new File(dir, `${video.size}-s${i}.jpg`);
     if (file.exists) frames.push(file.uri);
     else {
       allCached = false;
@@ -32,16 +34,21 @@ export async function ensureFilmstrip(video: {
   if (allCached && frames.length === FRAME_COUNT) return frames;
 
   if (!dir.exists) dir.create({ intermediates: true });
+  // Frames from before (full size, or another file size): gone.
+  try {
+    for (const f of dir.list()) if (f instanceof File && !f.name.startsWith(`${video.size}-s`)) f.delete();
+  } catch (e) {
+    console.log(`[FILM] old frames not cleared: ${String(e)}`);
+  }
 
   const duration = video.durationMs ?? 0;
   const out: string[] = [];
   for (let i = 0; i < FRAME_COUNT; i++) {
-    const destination = new File(dir, `${video.size}-f${i}.jpg`);
+    const destination = new File(dir, `${video.size}-s${i}.jpg`);
     if (!destination.exists) {
       const time = duration > 0 ? Math.floor((duration * (i + 0.5)) / FRAME_COUNT) : i * 1000;
       try {
-        const shot = await VideoThumbnails.getThumbnailAsync(video.uri, { time });
-        await new File(shot.uri).copy(destination);
+        await frameTo(video.uri, time, destination, STRIP_SIDE);
       } catch (e) {
         console.log(`[FILM] frame ${i} failed: ${String(e)}`);
       }

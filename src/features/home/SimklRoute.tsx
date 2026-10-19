@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SimklScreen from '@/features/simkl/ui/SimklScreen';
 import type { SimklType } from '@/features/simkl/ui/types';
 import { TAB_BAR_HEIGHT, TabBarSpace } from '@/features/vault/ui/chrome';
+import { SideSafe } from '@/features/vault/ui/screen';
 import { ThemeContext } from '@/features/vault/ui/theme';
 
 import { useHome } from './HomeData';
@@ -14,6 +15,7 @@ export default function SimklRoute({ type }: { type: SimklType }) {
   const insets = useSafeAreaInsets();
   return (
     <ThemeContext.Provider value={palette}>
+      <SideSafe>
       <TabBarSpace.Provider value={insets.bottom + TAB_BAR_HEIGHT}>
         <SimklScreen
           category={type}
@@ -31,6 +33,7 @@ export default function SimklRoute({ type }: { type: SimklType }) {
           onOpenHandled={simkl.clearOpenRequest}
         />
       </TabBarSpace.Provider>
+      </SideSafe>
     </ThemeContext.Provider>
   );
 }
