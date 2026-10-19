@@ -33,7 +33,7 @@ export type MetaFile = { format: 'csv' | 'json' | 'xml'; records: MetaRecord[]; 
 const norm = (k: string) => k.toLowerCase().replace(/[^a-z]/g, '');
 
 const FIELDS: Record<keyof MetaRecord, string[]> = {
-  filename: ['filename', 'name', 'file', 'originalfilename', 'originalname', 'path', 'filepath', 'sourcefile', 'url'],
+  filename: ['filename', 'name', 'file', 'originalfilename', 'originalname', 'path', 'filepath', 'sourcefile', 'url', 'about'],
   keywords: ['keywords', 'keyword', 'tags', 'tag', 'subject', 'labels'],
   rating: ['rating', 'stars', 'starrating', 'score'],
   title: ['title', 'headline', 'objectname'],
@@ -67,16 +67,35 @@ function msOf(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 1000) : null;
 }
 
+/** Prefixes metadata standards put in front of a name ("IPTC:Keywords", "XMP-dc:Subject", "rdf:li"). */
+const PREFIX = /^(?:iptc|xmp|xmpdc|dc|exif|photoshop|lr|mwg|mwgrs|hashphotos|hp|iptccore|iptcext|digikam|acdsee|microsoft|ms|metadata|meta|photo|item|asset|video|media)+/;
+
+/**
+ * Which field a column holds. The exact name first, then without a standard's
+ * prefix ("IPTC:Keywords", "XMP Subject"), then by what the name contains
+ * ("Keyword List", "Star Rating (1-5)", "HashPhotos Tags").
+ */
 function fieldOf(key: string): keyof MetaRecord | null {
-  const k = norm(key);
-  for (const [field, names] of Object.entries(FIELDS)) if (names.includes(k)) return field as keyof MetaRecord;
+  const k = norm(key.includes(':') ? key.slice(key.lastIndexOf(':') + 1) : key);
+  const full = norm(key);
+  for (const name of [full, k, full.replace(PREFIX, ''), k.replace(PREFIX, '')]) {
+    if (!name) continue;
+    for (const [field, names] of Object.entries(FIELDS)) if (names.includes(name)) return field as keyof MetaRecord;
+  }
+  if (/count|number|total|id$|date|time/.test(k)) return null;
+  if (/keyword|tags?$|^tags|subject/.test(k)) return 'keywords';
+  if (/rating|stars?$/.test(k)) return 'rating';
+  if (/caption|description/.test(k)) return 'caption';
+  if (/filename|^name$/.test(k)) return 'filename';
   return null;
 }
 
 const baseName = (p: string) => p.split(/[\\/]/).pop()!.trim();
 
+/** A keyword list as text ("a; b, c"), a list, or a list of objects ({ name: "a" }). */
 function splitKeywords(v: unknown): string[] {
-  const list = Array.isArray(v) ? v.map(String) : String(v ?? '').split(/[;,|\n]/);
+  const one = (x: unknown): string => (x && typeof x === 'object' ? String((x as Record<string, unknown>).name ?? (x as Record<string, unknown>).title ?? (x as Record<string, unknown>).value ?? (x as Record<string, unknown>).keyword ?? (x as Record<string, unknown>).tag ?? '') : String(x ?? ''));
+  const list = Array.isArray(v) ? v.map(one) : String(v ?? '').split(/[;,|\n]/);
   return [...new Set(list.map((s) => s.trim()).filter(Boolean))];
 }
 
@@ -102,7 +121,9 @@ function toRecords(rows: Record<string, unknown>[]): { records: MetaRecord[]; co
       if (f === 'filename' && !rec.filename) rec.filename = baseName(String(value));
       else if (f === 'keywords') rec.keywords = [...new Set([...rec.keywords, ...splitKeywords(value)])];
       else if (f === 'rating') {
-        const n = Number(String(value).replace(',', '.'));
+        const text = String(value).trim();
+        const stars = (text.match(/★/g) ?? []).length;
+        const n = stars || Number(text.replace(',', '.').replace(/\s*(?:stars?|\/\s*\d+)$/i, ''));
         if (Number.isFinite(n) && n > 0) rec.rawRating = n;
       } else if (f === 'title' && !rec.title) rec.title = String(value).trim() || null;
       else if (f === 'caption' && !rec.caption) rec.caption = String(value).trim() || null;
@@ -184,12 +205,31 @@ function xmlRows(text: string): Record<string, unknown>[] {
     const keywords: string[] = [];
     for (const c of body.matchAll(/<([A-Za-z][\w:-]*)[^>]*>([^<]*(?:<!\[CDATA\[[\s\S]*?\]\]>[^<]*)?)<\/\1>/g)) {
       const f = fieldOf(c[1]);
-      if (f === 'keywords' || norm(c[1]) === 'string' || norm(c[1]) === 'li') keywords.push(decode(c[2]));
+      const local = norm(c[1].slice(c[1].lastIndexOf(':') + 1));
+      if (f === 'keywords' || local === 'string' || local === 'li') keywords.push(decode(c[2]));
       else rec[c[1]] = decode(c[2]);
     }
     if (keywords.length) rec.keywords = keywords;
     out.push(rec);
   }
+  return out;
+}
+
+/**
+ * Nested objects lifted to the top ({ metadata: { keywords: [...] } } → keywords),
+ * so a field is found however deep the export puts it. A name already at the top wins.
+ */
+function flatten(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const walk = (o: Record<string, unknown>, depth: number) => {
+    for (const [k, v] of Object.entries(o)) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && depth < 4) walk(v as Record<string, unknown>, depth + 1);
+      else if (!(k in out)) out[k] = v;
+    }
+  };
+  // Top-level values first, so they win over nested ones of the same name.
+  for (const [k, v] of Object.entries(row)) if (!(v && typeof v === 'object' && !Array.isArray(v))) out[k] = v;
+  walk(row, 0);
   return out;
 }
 
@@ -204,7 +244,7 @@ export function parseMetadataFile(text: string): MetaFile | null {
     try {
       const data = JSON.parse(t);
       const list = Array.isArray(data) ? data : (Object.values(data).find((v) => Array.isArray(v)) as unknown[] | undefined) ?? [data];
-      rows = list.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+      rows = list.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object').map(flatten);
     } catch {
       return null;
     }
@@ -253,6 +293,11 @@ export type MetaPlan = {
   pictures: string[];
   keywords: number;
   ratings: number;
+  /** Matched videos whose row has keywords, and of those, the ones that already have every keyword. */
+  withKeywords: number;
+  keywordsAlreadyThere: number;
+  /** Matched rows with a rating, title, caption or flag the video already has (or keeps, with replace off). */
+  otherAlreadyThere: number;
 };
 
 const PICTURE = /\.(jpe?g|png|heic|heif|gif|webp|tiff?|bmp|dng|raw|cr2|nef|arw)$/i;
@@ -324,6 +369,9 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
   const changes = new Map<string, MetaChange>();
   const unmatched: string[] = [];
   let matched = 0;
+  let withKeywords = 0;
+  let keywordsAlreadyThere = 0;
+  let otherAlreadyThere = 0;
   for (const [i, r] of records.entries()) {
     const v = found.get(i);
     if (!v) {
@@ -333,7 +381,18 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
     matched += 1;
     const c = changes.get(v.id) ?? { videoId: v.id, addKeywords: [], rating: null, title: null, caption: null, flag: null };
     const have = new Set(v.tagNames.map(lower));
-    c.addKeywords = [...new Set([...c.addKeywords, ...r.keywords.filter((k) => !have.has(lower(k)))])];
+    const fresh = r.keywords.filter((k) => !have.has(lower(k)));
+    if (r.keywords.length) {
+      withKeywords += 1;
+      if (!fresh.length) keywordsAlreadyThere += 1;
+    }
+    c.addKeywords = [...new Set([...c.addKeywords, ...fresh])];
+    if ((r.rating !== null || r.title || r.caption || r.flag) && !(
+      (r.rating !== null && (overwrite || !v.rating) && r.rating !== v.rating) ||
+      (r.title && (overwrite || !v.title) && r.title !== v.title) ||
+      (r.caption && (overwrite || !v.notes) && r.caption !== v.notes) ||
+      (r.flag && (overwrite || !v.flag) && r.flag !== v.flag)
+    )) otherAlreadyThere += 1;
     if (r.rating !== null && (overwrite || !v.rating) && r.rating !== v.rating) c.rating = r.rating;
     if (r.title && (overwrite || !v.title) && r.title !== v.title) c.title = r.title;
     if (r.caption && (overwrite || !v.notes) && r.caption !== v.notes) c.caption = r.caption;
@@ -348,5 +407,8 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
     pictures,
     keywords: list.reduce((a, c) => a + c.addKeywords.length, 0),
     ratings: list.filter((c) => c.rating !== null).length,
+    withKeywords,
+    keywordsAlreadyThere,
+    otherAlreadyThere,
   };
 }
