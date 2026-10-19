@@ -37,7 +37,7 @@ const FIELDS: Record<keyof MetaRecord, string[]> = {
   keywords: ['keywords', 'keyword', 'tags', 'tag', 'subject', 'labels'],
   rating: ['rating', 'stars', 'starrating', 'score'],
   title: ['title', 'headline', 'objectname'],
-  caption: ['caption', 'description', 'comment', 'comments', 'notes', 'note', 'captionabstract'],
+  caption: ['caption', 'memo', 'description', 'comment', 'comments', 'notes', 'note', 'captionabstract'],
   flag: ['flag', 'pick', 'flagged', 'status'],
   size: ['size', 'filesize', 'bytes', 'sizebytes', 'filesizebytes', 'filelength'],
   durationMs: ['duration', 'length', 'videoduration', 'durationseconds', 'seconds', 'runtime'],

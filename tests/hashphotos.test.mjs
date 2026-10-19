@@ -88,3 +88,15 @@ test('column names with a standard in front, nested JSON and XMP lists are read'
   assert.deepEqual(x.records[0].keywords, ['Sea', 'Boat']);
   assert.equal(x.records[0].rating, 10);
 });
+
+test("HashPhotos' own export: IPTC.Keywords, IPTC.StarRating, IPTC.ObjectName and Memo (CSV and nested JSON)", () => {
+  const csv = parseMetadataFile('FileName,CreationDate,ModificationDate,Memo,IPTC.Byline,IPTC.Keywords,IPTC.ObjectName,IPTC.StarRating,Exif.DateTimeOriginal\nIMG_0001.MOV,2026-10-04T21:43:52Z,2026-10-08T17:57:32Z,A memo,Me,"Irl, Reddit/X",My title,4,2026:10:04 23:43:52\n');
+  const json = parseMetadataFile(JSON.stringify([{ CreationDate: '2026-10-04T21:43:52Z', Exif: { DateTimeOriginal: '2026:10:04 23:43:52' }, FileName: 'IMG_0001.MOV', IPTC: { Keywords: ['Irl', 'Reddit/X'], ObjectName: 'My title', StarRating: 4 }, Memo: 'A memo' }]));
+  for (const f of [csv, json]) {
+    const r = f.records[0];
+    assert.deepEqual(r.keywords, ['Irl', 'Reddit/X']);
+    assert.equal(r.rating, 8);
+    assert.equal(r.title, 'My title');
+    assert.equal(r.caption, 'A memo');
+  }
+});
