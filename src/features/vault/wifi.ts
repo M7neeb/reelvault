@@ -18,11 +18,7 @@ const VIDEO = /\.(mp4|mov|m4v|3gp|avi|mkv|webm|mts|m2ts|hevc)$/i;
 /** Strips the server's "<uuid>-" prefix so the video keeps its own name. */
 const ownName = (name: string) => name.replace(/^[0-9A-F-]{36}-/i, '');
 
-export function wifiBridge(
-  importFiles: (files: { uri: string; name: string; size: number }[]) => Promise<ImportSummary | undefined>,
-  /** A new transfer begins (the screen opened): "same answer for the rest" starts over. */
-  onSession?: () => void
-): WifiBridge | null {
+export function wifiBridge(importFiles: (files: { uri: string; name: string; size: number }[]) => Promise<ImportSummary | undefined>): WifiBridge | null {
   const wifi = ReelVaultWifi;
   if (!wifi) return null;
   let subs: { remove(): void }[] = [];
@@ -30,7 +26,6 @@ export function wifiBridge(
   return {
     start: async (onEvent: (e: WifiEvent) => void) => {
       subs.forEach((s) => s.remove());
-      onSession?.();
       const code = String(Crypto.getRandomBytes(2).reduce((a, b) => a * 256 + b, 0) % 10000).padStart(4, '0');
       subs = [
         wifi.addListener('onFileStart', (e) => onEvent({ kind: 'receiving', name: ownName(e.name), received: 0, total: e.total ?? 0 })),

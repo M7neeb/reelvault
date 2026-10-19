@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Share, Text, TouchableOpacity, View } from 'react-native';
 
 import { planMetadata, type MetaFile } from '../hashphotos';
 import { success } from './haptics';
@@ -15,7 +15,7 @@ import { Section, SheetFrame, ToggleRow } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultActions, VaultItem } from './types';
 
-const FIELD_NAMES: Record<string, string> = { filename: 'file names', keywords: 'keywords', rating: 'ratings', title: 'titles', caption: 'captions', flag: 'flags' };
+const FIELD_NAMES: Record<string, string> = { filename: 'file names', keywords: 'keywords', rating: 'ratings', title: 'titles', caption: 'captions', flag: 'flags', size: 'sizes', durationMs: 'lengths' };
 
 export function MetaImportSheet({
   items,
@@ -37,6 +37,7 @@ export function MetaImportSheet({
   const [overwrite, setOverwrite] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showMissing, setShowMissing] = useState(false);
   const plan = useMemo(() => (picked ? planMetadata(picked.file, items, overwrite) : null), [picked, items, overwrite]);
 
   const choose = () => {
@@ -77,7 +78,7 @@ export function MetaImportSheet({
     <SheetFrame title="HashPhotos Info" onClose={onClose}>
       {!picked ? (
         <>
-          <Text style={styles.lead}>Bring your HashPhotos keywords, ratings, titles and captions across to the videos you imported. Videos are matched by file name.</Text>
+          <Text style={styles.lead}>Bring your HashPhotos keywords, ratings, titles and captions across to the videos you imported. Videos are matched by file name (and by size or length when the file has them).</Text>
           <Section label="In HashPhotos">
             {['Open the album (or All Items) and tap Select → Select All.', 'Tap ⋯ → Export Metadata, and pick CSV (JSON or XML work too).', 'Save the file to Files (On My iPhone is fine).', 'Come back here and choose that file.'].map((t, i) => (
               <View key={i} style={styles.step}>
@@ -113,7 +114,12 @@ export function MetaImportSheet({
 
             <View style={styles.big}>
               <Text style={styles.bigNum}>{plan.matched}</Text>
-              <Text style={styles.bigLabel}>of {picked.file.records.length} files are in ReelVault</Text>
+              <Text style={styles.bigLabel}>of {picked.file.records.length - plan.pictures.length} videos are in ReelVault</Text>
+              {plan.pictures.length > 0 && (
+                <Text style={styles.hint}>
+                  {plan.pictures.length} {plan.pictures.length === 1 ? 'row is a picture' : 'rows are pictures'} (ReelVault keeps videos only)
+                </Text>
+              )}
             </View>
 
             <Section label="What changes">
@@ -133,10 +139,29 @@ export function MetaImportSheet({
             </Section>
 
             {plan.unmatched.length > 0 && (
-              <Text style={styles.hint}>
-                Not in ReelVault yet: {plan.unmatched.slice(0, 4).join(', ')}
-                {plan.unmatched.length > 4 ? ` and ${plan.unmatched.length - 4} more` : ''}. Import those videos first, then run this again.
-              </Text>
+              <Section label={`Not found in ReelVault (${plan.unmatched.length})`}>
+                <Text style={styles.hint}>
+                  No video here has this name, even allowing for a " 2" or "(1)" added when it was saved or characters a folder can't hold. Send these from HashPhotos (Wi-Fi skips any you already have), then run this again.
+                </Text>
+                {(showMissing ? plan.unmatched : plan.unmatched.slice(0, 5)).map((name, i) => (
+                  <Text key={`${name}-${i}`} style={styles.missing} numberOfLines={2}>
+                    {name}
+                  </Text>
+                ))}
+                <View style={styles.missingActions}>
+                  {plan.unmatched.length > 5 && (
+                    <TouchableOpacity onPress={() => setShowMissing((x) => !x)} hitSlop={8}>
+                      <Text style={styles.link}>{showMissing ? 'Show fewer' : `Show all ${plan.unmatched.length}`}</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => void Share.share({ message: plan.unmatched.join('\n') }).catch(() => undefined)}
+                    hitSlop={8}
+                  >
+                    <Text style={styles.link}>Share the list</Text>
+                  </TouchableOpacity>
+                </View>
+              </Section>
             )}
 
             <TouchableOpacity style={[styles.primary, !plan.changes.length && { opacity: 0.5 }]} disabled={!plan.changes.length || busy} onPress={apply}>
@@ -170,5 +195,7 @@ const makeStyles = (p: Palette) =>
     change: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5 },
     changeText: { color: p.text, fontSize: 15 },
     hint: { color: p.textSecondary, fontSize: 13 },
+    missing: { color: p.text, fontSize: 14, paddingVertical: 3 },
+    missingActions: { flexDirection: 'row', gap: 20, paddingTop: 6 },
     error: { color: p.danger, fontSize: 13 },
   });

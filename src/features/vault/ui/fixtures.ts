@@ -397,5 +397,8 @@ export const FIXTURE_META: MetaFile = parseMetadataFile(
     'Filename,Keywords,Rating,Title,Caption',
     ...PUBLIC_ITEMS.slice(0, 5).map((v, i) => `${v.filename},"Holiday; ${['Beach', 'Family', 'City', 'Food', 'Night'][i]}",${5 - (i % 3)},,${i === 0 ? 'First day there' : ''}`),
     'IMG_9999.MOV,"Old phone",3,,',
+    'IMG_9998.MOV,,,,',
+    'Beach day: part two?.mp4,,,,',
+    'Sunset.JPG,,,,',
   ].join('\n')
 )!;

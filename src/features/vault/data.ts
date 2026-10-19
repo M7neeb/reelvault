@@ -360,6 +360,9 @@ function parsePrefs(json: string | null): VaultPrefs {
   }
 }
 
+/** Wi-Fi transfer: the very same file is skipped; a look-alike is kept beside the one you have. */
+const wifiDuplicates = async (info: DuplicateInfo): Promise<DupChoice> => (info.exact ? 'skip' : 'both');
+
 export function useVaultData(): VaultData {
   const [videos, setVideos] = useState<Video[]>([]);
   const [deleted, setDeleted] = useState<Video[]>([]);
@@ -579,7 +582,7 @@ export function useVaultData(): VaultData {
 
   // One question per copy found, unless "do the same for the rest" is ticked.
   const makeAsker = useCallback(
-    (ongoing: boolean) =>
+    () =>
       stickyAsker<DuplicateInfo>(
         (info) =>
           new Promise((resolve) => {
@@ -600,7 +603,6 @@ export function useVaultData(): VaultData {
               exact: info.exact,
               reason: info.reason,
               remaining: info.remaining,
-              ongoing,
               answer: (choice, all) => {
                 setDuplicateAsk(null);
                 resolve({ choice, all });
@@ -615,12 +617,12 @@ export function useVaultData(): VaultData {
     async (
       assets: { uri: string; name: string; size?: number }[],
       keepOriginals: boolean,
-      /** A Wi-Fi transfer brings one video at a time, so it keeps one asker for the whole transfer. */
+      /** What to do with a video already in the library (default: ask). */
       asker?: (info: DuplicateInfo) => Promise<DupChoice>
     ) => {
       const quality = canMakeSmaller() ? parseQuality(await getSetting(IMPORT_QUALITY_KEY)) : null;
       let saved = 0;
-      const onDuplicate = asker ?? makeAsker(false);
+      const onDuplicate = asker ?? makeAsker();
       const summary = await importAssets(
         assets.map((a) => ({ uri: a.uri, name: a.name, size: a.size })),
         (done, total) => setStatus(`Importing ${Math.min(done + 1, total)} of ${total}…`),
@@ -662,22 +664,12 @@ export function useVaultData(): VaultData {
   // Wi-Fi transfer: ONE bridge for the life of the app. A new one per render made the Wi-Fi
   // screen stop the server and start it again (with a new code) after every video it added,
   // so the computer's next uploads lost the connection.
-  // "Same answer for other copies" holds for the whole transfer, not just one video.
+  // Nothing is asked over Wi-Fi: a video you already have (the very same file) is left out, and
+  // one that only looks like a video you have (same length and picture size) is added, so
+  // sending a whole folder again adds just the ones that are missing.
   const runImportRef = useRef(runImport);
   runImportRef.current = runImport;
-  const makeAskerRef = useRef(makeAsker);
-  makeAskerRef.current = makeAsker;
-  const wifiAsker = useRef<((info: DuplicateInfo) => Promise<DupChoice>) | null>(null);
-  const wifi = useMemo(
-    () =>
-      wifiBridge(
-        (files) => runImportRef.current(files, false, (wifiAsker.current ??= makeAskerRef.current(true))),
-        () => {
-          wifiAsker.current = null;
-        }
-      ),
-    []
-  );
+  const wifi = useMemo(() => wifiBridge((files) => runImportRef.current(files, false, wifiDuplicates)), []);
 
   const onImport = useCallback(
     async (source: ImportSource) => {
