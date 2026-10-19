@@ -130,7 +130,7 @@ export function useAudioData(): AudioData {
     })();
   }, [refresh]);
 
-  const run = useCallback(
+  const runNow = useCallback(
     async (files: PickedAudioFile[], keepOriginals: boolean) => {
       if (!files.length) return;
       setBusy(true);
@@ -190,6 +190,17 @@ export function useAudioData(): AudioData {
       }
     },
     [refresh]
+  );
+  // One import at a time: a Wi-Fi transfer hands over each file on its own, and two waiting on
+  // "already in your library" at once would hide the first question behind the second.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const run = useCallback(
+    (files: PickedAudioFile[], keepOriginals: boolean) => {
+      const next = queue.current.then(() => runNow(files, keepOriginals));
+      queue.current = next.catch(() => undefined);
+      return next;
+    },
+    [runNow]
   );
 
   // Audio and books sent from another app ("Open in ReelVault").

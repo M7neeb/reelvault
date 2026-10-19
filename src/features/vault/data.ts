@@ -38,7 +38,7 @@ import { probeDurationMs } from '@/features/vault/duration';
 import { ensureFilmstrip } from '@/features/vault/filmstrip';
 import { pickVideoFolder } from '@/features/vault/folderImport';
 import { importAssets, type DuplicateInfo, type ImportSummary } from '@/features/vault/import';
-import { stickyAsker } from '@/features/vault/dupMatch';
+import { stickyAsker, type DupChoice } from '@/features/vault/dupMatch';
 import {
   addTagMany,
   removeTagMany,
@@ -577,12 +577,10 @@ export function useVaultData(): VaultData {
     [byId]
   );
 
-  const runImport = useCallback(
-    async (assets: { uri: string; name: string; size?: number }[], keepOriginals: boolean) => {
-      const quality = canMakeSmaller() ? parseQuality(await getSetting(IMPORT_QUALITY_KEY)) : null;
-      let saved = 0;
-      // One question per copy found, unless "do the same for the rest" is ticked.
-      const onDuplicate = stickyAsker<DuplicateInfo>(
+  // One question per copy found, unless "do the same for the rest" is ticked.
+  const makeAsker = useCallback(
+    (ongoing: boolean) =>
+      stickyAsker<DuplicateInfo>(
         (info) =>
           new Promise((resolve) => {
             const v = info.existing;
@@ -602,13 +600,27 @@ export function useVaultData(): VaultData {
               exact: info.exact,
               reason: info.reason,
               remaining: info.remaining,
+              ongoing,
               answer: (choice, all) => {
                 setDuplicateAsk(null);
                 resolve({ choice, all });
               },
             });
           })
-      );
+      ),
+    []
+  );
+
+  const runImport = useCallback(
+    async (
+      assets: { uri: string; name: string; size?: number }[],
+      keepOriginals: boolean,
+      /** A Wi-Fi transfer brings one video at a time, so it keeps one asker for the whole transfer. */
+      asker?: (info: DuplicateInfo) => Promise<DupChoice>
+    ) => {
+      const quality = canMakeSmaller() ? parseQuality(await getSetting(IMPORT_QUALITY_KEY)) : null;
+      let saved = 0;
+      const onDuplicate = asker ?? makeAsker(false);
       const summary = await importAssets(
         assets.map((a) => ({ uri: a.uri, name: a.name, size: a.size })),
         (done, total) => setStatus(`Importing ${Math.min(done + 1, total)} of ${total}…`),
@@ -631,7 +643,7 @@ export function useVaultData(): VaultData {
       setStatus(saved > 0 ? `${line} · saved ${(saved / 1024 ** 3).toFixed(2)} GB` : line);
       return summary;
     },
-    [refresh]
+    [refresh, makeAsker]
   );
 
   // Videos sent from another app ("Open in ReelVault"): imported as they arrive.
@@ -650,9 +662,22 @@ export function useVaultData(): VaultData {
   // Wi-Fi transfer: ONE bridge for the life of the app. A new one per render made the Wi-Fi
   // screen stop the server and start it again (with a new code) after every video it added,
   // so the computer's next uploads lost the connection.
+  // "Same answer for other copies" holds for the whole transfer, not just one video.
   const runImportRef = useRef(runImport);
   runImportRef.current = runImport;
-  const wifi = useMemo(() => wifiBridge((files) => runImportRef.current(files, false)), []);
+  const makeAskerRef = useRef(makeAsker);
+  makeAskerRef.current = makeAsker;
+  const wifiAsker = useRef<((info: DuplicateInfo) => Promise<DupChoice>) | null>(null);
+  const wifi = useMemo(
+    () =>
+      wifiBridge(
+        (files) => runImportRef.current(files, false, (wifiAsker.current ??= makeAskerRef.current(true))),
+        () => {
+          wifiAsker.current = null;
+        }
+      ),
+    []
+  );
 
   const onImport = useCallback(
     async (source: ImportSource) => {

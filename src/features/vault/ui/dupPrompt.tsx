@@ -89,9 +89,13 @@ export function DuplicatePrompt({ ask }: { ask: DuplicateAsk }) {
             </TouchableOpacity>
           </View>
 
-          {ask.remaining > 0 && (
+          {(ask.remaining > 0 || ask.ongoing) && (
             <View style={styles.allRow}>
-              <Text style={styles.allText}>Same answer for other copies in this import ({ask.remaining} {ask.remaining === 1 ? 'file' : 'files'} to go)</Text>
+              <Text style={styles.allText}>
+                {ask.ongoing
+                  ? 'Same answer for other copies in this Wi-Fi transfer'
+                  : `Same answer for other copies in this import (${ask.remaining} ${ask.remaining === 1 ? 'file' : 'files'} to go)`}
+              </Text>
               <Switch value={all} onValueChange={setAll} />
             </View>
           )}

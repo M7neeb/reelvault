@@ -10,7 +10,6 @@ import { useState } from 'react';
 import { View } from 'react-native';
 
 import { useTabBarSpace } from '../chrome';
-import { DuplicatePrompt } from '../dupPrompt';
 import type { VideosMode } from '../overviewParts';
 import { sheet, useStyles, type Palette } from '../theme';
 import AudioDashboard from './AudioDashboard';
@@ -96,7 +95,6 @@ export default function AudioSection({
           onClose={() => setDash(false)}
         />
       )}
-      {data.duplicateAsk && <DuplicatePrompt ask={data.duplicateAsk} />}
     </View>
   );
 }

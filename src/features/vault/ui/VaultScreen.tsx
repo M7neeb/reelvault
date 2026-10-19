@@ -278,6 +278,8 @@ function VaultScreenBody({
   });
   const [metaOpen, setMetaOpen] = useState(dev?.metaImportOpen ?? false);
   const [wifiOpen, setWifiOpen] = useState(dev?.wifiOpen ?? false);
+  /** An import (video or audio) waiting on "already in your library". */
+  const pendingAsk = duplicateAsk ?? audio?.duplicateAsk ?? devDupAsk;
   const [jumpTo, setJumpTo] = useState<{ key: string; nonce: number } | null>(null);
   /** The filter editor: a Smart Filter (`save`) or a one-off search (`search`). */
   const [editingSmart, setEditingSmart] = useState<{
@@ -1842,8 +1844,9 @@ function VaultScreenBody({
         />
       )}
 
-      {/* An import waits: this file is already in the library. */}
-      {(duplicateAsk ?? devDupAsk) && <DuplicatePrompt ask={(duplicateAsk ?? devDupAsk)!} />}
+      {/* An import waits: this file is already in the library. Over the Wi-Fi screen it is shown
+          inside that screen (iOS shows nothing presented beside an open full-screen page). */}
+      {!wifiOpen && pendingAsk && <DuplicatePrompt ask={pendingAsk} />}
 
       {metaOpen && (
         <MetaImportSheet
@@ -1858,6 +1861,7 @@ function VaultScreenBody({
       {wifiOpen && (
         <WifiScreen
           wifi={actions.wifi}
+          ask={pendingAsk}
           onClose={() => {
             setWifiOpen(false);
             loadPlayCounts();
