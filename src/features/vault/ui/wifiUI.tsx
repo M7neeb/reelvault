@@ -16,11 +16,12 @@ import { success, warn } from './haptics';
 import Icon from './Icon';
 import { gradient } from './insightParts';
 import { Aurora, Pulse } from './storyKit';
-import type { WifiBridge, WifiEvent } from './types';
+import { DuplicatePrompt } from './dupPrompt';
+import type { DuplicateAsk, WifiBridge, WifiEvent } from './types';
 
 type Row = { name: string; state: 'receiving' | 'imported' | 'duplicate' | 'failed'; received: number; total: number; reason?: string };
 
-export function WifiScreen({ wifi, onClose }: { wifi: WifiBridge | null; onClose: () => void }) {
+export function WifiScreen({ wifi, ask, onClose }: { wifi: WifiBridge | null; ask?: DuplicateAsk | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const [info, setInfo] = useState<{ url: string | null; code: string } | null>(null);
@@ -155,6 +156,8 @@ export function WifiScreen({ wifi, onClose }: { wifi: WifiBridge | null; onClose
           )}
         </ScrollView>
       </View>
+      {/* A video that is already in the library waits for this answer (and the ones after it). */}
+      {ask && <DuplicatePrompt ask={ask} />}
     </Modal>
   );
 }

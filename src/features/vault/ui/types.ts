@@ -296,6 +296,8 @@ export type DuplicateAsk = {
   reason: string;
   /** Files of this import still to come. */
   remaining: number;
+  /** More may still come (a Wi-Fi transfer): offers "same answer for the rest" even at 0 remaining. */
+  ongoing?: boolean;
   answer: (choice: 'replace' | 'both' | 'skip', all: boolean) => void;
 };
 
