@@ -317,7 +317,8 @@ function parsePlayer(r: unknown): PlayerOptions {
     ambient: bool(o.ambient, d.ambient),
     remaining: bool(o.remaining, d.remaining),
     background: bool(o.background, d.background),
-    start: o.start === 'normal' || o.start === 'full' || o.start === 'fill' ? o.start : d.start,
+    // 'full' (open full screen, sideways) was the default for a day and is gone: those open with the controls.
+    start: o.start === 'video' || o.start === 'fill' ? o.start : d.start,
   };
 }
 
