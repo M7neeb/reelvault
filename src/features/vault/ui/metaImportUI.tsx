@@ -74,6 +74,20 @@ export function MetaImportSheet({
   const captions = plan?.changes.filter((c) => c.caption).length ?? 0;
   const flags = plan?.changes.filter((c) => c.flag).length ?? 0;
 
+  /** Why nothing would change, so an all-zero list never looks like the keywords were lost. */
+  const why = (() => {
+    if (!picked || !plan || plan.changes.length || !plan.matched) return null;
+    const has = picked.file.recognised.filter((f) => !['filename', 'size', 'durationMs'].includes(f));
+    if (!has.length) return `No keywords, ratings, titles or captions were found in this file. Its columns are: ${picked.file.columns.join(', ') || 'none'}. Share the list so ReelVault can learn these names.`;
+    const parts: string[] = [];
+    if (!has.includes('keywords')) parts.push('The file has no keywords column.');
+    else if (!plan.withKeywords) parts.push('The keywords column is empty for every video found.');
+    else if (plan.keywordsAlreadyThere === plan.withKeywords)
+      parts.push(`All ${plan.withKeywords} ${plan.withKeywords === 1 ? 'video with keywords already has' : 'videos with keywords already have'} them in ReelVault.`);
+    if (plan.otherAlreadyThere) parts.push(overwrite ? 'Ratings, titles and captions already match.' : 'Ratings, titles and captions are already set (turn on Replace to use the file\'s).');
+    return parts.join(' ');
+  })();
+
   return (
     <SheetFrame title="HashPhotos Info" onClose={onClose}>
       {!picked ? (
@@ -135,6 +149,14 @@ export function MetaImportSheet({
                   <Text style={styles.changeText}>{r.text}</Text>
                 </View>
               ))}
+              {!!why && (
+                <View style={styles.why}>
+                  <Text style={styles.whyText}>{why}</Text>
+                  <TouchableOpacity onPress={() => void Share.share({ message: `Columns: ${picked.file.columns.join(', ')}` }).catch(() => undefined)} hitSlop={8}>
+                    <Text style={styles.link}>Share the file's columns</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               <ToggleRow label="Replace what's already there" value={overwrite} onChange={setOverwrite} />
               <Text style={styles.hint}>Off: only fills in ratings, titles and captions a video doesn't have yet. Keywords are always added, never removed. Dates always follow HashPhotos, so the library is in the same order.</Text>
             </Section>
@@ -199,4 +221,6 @@ const makeStyles = (p: Palette) =>
     missing: { color: p.text, fontSize: 14, paddingVertical: 3 },
     missingActions: { flexDirection: 'row', gap: 20, paddingTop: 6 },
     error: { color: p.danger, fontSize: 13 },
+    why: { backgroundColor: p.card, borderRadius: 12, padding: 12, gap: 8, marginVertical: 4 },
+    whyText: { color: p.text, fontSize: 14 },
   });
