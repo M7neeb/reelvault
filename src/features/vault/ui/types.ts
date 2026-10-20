@@ -642,20 +642,20 @@ export type PlayerOptions = {
   remaining: boolean;
   /** Keep the sound playing when you leave the app or lock the phone. */
   background: boolean;
-  /** How a video opens: with the controls (normal), full screen (sideways when it is wide), or zoomed to fill. */
+  /** How a video opens: with the controls (normal), the video alone (tap for the controls), or zoomed to fill. Never turns sideways on its own. */
   start: PlayerStart;
 };
 
-export type PlayerStart = 'normal' | 'full' | 'fill';
+export type PlayerStart = 'normal' | 'video' | 'fill';
 export const PLAYER_STARTS: { key: PlayerStart; label: string }[] = [
-  { key: 'full', label: 'Full Screen' },
-  { key: 'fill', label: 'Zoomed to Fill' },
   { key: 'normal', label: 'With Controls' },
+  { key: 'video', label: 'Video Only' },
+  { key: 'fill', label: 'Zoomed to Fill' },
 ];
 
 export const PLAYER_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
-export const DEFAULT_PLAYER: PlayerOptions = { autoplayNext: true, loop: false, speed: 1, ambient: true, remaining: false, background: true, start: 'full' };
+export const DEFAULT_PLAYER: PlayerOptions = { autoplayNext: true, loop: false, speed: 1, ambient: true, remaining: false, background: true, start: 'normal' };
 
 export type SlideshowOptions = {
   order: 'shown' | 'shuffle' | 'oldest' | 'best';

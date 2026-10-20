@@ -10,10 +10,12 @@
  *   album bar      (tap an album to put the video in it)
  *   toolbar        (pick flag · reject flag · stars · more · delete)
  *
- * Tapping the video hides all of it (full screen) and brings it back. The
- * viewer also turns with the phone: sideways, only the video and a slim
- * playback bar show. The full-screen button turns a landscape video sideways
- * without rotating the phone (and back upright). The
+ * Tapping the video hides all of it and brings it back. The viewer turns with
+ * the phone, and the full-screen button turns a wide video sideways (a tall one
+ * stays upright, the video alone). Sideways or full screen, a tap brings every
+ * control back OVER the video (dark and see-through: the bar, stars, flags,
+ * albums, info, more) and they hide again a few seconds after you stop
+ * touching them. It never turns sideways on its own when it opens. The
  * metadata lives in a SEPARATE panel opened by the info button.
  *
  * Gestures, like the iOS Photos app: swipe left or right for the next or
@@ -65,6 +67,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Backdrop } from './frame';
 
 import { episodeCode } from '@/features/simkl/logic';
@@ -85,7 +88,7 @@ import { PromptSheet } from './prompts';
 import { SmallerSheet } from './smaller';
 import RatingPicker from './RatingPicker';
 import EditorModal from './EditorModal';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import { DARK, sheet, usePalette, useStyles, withAccent, type Palette } from './theme';
 import {
   STATUSES,
   statusLabel,
@@ -158,6 +161,11 @@ function ViewerPage({
   const { width: W, height: H } = useWindowDimensions();
   const reduce = useReducedMotion();
   const { tx, ty, dx } = stage;
+  // Over the video the controls are always dark (white on a see-through black), whatever the theme.
+  const darkP = useMemo(() => withAccent(DARK, p.accent), [p.accent]);
+  const darkStyles = useMemo(() => makeStyles(darkP), [darkP]);
+  /** Height of the controls at the bottom, so what sits over the video stays clear of them. */
+  const [bottomH, setBottomH] = useState(0);
 
   // The player's own settings, kept for the next video and the next time.
   const [opts, setOpts] = useState<PlayerOptions>(prefs.player ?? DEFAULT_VAULT_PREFS.player);
@@ -211,33 +219,57 @@ function ViewerPage({
   const [playing, setPlaying] = useState(enableVideo);
   const [infoOpen, setInfoOpen] = useState(initialInfoOpen);
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
-  /** Opening big (the player setting): the video alone on the screen; a tap brings the controls. */
-  const [chrome, setChrome] = useState(opts.start === 'normal');
+  /** The controls. "Video Only" (the player setting) opens without them; a tap brings them back. */
+  const [chrome, setChrome] = useState(opts.start !== 'video');
   /** Sideways: the phone was turned, or the full-screen button turned it. */
   const landscape = W > H;
   const wide = !!item.width && !!item.height && item.width > item.height;
-  // Turning sideways hides everything but the video; turning back upright brings it back.
-  const firstTurn = useRef(true);
+  /** The full-screen button was pressed: the video alone (sideways when it is wide). */
+  const [fullScreen, setFullScreen] = useState(false);
+  // Turning sideways hides the controls (a tap brings them, over the video); upright brings them back.
+  const lastTurn = useRef(landscape);
   useEffect(() => {
-    if (firstTurn.current) {
-      firstTurn.current = false;
-      if (!landscape) return;
-    }
+    if (lastTurn.current === landscape) return;
+    lastTurn.current = landscape;
     setChrome(!landscape);
+    if (!landscape) setFullScreen(false);
   }, [landscape]);
-  // Full Screen: a wide video turns sideways as it opens.
-  useEffect(() => {
-    if (opts.start === 'full' && wide && canRotate) lockSideways();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   function toggleFullScreen() {
     tick();
-    if (landscape) {
-      lockUpright();
+    if (landscape || fullScreen) {
+      if (landscape) lockUpright();
+      setFullScreen(false);
       setChrome(true);
     } else {
       if (wide && canRotate) lockSideways();
+      setFullScreen(true);
       setChrome(false);
+      // A tall video stays upright, so say how to get the controls back.
+      if (!wide || !canRotate) setToast('Tap the video for the controls');
     }
+  }
+  /** Over the video (sideways or full screen), the controls hide again a few seconds after you stop touching them. */
+  const overlay = landscape || fullScreen;
+  const bs = overlay ? darkStyles : styles;
+  const bp = overlay ? darkP : p;
+  /** The big play / 10-second buttons fade while it plays; a tap on the video brings them back. */
+  const [centreShown, setCentreShown] = useState(true);
+  const [poked, setPoked] = useState(0);
+  const poke = () => setPoked((n) => n + 1);
+  const busy = menuOpen || infoOpen || scrubAt !== null || ended || locked;
+  useEffect(() => {
+    if (!chrome) return;
+    setCentreShown(true);
+    if (!playing || busy) return;
+    const t = setTimeout(() => (overlay ? setChrome(false) : setCentreShown(false)), overlay ? 3500 : 2500);
+    return () => clearTimeout(t);
+  }, [chrome, playing, busy, overlay, poked]);
+  /** A tap on the video: brings the big buttons back when they faded, otherwise shows or hides the controls. */
+  function tapVideo() {
+    if (chrome && !centreShown && !overlay) {
+      setCentreShown(true);
+      poke();
+    } else setChrome((c) => !c);
   }
   const [dateOpen, setDateOpen] = useState(false);
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
@@ -456,14 +488,19 @@ function ViewerPage({
   function togglePlay() {
     if (ended) return replay();
     if (!enableVideo) return;
-    if (player.playing) player.pause();
+    // Read it first: the player may already say the new state right after play() or pause().
+    const was = player.playing;
+    if (was) player.pause();
     else player.play();
-    setPlaying(!player.playing);
+    setPlaying(!was);
+    poke();
   }
 
   const durationSec = () => player.duration || (item.durationMs ?? 0) / 1000;
 
   function seek(fraction: number) {
+    setEnded(false);
+    setUpNextLeft(null);
     setProgress(fraction);
     holdUntil.current = Date.now() + 500;
     if (!enableVideo) return;
@@ -507,6 +544,9 @@ function ViewerPage({
   /** Double-tap a side: 10 seconds back or forward. */
   function jump(dir: -1 | 1) {
     tick();
+    setEnded(false);
+    setUpNextLeft(null);
+    poke();
     setSkip((s) => ({ dir, n: s && s.dir === dir ? s.n + 10 : 10 }));
     const d = durationSec();
     if (enableVideo && d > 0) {
@@ -544,7 +584,7 @@ function ViewerPage({
     return () => sub.remove();
   }, [player, opts.autoplayNext, next]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (upNextLeft === null) return;
+    if (upNextLeft === null || menuOpen || infoOpen) return;
     if (upNextLeft <= 0) {
       setUpNextLeft(null);
       goNext();
@@ -552,7 +592,7 @@ function ViewerPage({
     }
     const t = setTimeout(() => setUpNextLeft((n) => (n === null ? null : n - 1)), 1000);
     return () => clearTimeout(t);
-  }, [upNextLeft]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [upNextLeft, menuOpen, infoOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Slide to the next / previous video, the same way a swipe does. */
   function goNext(dir: 1 | -1 = 1) {
@@ -638,7 +678,7 @@ function ViewerPage({
     .runOnJS(true)
     .maxDuration(260)
     .onEnd((_e, ok) => {
-      if (ok) setChrome((c) => !c);
+      if (ok) tapVideo();
     });
   const doubleTap = Gesture.Tap()
     .runOnJS(true)
@@ -760,6 +800,7 @@ function ViewerPage({
 
   return (
     <View style={styles.viewer}>
+        <StatusBar hidden={!chrome || landscape} animated />
         <Animated.View style={[fill, { backgroundColor: p.bg }, bgStyle]} pointerEvents="none">
           <Animated.View style={[fill, { backgroundColor: '#000' }, blackStyle]} />
         </Animated.View>
@@ -801,15 +842,19 @@ function ViewerPage({
             </View>
           </GestureDetector>
           {/* ── the middle: big play and 10-second buttons, Replay or Up Next at the end ── */}
-          {chrome && !locked && !infoOpen && enableVideo && !ended && (
-            <Animated.View entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.fast)} style={styles.centre} pointerEvents="box-none">
-              <TouchableOpacity style={styles.centreSmall} onPress={() => jump(-1)} accessibilityLabel="Back 10 seconds">
+          {chrome && centreShown && !locked && !infoOpen && !menuOpen && enableVideo && !ended && (
+            <Animated.View
+              entering={FadeIn.duration(DUR.fast)}
+              exiting={FadeOut.duration(DUR.base)}
+              style={[styles.centre, overlay && bottomH > 0 && { top: Math.max(insets.top + 50, (H - bottomH) / 2 - 36), marginTop: 0 }]}
+              pointerEvents="box-none">
+              <TouchableOpacity style={styles.centreSmall} onPress={() => jump(-1)} hitSlop={8} accessibilityLabel="Back 10 seconds">
                 <Icon name="back10" size={22} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.centreBig} onPress={togglePlay} accessibilityLabel={playing ? 'Pause' : 'Play'}>
                 <Icon name={playing ? 'pause' : 'play'} size={30} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.centreSmall} onPress={() => jump(1)} accessibilityLabel="Forward 10 seconds">
+              <TouchableOpacity style={styles.centreSmall} onPress={() => jump(1)} hitSlop={8} accessibilityLabel="Forward 10 seconds">
                 <Icon name="forward10" size={22} color="#fff" />
               </TouchableOpacity>
             </Animated.View>
@@ -859,7 +904,7 @@ function ViewerPage({
           )}
           {/* ── scrubbing: the frame under your finger ── */}
           {scrubAt !== null && frames.length > 0 && (
-            <Animated.View entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.fast)} style={styles.preview} pointerEvents="none">
+            <Animated.View entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.fast)} style={[styles.preview, overlay && { bottom: bottomH + 12 }]} pointerEvents="none">
               <Image source={frames[Math.min(frames.length - 1, Math.floor(scrubAt * frames.length))]} style={styles.previewImg} contentFit="cover" />
               <Text style={styles.previewTime}>
                 {fmtClock(scrubAt * totalSec * 1000)} / {fmtClock(totalSec * 1000)}
@@ -867,7 +912,7 @@ function ViewerPage({
             </Animated.View>
           )}
           {!!toast && (
-            <Animated.View key={toast} entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.base)} style={[styles.fastPill, { top: insets.top + 60 }]} pointerEvents="none">
+            <Animated.View key={toast} entering={FadeIn.duration(DUR.fast)} exiting={FadeOut.duration(DUR.base)} style={[styles.fastPill, { top: insets.top + (fast ? 104 : 60) }]} pointerEvents="none">
               <Text style={styles.fastText}>{toast}</Text>
             </Animated.View>
           )}
@@ -912,7 +957,7 @@ function ViewerPage({
         {chrome && !locked && (
           <>
             {/* ── header (over the video, with a soft shade so the buttons always show) ── */}
-            <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.headerWrap, chromeFade]} pointerEvents="box-none">
+            <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.headerWrap, chromeFade]} pointerEvents="box-none" onTouchStart={poke}>
               <Fade color="0,0,0" from={0} to={0.55} reverse style={[fill, { bottom: -30 }]} />
               <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: insets.left + 8, paddingRight: insets.right + 8 }]} pointerEvents="box-none">
                 <IconButton icon="back" label="Back" clear color="#fff" onPress={onDismiss} size={38} />
@@ -946,16 +991,14 @@ function ViewerPage({
                     />
                   )}
                   <IconButton
-                    icon={landscape ? 'exitFullScreen' : 'fullScreen'}
-                    label={landscape ? 'Exit full screen' : 'Full screen'}
+                    icon={overlay ? 'exitFullScreen' : 'fullScreen'}
+                    label={overlay ? 'Exit full screen' : 'Full screen'}
                     clear
                     color="#fff"
                     size={38}
                     onPress={toggleFullScreen}
                   />
-                  {!landscape && (
-                    <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
-                  )}
+                  <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
                   <IconButton icon="more" label="More" clear color="#fff" size={38} onPress={() => setMenuOpen(true)} />
                 </View>
               </View>
@@ -971,135 +1014,137 @@ function ViewerPage({
               )}
             </Animated.View>
 
-            {/* ── bottom stack ────────────────────────────────────────── */}
+            {/* ── bottom stack: under the video upright, over it (darker, see-through) sideways or full screen ── */}
             <Animated.View
               entering={reduce ? fadeIn : SlideInDown.duration(DUR.base).easing(EASE_OUT)}
               exiting={reduce ? FadeOut.duration(DUR.fast) : SlideOutDown.duration(DUR.fast)}
-              style={[styles.bottom, chromeFade, landscape && { paddingLeft: insets.left + 12, paddingRight: insets.right + 12, paddingBottom: insets.bottom + 10 }]}>
+              onLayout={(e) => setBottomH(e.nativeEvent.layout.height)}
+              onTouchStart={poke}
+              style={[bs.bottom, chromeFade, overlay && [bs.bottomOver, { paddingLeft: insets.left + 4, paddingRight: insets.right + 4 }]]}>
               {!!note && (
                 <TouchableOpacity onPress={() => setNote('')}>
-                  <Text style={styles.note}>{note}</Text>
+                  <Text style={bs.note}>{note}</Text>
                 </TouchableOpacity>
               )}
-              <View style={styles.scrub}>
-                <TouchableOpacity onPress={togglePlay} hitSlop={10} accessibilityLabel="Play or pause">
-                  <Icon name={playing ? 'pause' : 'play'} size={18} color={p.text} />
+              <View style={bs.scrub}>
+                <TouchableOpacity onPress={togglePlay} hitSlop={12} accessibilityLabel={playing ? 'Pause' : 'Play'}>
+                  <Icon name={playing ? 'pause' : 'play'} size={20} color={bp.text} />
                 </TouchableOpacity>
+                <Text style={bs.scrubTime}>{fmtDuration(elapsed * 1000) ?? '0:00'}</Text>
                 <Scrubber
                   fraction={progress}
                   durationSec={totalSec}
                   marks={marks.map((m) => m.atMs)}
-                  color={p.text}
-                  trackColor={p.border}
-                  markColor={p.rating}
+                  color={bp.text}
+                  trackColor={bp.border}
+                  markColor={bp.rating}
                   onStart={scrubStart}
                   onMove={scrubMove}
                   onEnd={scrubEnd}
                 />
-                <TouchableOpacity onPress={() => setOpt({ remaining: !opts.remaining })} hitSlop={6} accessibilityLabel="Show the time left or the length">
-                  <Text style={styles.scrubTime}>
-                    {fmtDuration(elapsed * 1000) ?? '0:00'} / {opts.remaining ? `−${fmtDuration(Math.max(0, totalSec - elapsed) * 1000) ?? '0:00'}` : (fmtDuration(totalSec * 1000) ?? '--:--')}
+                <TouchableOpacity onPress={() => setOpt({ remaining: !opts.remaining })} hitSlop={8} accessibilityLabel="Show the time left or the length">
+                  <Text style={bs.scrubTime}>
+                    {opts.remaining ? `−${fmtDuration(Math.max(0, totalSec - elapsed) * 1000) ?? '0:00'}` : (fmtDuration(totalSec * 1000) ?? '--:--')}
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={cycleSpeed} hitSlop={6} style={[styles.speedPill, opts.speed !== 1 && styles.speedPillOn]} accessibilityLabel={`Playback speed ${opts.speed}×`}>
-                  <Text style={[styles.speedText, opts.speed !== 1 && styles.speedTextOn]}>{opts.speed}×</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={toggleLoop} hitSlop={6} accessibilityLabel={opts.loop ? 'Loop on' : 'Loop off'}>
-                  <Icon name="repeatOne" size={16} color={opts.loop ? p.accent : p.textSecondary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={addMark} hitSlop={8} accessibilityLabel="Bookmark this moment">
-                  <Icon name="bookmarkAdd" size={17} color={p.text} />
-                </TouchableOpacity>
-                {prefs.resumeEnabled && canResume(item.durationMs) && (
-                  <TouchableOpacity onPress={continueLater} hitSlop={8} accessibilityLabel="Continue another time">
-                    <Icon name="later" size={17} color={p.text} />
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={10} accessibilityLabel="More">
-                  <Icon name="more" size={18} color={p.text} />
                 </TouchableOpacity>
               </View>
 
               {resumedFrom !== null && (
-                <View style={styles.resumeRow}>
-                  <Icon name="later" size={13} color={p.accent} />
-                  <Text style={styles.resumeText}>Continuing from {fmtClock(resumedFrom)}</Text>
+                <View style={bs.resumeRow}>
+                  <Icon name="later" size={13} color={bp.accent} />
+                  <Text style={bs.resumeText}>Continuing from {fmtClock(resumedFrom)}</Text>
                   <TouchableOpacity
                     onPress={() => {
                       player.currentTime = 0;
+                      setProgress(0);
+                      holdUntil.current = Date.now() + 500;
                       setResumedFrom(null);
                       void actions.setResume(item.id, null);
                     }}>
-                    <Text style={styles.resumeLink}>Start over</Text>
+                    <Text style={bs.resumeLink}>Start over</Text>
                   </TouchableOpacity>
                 </View>
               )}
 
-              {/* Quick controls: previous / next video, picture in picture, fill, glow. */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickRow}>
-                <TouchableOpacity style={styles.quick} onPress={() => goNext(-1)} disabled={!prev} accessibilityLabel="Previous video">
-                  <Icon name="prevVideo" size={15} color={prev ? p.text : p.textMuted} />
+              {/* Quick controls: speed, loop, bookmark, later, previous / next video, autoplay, fill, glow, cover, picture in picture. */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={bs.quickRow}>
+                <TouchableOpacity style={[bs.quick, opts.speed !== 1 && bs.quickOn]} onPress={cycleSpeed} accessibilityLabel={`Playback speed ${opts.speed}×`}>
+                  <Text style={[bs.quickText, opts.speed !== 1 && bs.quickTextOn]}>{opts.speed}×</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.quick} onPress={() => goNext(1)} disabled={!next} accessibilityLabel="Next video">
-                  <Icon name="nextVideo" size={15} color={next ? p.text : p.textMuted} />
+                <TouchableOpacity style={[bs.quick, opts.loop && bs.quickOn]} onPress={toggleLoop} accessibilityLabel={opts.loop ? 'Loop on' : 'Loop off'}>
+                  <Icon name="repeatOne" size={15} color={opts.loop ? bp.accent : bp.text} />
+                </TouchableOpacity>
+                <TouchableOpacity style={bs.quick} onPress={addMark} accessibilityLabel="Bookmark this moment">
+                  <Icon name="bookmarkAdd" size={15} color={bp.text} />
+                </TouchableOpacity>
+                {prefs.resumeEnabled && canResume(item.durationMs) && (
+                  <TouchableOpacity style={bs.quick} onPress={continueLater} accessibilityLabel="Continue another time">
+                    <Icon name="later" size={15} color={bp.text} />
+                    <Text style={bs.quickText}>Later</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={bs.quick} onPress={() => goNext(-1)} disabled={!prev} accessibilityLabel="Previous video">
+                  <Icon name="prevVideo" size={15} color={prev ? bp.text : bp.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity style={bs.quick} onPress={() => goNext(1)} disabled={!next} accessibilityLabel="Next video">
+                  <Icon name="nextVideo" size={15} color={next ? bp.text : bp.textMuted} />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.quick, opts.autoplayNext && styles.quickOn]}
+                  style={[bs.quick, opts.autoplayNext && bs.quickOn]}
                   onPress={() => {
                     tick();
                     setOpt({ autoplayNext: !opts.autoplayNext });
                     setToast(opts.autoplayNext ? 'Stops at the end' : 'Plays the next one at the end');
                   }}
                   accessibilityLabel="Play the next video automatically">
-                  <Text style={[styles.quickText, opts.autoplayNext && styles.quickTextOn]}>Autoplay</Text>
+                  <Text style={[bs.quickText, opts.autoplayNext && bs.quickTextOn]}>Autoplay</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.quick, fillScreen && styles.quickOn]}
+                  style={[bs.quick, fillScreen && bs.quickOn]}
                   onPress={() => {
                     tick();
                     setFillScreen(!fillScreen);
                   }}
                   accessibilityLabel="Fill the screen">
-                  <Icon name="fill" size={15} color={fillScreen ? p.accent : p.text} />
+                  <Icon name="fill" size={15} color={fillScreen ? bp.accent : bp.text} />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.quick, opts.ambient && styles.quickOn]}
+                  style={[bs.quick, opts.ambient && bs.quickOn]}
                   onPress={() => {
                     tick();
                     setOpt({ ambient: !opts.ambient });
                   }}
                   accessibilityLabel="Ambient glow">
-                  <Icon name="glow" size={15} color={opts.ambient ? p.accent : p.text} />
+                  <Icon name="glow" size={15} color={opts.ambient ? bp.accent : bp.text} />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.quick}
+                  style={bs.quick}
                   onPress={() => {
                     tick();
                     if (player.playing) player.pause();
                     setCoverOpen(true);
                   }}
                   accessibilityLabel="Choose the cover (thumbnail)">
-                  <Icon name="frame" size={14} color={p.text} />
-                  <Text style={styles.quickText}>Cover</Text>
+                  <Icon name="frame" size={14} color={bp.text} />
+                  <Text style={bs.quickText}>Cover</Text>
                 </TouchableOpacity>
                 {enableVideo && (
-                  <TouchableOpacity style={styles.quick} onPress={startPip} accessibilityLabel="Picture in picture">
-                    <Icon name="pip" size={15} color={p.text} />
+                  <TouchableOpacity style={bs.quick} onPress={startPip} accessibilityLabel="Picture in picture">
+                    <Icon name="pip" size={15} color={bp.text} />
                   </TouchableOpacity>
                 )}
               </ScrollView>
 
-              {/* Sideways, only the playback bar: the rest is in the upright view. */}
-              {!landscape && marks.length > 0 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.markRow}>
+              {marks.length > 0 && !overlay && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={bs.markRow}>
                   {marks.map((m) => (
                     <TouchableOpacity
                       key={m.id}
-                      style={styles.markChip}
+                      style={bs.markChip}
                       onPress={() => seek(Math.min(1, m.atMs / 1000 / Math.max(1, totalSec)))}
                       onLongPress={() => setMarkMenu(m)}>
-                      <Icon name="bookmark" size={11} color={p.accent} />
-                      <Text style={styles.markText} numberOfLines={1}>
+                      <Icon name="bookmark" size={11} color={bp.accent} />
+                      <Text style={bs.markText} numberOfLines={1}>
                         {fmtClock(m.atMs)}
                         {m.label ? `  ${m.label}` : ''}
                       </Text>
@@ -1108,62 +1153,81 @@ function ViewerPage({
                 </ScrollView>
               )}
 
-              {!landscape && (
-              <>
-              <ScrollView ref={stripRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
+              {/* The film strip only upright (over the video the bar's frame preview does its job). */}
+              {!overlay && (
+              <ScrollView ref={stripRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={bs.strip}>
                 {frames.map((src, i) => (
                   <TouchableOpacity key={i} onPress={() => seek((i + 0.5) / frames.length)}>
-                    <Image source={src} style={styles.stripFrame} contentFit="cover" />
+                    <Image source={src} style={bs.stripFrame} contentFit="cover" />
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+              )}
 
-              {/* album bar */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.albumBar}>
+              {/* album bar (sideways it sits in the star row, to keep the video clear) */}
+              {!overlay && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={bs.albumBar}>
                 {barAlbums.map((a) => (
                   <TouchableOpacity
                     key={a.id}
-                    style={[styles.albumChip, albumIds.includes(a.id) && styles.albumChipOn]}
+                    style={[bs.albumChip, albumIds.includes(a.id) && bs.albumChipOn]}
                     onPress={() => void toggleAlbum(a)}>
-                    <Text style={[styles.albumChipText, albumIds.includes(a.id) && styles.albumChipTextOn]} numberOfLines={1}>
+                    <Text style={[bs.albumChipText, albumIds.includes(a.id) && bs.albumChipTextOn]} numberOfLines={1}>
                       {albumIds.includes(a.id) ? '✓ ' : ''}
                       {a.name}
                     </Text>
                   </TouchableOpacity>
                 ))}
-                <TouchableOpacity style={styles.albumChip} onPress={() => setNewAlbumOpen(true)}>
-                  <Text style={styles.albumChipText}>+ Album</Text>
+                <TouchableOpacity style={bs.albumChip} onPress={() => setNewAlbumOpen(true)}>
+                  <Text style={bs.albumChipText}>+ Album</Text>
                 </TouchableOpacity>
               </ScrollView>
+              )}
 
-              <View style={[styles.toolbar, { paddingBottom: insets.bottom + 10 }]}>
-                <TouchableOpacity style={styles.tool} onPress={() => void onFlag(1)} accessibilityLabel="Pick">
-                  <Icon name="flag" size={18} color={flag === 1 ? '#30d158' : p.textSecondary} />
+              <View style={[bs.toolbar, { paddingBottom: overlay ? Math.max(8, insets.bottom) : insets.bottom + 10 }]}>
+                <TouchableOpacity style={bs.tool} onPress={() => void onFlag(1)} accessibilityLabel="Pick">
+                  <Icon name="flag" size={18} color={flag === 1 ? '#30d158' : bp.textSecondary} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.tool} onPress={() => void onFlag(-1)} accessibilityLabel="Reject">
-                  <Icon name="close" size={18} color={flag === -1 ? '#ff453a' : p.textSecondary} weight="bold" />
+                <TouchableOpacity style={bs.tool} onPress={() => void onFlag(-1)} accessibilityLabel="Reject">
+                  <Icon name="close" size={18} color={flag === -1 ? '#ff453a' : bp.textSecondary} weight="bold" />
                 </TouchableOpacity>
-                <View style={styles.stars}>
+                <View style={[bs.stars, overlay && bs.starsOver]}>
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                     <TouchableOpacity key={n} onPress={() => onRate(n)} onLongPress={() => setPickerOpen(true)} hitSlop={4}>
-                      <Text style={[styles.star, n <= rating && styles.starOn]}>{n <= rating ? '★' : '☆'}</Text>
+                      <Text style={[bs.star, n <= rating && bs.starOn]}>{n <= rating ? '★' : '☆'}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
                 {!!ratingLabel(rating, prefs.ratingLabels) && (
-                  <Text style={styles.rateWord} numberOfLines={1}>
+                  <Text style={bs.rateWord} numberOfLines={1}>
                     {ratingLabel(rating, prefs.ratingLabels)}
                   </Text>
                 )}
-                <TouchableOpacity style={styles.tool} onPress={() => setMenuOpen(true)} accessibilityLabel="More">
-                  <Icon name="more" size={18} color={p.textSecondary} />
+                {overlay && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={[bs.albumBar, { paddingBottom: 0, paddingHorizontal: 4 }]}>
+                    {barAlbums.map((a) => (
+                      <TouchableOpacity
+                        key={a.id}
+                        style={[bs.albumChip, albumIds.includes(a.id) && bs.albumChipOn]}
+                        onPress={() => void toggleAlbum(a)}>
+                        <Text style={[bs.albumChipText, albumIds.includes(a.id) && bs.albumChipTextOn]} numberOfLines={1}>
+                          {albumIds.includes(a.id) ? '✓ ' : ''}
+                          {a.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                    <TouchableOpacity style={bs.albumChip} onPress={() => setNewAlbumOpen(true)}>
+                      <Text style={bs.albumChipText}>+ Album</Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                )}
+                <TouchableOpacity style={bs.tool} onPress={() => setMenuOpen(true)} accessibilityLabel="More">
+                  <Icon name="more" size={18} color={bp.textSecondary} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.tool} onPress={confirmDelete} accessibilityLabel="Delete">
-                  <Icon name="trash" size={18} color={p.dangerText} />
+                <TouchableOpacity style={bs.tool} onPress={confirmDelete} accessibilityLabel="Delete">
+                  <Icon name="trash" size={18} color={bp.dangerText} />
                 </TouchableOpacity>
               </View>
-                </>
-              )}
             </Animated.View>
           </>
         )}
@@ -1981,6 +2045,7 @@ const makeStyles = (p: Palette) =>
     circleIconOn: { color: '#fff' },
 
     bottom: { backgroundColor: p.viewerBar },
+    bottomOver: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' },
     note: { color: p.link, fontSize: 12, textAlign: 'center', paddingTop: 8 },
     scrub: {
       flexDirection: 'row',
@@ -1999,7 +2064,7 @@ const makeStyles = (p: Palette) =>
     },
     scrubFill: { height: 3, borderRadius: 2, backgroundColor: p.text },
     scrubThumb: { position: 'absolute', width: 9, height: 9, borderRadius: 5, backgroundColor: p.text },
-    scrubTime: { color: p.textSecondary, fontSize: 11, fontVariant: ['tabular-nums'] },
+    scrubTime: { color: p.textSecondary, fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'], minWidth: 38, textAlign: 'center' },
 
     strip: { gap: FRAME_GAP, paddingHorizontal: 14, paddingBottom: 8, alignItems: 'center' },
     stripFrame: { width: FRAME_W, height: FRAME_H, backgroundColor: p.tile },
@@ -2033,6 +2098,7 @@ const makeStyles = (p: Palette) =>
     toolReject: { color: '#ff453a' },
     toolDanger: { color: p.dangerText, fontSize: 17, fontWeight: '700' },
     stars: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 },
+    starsOver: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', gap: 7 },
     star: { color: p.starOff, fontSize: 14 },
     starOn: { color: p.rating },
 
