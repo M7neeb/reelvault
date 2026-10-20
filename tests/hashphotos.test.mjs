@@ -97,3 +97,36 @@ test('HashPhotos dates: read in every common way, and set so the library is in t
   assert.equal(plan.dates, 1);
   assert.deepEqual(plan.changes.map((c) => [c.videoId, c.date]), [['a', local(2019, 7, 4, 18, 30)]]);
 });
+
+test('column names with a standard in front, nested JSON and XMP lists are read', () => {
+  const t = (id, filename, extra = {}) => ({ id, filename, title: null, notes: null, rating: 0, tagNames: [], flag: 0, ...extra });
+  const library = [t('a', 'IMG_0001.MOV'), t('b', 'IMG_0002.mp4', { tagNames: ['dog'] })];
+  const c = parseMetadataFile('File Name,IPTC:Keywords,XMP:Rating,Caption-Abstract\nIMG_0001.MOV,Beach;Sun,★★★,Hi\nIMG_0002.mp4,Dog,,\n');
+  assert.deepEqual(c.recognised.sort(), ['caption', 'filename', 'keywords', 'rating']);
+  assert.equal(c.records[0].rating, 6);
+  const plan = planMetadata(c, library);
+  assert.equal(plan.keywords, 2);
+  assert.equal(plan.withKeywords, 2);
+  assert.equal(plan.keywordsAlreadyThere, 1);
+  const j = parseMetadataFile(JSON.stringify([{ file: { name: 'IMG_0001.MOV' }, metadata: { 'Keyword List': [{ name: 'Holiday' }], 'Star Rating': '4 stars' } }]));
+  assert.deepEqual(j.records[0].keywords, ['Holiday']);
+  assert.equal(j.records[0].filename, 'IMG_0001.MOV');
+  assert.equal(j.records[0].rating, 8);
+  const x = parseMetadataFile('<x:xmpmeta><rdf:RDF><rdf:Description rdf:about="IMG_0001.MOV" xmp:Rating="5"><dc:subject><rdf:Bag><rdf:li>Sea</rdf:li><rdf:li>Boat</rdf:li></rdf:Bag></dc:subject></rdf:Description></rdf:RDF></x:xmpmeta>');
+  assert.deepEqual(x.records[0].keywords, ['Sea', 'Boat']);
+  assert.equal(x.records[0].rating, 10);
+});
+
+test("HashPhotos' own export: IPTC.Keywords, IPTC.StarRating, IPTC.ObjectName and Memo (CSV and nested JSON)", () => {
+  const csv = parseMetadataFile('FileName,CreationDate,ModificationDate,Memo,IPTC.Byline,IPTC.Keywords,IPTC.ObjectName,IPTC.StarRating,Exif.DateTimeOriginal\nIMG_0001.MOV,2026-10-04T21:43:52Z,2026-10-08T17:57:32Z,A memo,Me,"Irl, Reddit/X",My title,4,2026:10:04 23:43:52\n');
+  const json = parseMetadataFile(JSON.stringify([{ CreationDate: '2026-10-04T21:43:52Z', Exif: { DateTimeOriginal: '2026:10:04 23:43:52' }, FileName: 'IMG_0001.MOV', IPTC: { Keywords: ['Irl', 'Reddit/X'], ObjectName: 'My title', StarRating: 4 }, Memo: 'A memo' }]));
+  for (const f of [csv, json]) {
+    const r = f.records[0];
+    assert.deepEqual(r.keywords, ['Irl', 'Reddit/X']);
+    assert.equal(r.rating, 8);
+    assert.equal(r.title, 'My title');
+    assert.equal(r.caption, 'A memo');
+    // CreationDate (the moment it was filmed) wins over the modified date and the camera's local clock.
+    assert.equal(r.takenAt, Date.UTC(2026, 9, 4, 21, 43, 52));
+  }
+});
