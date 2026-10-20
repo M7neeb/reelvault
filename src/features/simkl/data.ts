@@ -37,7 +37,7 @@ import {
 } from './actions';
 import { allHistory, allPlays, metaMap, playsFor, sessionsFor } from './history';
 import { loadFranchises, matchFranchise, prefetchArt, scrobble } from './actions';
-import { allLinks, allLists, createList, deleteList, listEntries, setInList, setLink, markLinkLogged, updateList, type SimklList } from './collections';
+import { addManyToList, allLinks, allLists, createList, deleteList, listEntries, setInList, setLink, setSearched, markLinkLogged, updateList, type SimklList } from './collections';
 import { buildIcs, calendarEntries } from './ics';
 import { pickImportFile, runImport } from './importer';
 import { describeImport } from './imports';
@@ -219,6 +219,14 @@ export function useSimklData() {
       deleteList: write(deleteList),
       listEntries,
       setInList: write(setInList),
+      addManyToList: async (listId, titles) => {
+        try {
+          return await addManyToList(listId, titles);
+        } finally {
+          await reload();
+        }
+      },
+      setSearched,
       importFile: async (onProgress) => {
         const file = await pickImportFile();
         if (!file) return null;

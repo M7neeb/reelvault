@@ -19,7 +19,7 @@ export type SimklList = {
   ids: number[];
 };
 
-export type ListEntry = CatalogTitle & { addedAt: string };
+export type ListEntry = CatalogTitle & { addedAt: string; /** When you looked it up on Google; null = not yet. */ searchedAt: string | null };
 
 export type VideoLink = {
   videoId: string;
@@ -93,7 +93,8 @@ export async function listEntries(id: number): Promise<ListEntry[]> {
     poster: string | null;
     slug: string | null;
     added_at: string;
-  }>('SELECT simkl_id, type, title, year, poster, slug, added_at FROM simkl_list_items WHERE list_id = ? ORDER BY added_at DESC;', [id]);
+    searched_at: string | null;
+  }>('SELECT simkl_id, type, title, year, poster, slug, added_at, searched_at FROM simkl_list_items WHERE list_id = ? ORDER BY added_at DESC, position;', [id]);
   return rows.map((r) => ({
     simklId: r.simkl_id,
     type: r.type,
@@ -102,7 +103,32 @@ export async function listEntries(id: number): Promise<ListEntry[]> {
     poster: r.poster,
     slug: r.slug,
     addedAt: r.added_at,
+    searchedAt: r.searched_at,
   }));
+}
+
+/** Marks a list entry as looked up on Google (or not). */
+export async function setSearched(listId: number, simklId: number, on: boolean): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE simkl_list_items SET searched_at = ? WHERE list_id = ? AND simkl_id = ?;', [on ? new Date().toISOString() : null, listId, simklId]);
+}
+
+/** Many titles at once (kept in the order given); returns how many were new to the list. */
+export async function addManyToList(listId: number, titles: CatalogTitle[]): Promise<number> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  let added = 0;
+  await db.withTransactionAsync(async () => {
+    for (const [i, t] of titles.entries()) {
+      const r = await db.runAsync(
+        `INSERT OR IGNORE INTO simkl_list_items (list_id, simkl_id, type, title, year, poster, slug, added_at, position)
+         VALUES (?,?,?,?,?,?,?,?,?);`,
+        [listId, t.simklId, t.type, t.title, t.year, t.poster, t.slug, now, i]
+      );
+      added += r.changes;
+    }
+  });
+  return added;
 }
 
 export async function setInList(listId: number, title: CatalogTitle, on: boolean): Promise<void> {

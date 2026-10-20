@@ -366,12 +366,9 @@ export default function SimklScreen(props: SimklScreenProps) {
             </>
           )}
 
-          {look !== 'simple' && look !== 'compact' && (
-            <>
-              <SectionHead title="My Lists" detail={lists.length ? `${lists.length}` : undefined} />
-              <ListShelf lists={lists} onOpen={setOpenList} onNew={() => setNewList(true)} />
-            </>
-          )}
+          {/* Every look shows your lists (they were hidden in Simple and Compact). */}
+          <SectionHead title="My Lists" detail={lists.length ? `${lists.length}` : undefined} />
+          <ListShelf lists={lists} onOpen={setOpenList} onNew={() => setNewList(true)} />
 
           <SectionHead
             title="Library"
@@ -519,7 +516,7 @@ export default function SimklScreen(props: SimklScreenProps) {
           onClose={() => setSortMenu(false)}
         />
       )}
-      {open && (
+      {open && !liveList && (
         <DetailModal
           item={openItem}
           title={open}
@@ -570,7 +567,23 @@ export default function SimklScreen(props: SimklScreenProps) {
         />
       )}
       {importing && <ImportSheet actions={actions} onClose={() => setImporting(false)} />}
-      {liveList && <ListModal list={liveList} actions={actions} onOpenTitle={setOpen} onClose={() => setOpenList(null)} />}
+      {liveList && (
+        // A title opened from the list shows over the list, inside it.
+        <ListModal list={liveList} type={category} actions={actions} initialAdding={dev?.addManyOpen} onOpenTitle={setOpen} onClose={() => setOpenList(null)}>
+          {open && (
+            <DetailModal
+              item={openItem}
+              title={open}
+              actions={actions}
+              lists={lists}
+              library={libraryMap}
+              hideSpoilers={hideSpoilers}
+              onOpen={setOpen}
+              onClose={() => setOpen(null)}
+            />
+          )}
+        </ListModal>
+      )}
       {newList && <ListEditor list={null} actions={actions} onClose={() => setNewList(false)} />}
       {account && (
         <AccountSheet

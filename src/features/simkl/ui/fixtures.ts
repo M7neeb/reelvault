@@ -159,13 +159,13 @@ export const FIXTURE_LISTS: SimklList[] = [
 
 const LIST_ENTRIES: Record<number, ListEntry[]> = {
   1: [
-    { simklId: 103, type: 'show', title: 'Copper Street', year: 2019, poster: null, slug: null, addedAt: day(30) },
-    { simklId: 101, type: 'show', title: 'Harbour Lights', year: 2024, poster: null, slug: null, addedAt: day(20) },
-    { simklId: 301, type: 'anime', title: 'Starlit Workshop', year: 2025, poster: null, slug: null, addedAt: day(5) },
+    { simklId: 103, type: 'show', title: 'Copper Street', year: 2019, poster: null, slug: null, addedAt: day(30), searchedAt: day(2) },
+    { simklId: 101, type: 'show', title: 'Harbour Lights', year: 2024, poster: null, slug: null, addedAt: day(20), searchedAt: null },
+    { simklId: 301, type: 'anime', title: 'Starlit Workshop', year: 2025, poster: null, slug: null, addedAt: day(5), searchedAt: null },
   ],
   2: [
-    { simklId: 202, type: 'movie', title: 'Low Tide', year: 2020, poster: null, slug: null, addedAt: day(8) },
-    { simklId: 203, type: 'movie', title: 'Signal Hill', year: 2012, poster: null, slug: null, addedAt: day(7) },
+    { simklId: 202, type: 'movie', title: 'Low Tide', year: 2020, poster: null, slug: null, addedAt: day(8), searchedAt: day(1) },
+    { simklId: 203, type: 'movie', title: 'Signal Hill', year: 2012, poster: null, slug: null, addedAt: day(7), searchedAt: null },
   ],
 };
 
@@ -301,6 +301,8 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
     deleteList: async () => {},
     listEntries: async (id) => LIST_ENTRIES[id] ?? [],
     setInList: async () => {},
+    addManyToList: async (_id, titles) => titles.length,
+    setSearched: async () => {},
     importFile: async (onProgress) => {
       for (let i = 1; i <= 4; i++) {
         await wait(200);

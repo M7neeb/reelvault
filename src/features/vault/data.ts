@@ -317,6 +317,7 @@ function parsePlayer(r: unknown): PlayerOptions {
     ambient: bool(o.ambient, d.ambient),
     remaining: bool(o.remaining, d.remaining),
     background: bool(o.background, d.background),
+    start: o.start === 'normal' || o.start === 'full' || o.start === 'fill' ? o.start : d.start,
   };
 }
 

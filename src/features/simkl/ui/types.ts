@@ -144,6 +144,10 @@ export type SimklActions = {
   deleteList: (id: number) => Promise<void>;
   listEntries: (id: number) => Promise<ListEntry[]>;
   setInList: (listId: number, title: CatalogTitle, on: boolean) => Promise<void>;
+  /** Many titles at once; resolves with how many were new to the list. */
+  addManyToList: (listId: number, titles: CatalogTitle[]) => Promise<number>;
+  /** Looked up on Google (or not). */
+  setSearched: (listId: number, simklId: number, on: boolean) => Promise<void>;
   /** Pick an IMDb / Letterboxd CSV and send it to Simkl. null = cancelled, 'unknown' = not a known export. */
   importFile: (onProgress: (done: number, total: number) => void) => Promise<ImportResult | null | 'unknown'>;
   /** Upcoming episodes as an .ics file through the share sheet; resolves how many. */
@@ -187,6 +191,8 @@ export type SimklScreenProps = {
     grid?: boolean;
     connectCode?: ConnectCode;
     listOpen?: number;
+    /** The open list starts on "Add many". */
+    addManyOpen?: boolean;
     pickOpen?: boolean;
     importOpen?: boolean;
     addToListOpen?: boolean;

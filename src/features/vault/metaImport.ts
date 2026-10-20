@@ -10,7 +10,7 @@ import { File } from 'expo-file-system';
 import { getDb } from '@/db';
 
 import { parseMetadataFile, type MetaChange, type MetaFile } from './hashphotos';
-import { setFlagMany, setTextMany } from './library';
+import { adjustDates, setFlagMany, setTextMany } from './library';
 import { setRating } from './repo';
 import { addTagToVideo } from './tags';
 
@@ -37,6 +37,7 @@ export async function applyMetadata(changes: MetaChange[]): Promise<void> {
       if (c.title) await setTextMany([c.videoId], 'title', c.title);
       if (c.caption) await setTextMany([c.videoId], 'notes', c.caption);
       if (c.flag) await setFlagMany([c.videoId], c.flag);
+      if (c.date) await adjustDates([c.videoId], { setTo: c.date });
     }
   });
   console.log(`[META] applied to ${changes.length} videos`);

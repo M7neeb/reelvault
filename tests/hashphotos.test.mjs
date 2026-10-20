@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseCsv, parseMetadataFile, planMetadata } from '../src/features/vault/hashphotos.ts';
+import { dateOf, parseCsv, parseMetadataFile, planMetadata } from '../src/features/vault/hashphotos.ts';
 
 const lib = [
   { id: 'a', filename: 'IMG_0001.MOV', title: null, notes: null, rating: 0, tagNames: ['beach'], flag: 0 },
@@ -68,4 +68,32 @@ test('finding the video when Files or Windows changed its name, and counting pic
   // A loose name shared by two videos is never guessed.
   const g = parseMetadataFile('Filename\nPart 3.mp4\n');
   assert.deepEqual(planMetadata(g, library).unmatched, ['Part 3.mp4']);
+});
+
+test('HashPhotos dates: read in every common way, and set so the library is in the same order', () => {
+  const local = (y, mo, d, h = 0, mi = 0, s = 0) => new Date(y, mo - 1, d, h, mi, s).getTime();
+  assert.equal(dateOf('2021-05-03 14:22:11'), local(2021, 5, 3, 14, 22, 11));
+  assert.equal(dateOf('2021:05:03 14:22:11'), local(2021, 5, 3, 14, 22, 11));
+  assert.equal(dateOf('2021-05-03T14:22:11Z'), Date.UTC(2021, 4, 3, 14, 22, 11));
+  assert.equal(dateOf('2021-05-03T14:22:11+02:00'), Date.UTC(2021, 4, 3, 12, 22, 11));
+  assert.equal(dateOf('5/3/2021, 2:22 PM'), local(2021, 5, 3, 14, 22));
+  assert.equal(dateOf('25/3/2021 09:05'), local(2021, 3, 25, 9, 5));
+  assert.equal(dateOf('03.05.2021 14:22'), local(2021, 5, 3, 14, 22));
+  assert.equal(dateOf('1620051731'), 1620051731000);
+  assert.equal(dateOf('1620051731000'), 1620051731000);
+  assert.equal(dateOf('soon'), null);
+  assert.equal(dateOf('2021-13-40'), null);
+
+  // The filming date wins over the date it was added, whatever the column order.
+  const f = parseMetadataFile('Filename,Date Added,Creation Date\na.mov,2024-01-01 10:00,2019-07-04 18:30\nb.mov,2024-01-01 10:00,\n');
+  assert.ok(f.recognised.includes('takenAt'));
+  assert.equal(f.records[0].takenAt, local(2019, 7, 4, 18, 30));
+  assert.equal(f.records[1].takenAt, local(2024, 1, 1, 10, 0));
+  const lib = [
+    { id: 'a', filename: 'a.mov', title: null, notes: null, rating: 0, tagNames: [], flag: 0, createdAt: Date.now() },
+    { id: 'b', filename: 'b.mov', title: null, notes: null, rating: 0, tagNames: [], flag: 0, createdAt: local(2024, 1, 1, 10, 0) },
+  ];
+  const plan = planMetadata(f, lib);
+  assert.equal(plan.dates, 1);
+  assert.deepEqual(plan.changes.map((c) => [c.videoId, c.date]), [['a', local(2019, 7, 4, 18, 30)]]);
 });
