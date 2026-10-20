@@ -26,11 +26,18 @@ export type MetaRecord = {
   /** The file's size in bytes and its length, when the export has them (a second way to find the video). */
   size?: number | null;
   durationMs?: number | null;
+  /** The video's date in HashPhotos (ms), so the library is in the same order. */
+  takenAt?: number | null;
 };
 
 export type MetaFile = { format: 'csv' | 'json' | 'xml'; records: MetaRecord[]; columns: string[]; recognised: string[] };
 
 const norm = (k: string) => k.toLowerCase().replace(/[^a-z]/g, '');
+
+/** Columns that hold when the video was filmed, surest first. */
+const TAKEN_NAMES = ['creationdate', 'datecreated', 'createdate', 'created', 'createdat', 'creationtime', 'datetaken', 'takendate', 'taken', 'datetimeoriginal', 'originaldate', 'capturedate', 'captured', 'recordeddate', 'date', 'datetime', 'timestamp'];
+/** Used only when the file has no filming date: when it was added to HashPhotos. */
+const ADDED_NAMES = ['dateadded', 'addeddate', 'added', 'importdate', 'importeddate', 'modificationdate', 'datemodified', 'modifieddate', 'modified'];
 
 const FIELDS: Record<keyof MetaRecord, string[]> = {
   filename: ['filename', 'name', 'file', 'originalfilename', 'originalname', 'path', 'filepath', 'sourcefile', 'url'],
@@ -41,7 +48,66 @@ const FIELDS: Record<keyof MetaRecord, string[]> = {
   flag: ['flag', 'pick', 'flagged', 'status'],
   size: ['size', 'filesize', 'bytes', 'sizebytes', 'filesizebytes', 'filelength'],
   durationMs: ['duration', 'length', 'videoduration', 'durationseconds', 'seconds', 'runtime'],
+  takenAt: [...TAKEN_NAMES, ...ADDED_NAMES],
 };
+
+/** How sure a date column is: lower is better. */
+function dateRank(col: string): number {
+  const k = norm(col);
+  const i = TAKEN_NAMES.indexOf(k);
+  if (i >= 0) return i;
+  const j = ADDED_NAMES.indexOf(k);
+  return j >= 0 ? 100 + j : 1000;
+}
+
+/**
+ * A date as HashPhotos or a spreadsheet may write it, read as local time:
+ * "2021-05-03 14:22:11", "2021:05:03 14:22:11" (camera style), ISO with "T"
+ * and a zone, "5/3/2021 2:22 PM" (month first unless the first number is over
+ * 12), "03.05.2021 14:22", or seconds / milliseconds since 1970.
+ */
+export function dateOf(v: unknown): number | null {
+  const t = String(v ?? '').trim();
+  if (!t) return null;
+  const ok = (ms: number) => (Number.isFinite(ms) && ms > Date.UTC(1971, 0, 1) && ms < Date.now() + 2 * 86400000 ? Math.round(ms) : null);
+  if (/^\d{9,13}(?:\.\d+)?$/.test(t)) {
+    const n = Number(t);
+    return ok(n < 1e11 ? n * 1000 : n);
+  }
+  const time = (rest: string) => {
+    const m = /(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,6}))?)?\s*([ap]\.?m\.?)?/i.exec(rest);
+    if (!m) return { h: 0, mi: 0, s: 0, ms: 0 };
+    let h = Number(m[1]);
+    const ap = m[5]?.toLowerCase()[0];
+    if (ap === 'p' && h < 12) h += 12;
+    if (ap === 'a' && h === 12) h = 0;
+    return { h, mi: Number(m[2]), s: Number(m[3] ?? 0), ms: m[4] ? Math.round(Number(`0.${m[4]}`) * 1000) : 0 };
+  };
+  const build = (y: number, mo: number, d: number, rest: string) => {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    const { h, mi, s, ms } = time(rest);
+    // A zone ("Z", "+02:00") makes it an exact moment; otherwise it is the phone's local time.
+    const zone = /(?:\d)(Z|[+-]\d{2}:?\d{2})\s*$/i.exec(rest);
+    if (zone) {
+      const z = zone[1].toUpperCase();
+      const off = z === 'Z' ? 0 : (z[0] === '-' ? -1 : 1) * (Number(z.slice(1, 3)) * 60 + Number(z.slice(-2)));
+      return ok(Date.UTC(y, mo - 1, d, h, mi, s, ms) - off * 60000);
+    }
+    return ok(new Date(y, mo - 1, d, h, mi, s, ms).getTime());
+  };
+  let m = /^(\d{4})[-:/.](\d{1,2})[-:/.](\d{1,2})(.*)$/.exec(t);
+  if (m) return build(Number(m[1]), Number(m[2]), Number(m[3]), m[4]);
+  m = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{2,4})(.*)$/.exec(t);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[3]);
+    const y = m[4].length === 2 ? 2000 + Number(m[4]) : Number(m[4]);
+    // Dots are day first (03.05.2021); slashes month first unless that can't be.
+    const dayFirst = m[2] === '.' || a > 12;
+    return build(y, dayFirst ? b : a, dayFirst ? a : b, m[5]);
+  }
+  return null;
+}
 
 /** "12345", "12,345" or "14.2 MB" into bytes. */
 function bytesOf(v: unknown): number | null {
@@ -96,6 +162,7 @@ function toRecords(rows: Record<string, unknown>[]): { records: MetaRecord[]; co
   const recognised = [...new Set([...map.values()].filter((f): f is keyof MetaRecord => !!f))];
   const raw = rows.map((row) => {
     const rec: MetaRecord & { rawRating: number | null } = { filename: '', keywords: [], rating: null, rawRating: null, title: null, caption: null, flag: null };
+    let dateRankSeen = Infinity;
     for (const [col, value] of Object.entries(row)) {
       const f = map.get(col);
       if (!f || value === null || value === undefined || value === '') continue;
@@ -109,6 +176,15 @@ function toRecords(rows: Record<string, unknown>[]): { records: MetaRecord[]; co
       else if (f === 'flag') rec.flag = flagOf(value);
       else if (f === 'size' && !rec.size) rec.size = bytesOf(value);
       else if (f === 'durationMs' && !rec.durationMs) rec.durationMs = msOf(value);
+      else if (f === 'takenAt') {
+        // Several date columns: the filming date wins over the date it was added.
+        const rank = dateRank(col);
+        const at = rank < dateRankSeen ? dateOf(value) : null;
+        if (at) {
+          rec.takenAt = at;
+          dateRankSeen = rank;
+        }
+      }
     }
     return rec;
   });
@@ -233,6 +309,7 @@ export type MetaTarget = {
   flag: number;
   sizeBytes?: number | null;
   durationMs?: number | null;
+  createdAt?: number;
 };
 
 export type MetaChange = {
@@ -242,6 +319,8 @@ export type MetaChange = {
   title: string | null;
   caption: string | null;
   flag: -1 | 1 | null;
+  /** The HashPhotos date, when it differs from the video's. */
+  date: number | null;
 };
 
 export type MetaPlan = {
@@ -253,6 +332,7 @@ export type MetaPlan = {
   pictures: string[];
   keywords: number;
   ratings: number;
+  dates: number;
 };
 
 const PICTURE = /\.(jpe?g|png|heic|heif|gif|webp|tiff?|bmp|dng|raw|cr2|nef|arw)$/i;
@@ -331,16 +411,18 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
       continue;
     }
     matched += 1;
-    const c = changes.get(v.id) ?? { videoId: v.id, addKeywords: [], rating: null, title: null, caption: null, flag: null };
+    const c = changes.get(v.id) ?? { videoId: v.id, addKeywords: [], rating: null, title: null, caption: null, flag: null, date: null };
     const have = new Set(v.tagNames.map(lower));
     c.addKeywords = [...new Set([...c.addKeywords, ...r.keywords.filter((k) => !have.has(lower(k)))])];
     if (r.rating !== null && (overwrite || !v.rating) && r.rating !== v.rating) c.rating = r.rating;
     if (r.title && (overwrite || !v.title) && r.title !== v.title) c.title = r.title;
     if (r.caption && (overwrite || !v.notes) && r.caption !== v.notes) c.caption = r.caption;
     if (r.flag && (overwrite || !v.flag) && r.flag !== v.flag) c.flag = r.flag;
+    // Always taken from HashPhotos (the date ReelVault has is often the day it was sent over).
+    if (r.takenAt && Math.abs(r.takenAt - (v.createdAt ?? 0)) >= 1000) c.date = r.takenAt;
     changes.set(v.id, c);
   }
-  const list = [...changes.values()].filter((c) => c.addKeywords.length || c.rating !== null || c.title || c.caption || c.flag);
+  const list = [...changes.values()].filter((c) => c.addKeywords.length || c.rating !== null || c.title || c.caption || c.flag || c.date);
   return {
     changes: list,
     matched,
@@ -348,5 +430,6 @@ export function planMetadata(file: MetaFile, library: MetaTarget[], overwrite = 
     pictures,
     keywords: list.reduce((a, c) => a + c.addKeywords.length, 0),
     ratings: list.filter((c) => c.rating !== null).length,
+    dates: list.filter((c) => c.date !== null).length,
   };
 }

@@ -98,6 +98,7 @@ import {
   type VaultScreenProps,
   DEFAULT_VAULT_PREFS,
   PLAYER_SPEEDS,
+  PLAYER_STARTS,
   type PlayerOptions,
   type VaultPrefs,
 } from './types';
@@ -186,7 +187,7 @@ function ViewerPage({
 
   const videoRef = useRef<VideoView>(null);
   /** Pinch out to fill the screen (cropping the edges), pinch in to see it whole. */
-  const [fillScreen, setFillScreen] = useState(false);
+  const [fillScreen, setFillScreen] = useState(opts.start === 'fill');
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState(false);
   /** The video ended: the next one comes up after a countdown (or Replay when it is the last). */
@@ -210,14 +211,24 @@ function ViewerPage({
   const [playing, setPlaying] = useState(enableVideo);
   const [infoOpen, setInfoOpen] = useState(initialInfoOpen);
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
-  const [chrome, setChrome] = useState(true);
+  /** Opening big (the player setting): the video alone on the screen; a tap brings the controls. */
+  const [chrome, setChrome] = useState(opts.start === 'normal');
   /** Sideways: the phone was turned, or the full-screen button turned it. */
   const landscape = W > H;
   const wide = !!item.width && !!item.height && item.width > item.height;
   // Turning sideways hides everything but the video; turning back upright brings it back.
+  const firstTurn = useRef(true);
   useEffect(() => {
+    if (firstTurn.current) {
+      firstTurn.current = false;
+      if (!landscape) return;
+    }
     setChrome(!landscape);
   }, [landscape]);
+  // Full Screen: a wide video turns sideways as it opens.
+  useEffect(() => {
+    if (opts.start === 'full' && wide && canRotate) lockSideways();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   function toggleFullScreen() {
     tick();
     if (landscape) {
@@ -1404,6 +1415,16 @@ function ViewerPage({
                   onPress={() => {
                     setMenuOpen(false);
                     setOpt({ autoplayNext: !opts.autoplayNext });
+                  }}
+                />
+                <MenuRow
+                  label="Open Videos"
+                  hint={PLAYER_STARTS.find((s) => s.key === opts.start)?.label ?? ''}
+                  onPress={() => {
+                    const i = PLAYER_STARTS.findIndex((s) => s.key === opts.start);
+                    const nextStart = PLAYER_STARTS[(i + 1) % PLAYER_STARTS.length];
+                    setOpt({ start: nextStart.key });
+                    setToast(`Videos open ${nextStart.label.toLowerCase()}`);
                   }}
                 />
                 <MenuRow

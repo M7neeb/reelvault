@@ -2,12 +2,14 @@
  * Your own lists ("Comfort shows", "Watch with Sam"): the shelf on each Simkl
  * tab, the list itself, the "Add to my lists" sheet and the editor. Lists
  * live in ReelVault (Simkl's custom lists are PRO-only and read-only through
- * the API) and can mix movies, shows and anime.
+ * the API) and can mix movies, shows and anime. "Add many" pastes a whole list
+ * of names at once; each title can be looked up on Google, and the list keeps
+ * which ones you have searched.
  * Presentational only (see simkl/ui/types.ts).
  */
 
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ActivityIndicator, FlatList, Linking, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal, useWindowDimensions } from '@/features/vault/ui/screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,9 +21,10 @@ import { OptionsSheet } from '@/features/vault/ui/prompts';
 import { SheetFrame } from '@/features/vault/ui/sheets';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
+import { googleUrl, parseTitleLines, pickMatch } from '../bulkAdd';
 import { SIMKL_TYPES } from '../logic';
 import Poster from './Poster';
-import type { CatalogTitle, ListEntry, SimklActions, SimklList } from './types';
+import type { CatalogTitle, ListEntry, SimklActions, SimklList, SimklType } from './types';
 
 export const LIST_ICONS = ['🍿', '❤️', '⭐', '🔥', '😂', '😱', '🎬', '📺', '🌙', '🧠', '👀', '🎉', '🧸', '🏆'];
 
@@ -213,34 +216,182 @@ export function AddToListSheet({
           </TouchableOpacity>
         </View>
         <Text style={styles.sheetHint}>Lists are kept in ReelVault and can mix movies, shows and anime.</Text>
+        {/* Inside the sheet: iOS shows nothing presented beside an open sheet. */}
+        {creating && (
+          <ListEditor
+            list={null}
+            actions={actions}
+            onDone={(id) => {
+              setInList(new Set([...inList, id]));
+              void actions.setInList(id, title, true);
+            }}
+            onClose={() => setCreating(false)}
+          />
+        )}
       </SheetFrame>
-      {creating && (
-        <ListEditor
-          list={null}
-          actions={actions}
-          onDone={(id) => {
-            setInList(new Set([...inList, id]));
-            void actions.setInList(id, title, true);
-          }}
-          onClose={() => setCreating(false)}
-        />
-      )}
     </>
+  );
+}
+
+/* --------------------------------------------------------------- add many */
+
+type AddManyResult = { added: number; already: number; notFound: string[] };
+
+/**
+ * Paste a list of names (one per line): each one is searched on Simkl and the
+ * best match added to the list. Names with no clear match are listed after.
+ */
+export function AddManySheet({
+  list,
+  initialType,
+  actions,
+  onClose,
+}: {
+  list: SimklList;
+  initialType: SimklType;
+  actions: SimklActions;
+  onClose: () => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const [type, setType] = useState<SimklType>(initialType);
+  const [text, setText] = useState('');
+  const [progress, setProgress] = useState<{ done: number; total: number; name: string } | null>(null);
+  const [result, setResult] = useState<AddManyResult | null>(null);
+  const alive = useRef(true);
+  useEffect(
+    () => () => {
+      alive.current = false;
+    },
+    []
+  );
+  const wanted = parseTitleLines(text);
+
+  async function run() {
+    if (!wanted.length || progress) return;
+    const found: CatalogTitle[] = [];
+    const notFound: string[] = [];
+    for (const [i, w] of wanted.entries()) {
+      if (!alive.current) return;
+      setProgress({ done: i, total: wanted.length, name: w.name });
+      try {
+        const match = pickMatch(w, await actions.search(type, w.name));
+        if (match && !found.some((f) => f.simklId === match.simklId)) found.push(match);
+        else if (!match) notFound.push(w.line || w.name);
+      } catch {
+        notFound.push(w.line || w.name);
+      }
+      // Gentle on Simkl: a few searches a second.
+      await new Promise((res) => setTimeout(res, 250));
+    }
+    const added = await actions.addManyToList(list.id, found).catch(() => 0);
+    if (!alive.current) return;
+    success();
+    setProgress(null);
+    setResult({ added, already: found.length - added, notFound });
+  }
+
+  return (
+    <SheetFrame
+      title="Add many"
+      onClose={onClose}
+      action={result ? { label: 'Done', onPress: onClose } : { label: progress ? 'Adding…' : 'Add', onPress: () => void run(), disabled: !wanted.length || !!progress }}>
+      {result ? (
+        <>
+          <View style={styles.resultBig}>
+            <Text style={styles.resultNum}>{result.added}</Text>
+            <Text style={styles.sheetHint}>
+              added to {list.name}
+              {result.already ? ` · ${result.already} already in it` : ''}
+            </Text>
+          </View>
+          {result.notFound.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>NOT FOUND ON SIMKL ({result.notFound.length})</Text>
+              <View style={styles.group}>
+                {result.notFound.map((n, i) => (
+                  <Text key={`${n}-${i}`} style={[styles.notFound, i > 0 && styles.groupSep]} numberOfLines={2}>
+                    {n}
+                  </Text>
+                ))}
+              </View>
+              <Text style={styles.sheetHint}>Check the spelling, or try another kind (anime, show or movie), then add them again.</Text>
+              <View style={styles.rowActions}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setText(result.notFound.join('\n'));
+                    setResult(null);
+                  }}
+                  hitSlop={8}>
+                  <Text style={styles.link}>Try these again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => void Share.share({ message: result.notFound.join('\n') }).catch(() => undefined)} hitSlop={8}>
+                  <Text style={styles.link}>Share the list</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <Text style={styles.sheetHint}>Paste or type names, one per line (numbers, bullets and years like "(2019)" are fine). Each one is looked up on Simkl and added.</Text>
+          <View style={styles.filtersLeft}>
+            {SIMKL_TYPES.map((t) => (
+              <TouchableOpacity key={t.key} style={[styles.filter, type === t.key && styles.filterOn]} onPress={() => setType(t.key)} disabled={!!progress}>
+                <Text style={[styles.filterText, type === t.key && styles.filterTextOn]}>{t.plural}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput
+            style={styles.bigInput}
+            value={text}
+            onChangeText={setText}
+            multiline
+            editable={!progress}
+            placeholder={type === 'anime' ? 'Naruto\nOne Piece\nSteins;Gate' : type === 'show' ? 'Breaking Bad\nDark\nThe Office' : 'Dune\nInception (2010)\nSpirited Away'}
+            placeholderTextColor={p.textMuted}
+            keyboardAppearance={p.scheme}
+            autoCorrect={false}
+          />
+          {progress ? (
+            <View style={styles.progressRow}>
+              <ActivityIndicator color={p.accent} />
+              <Text style={styles.sheetHint} numberOfLines={1}>
+                Finding {progress.done + 1} of {progress.total}: {progress.name}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.sheetHint}>{wanted.length ? `${wanted.length} ${wanted.length === 1 ? 'title' : 'titles'}` : ' '}</Text>
+          )}
+        </>
+      )}
+    </SheetFrame>
   );
 }
 
 /* --------------------------------------------------------------- the list */
 
+type Searched = 'all' | 'todo' | 'done';
+
 export function ListModal({
   list,
+  type,
   actions,
   onOpenTitle,
   onClose,
+  initialAdding = false,
+  children,
 }: {
   list: SimklList;
+  /** Open "Add many" straight away (the browser preview). */
+  initialAdding?: boolean;
+  /** The tab it was opened from (the kind "Add many" starts with). */
+  type: SimklType;
   actions: SimklActions;
   onOpenTitle: (t: CatalogTitle) => void;
   onClose: () => void;
+  /** Shown over the list (a title's page): iOS shows nothing presented beside an open page. */
+  children?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
@@ -249,7 +400,9 @@ export function ListModal({
   const [entries, setEntries] = useState<ListEntry[] | null>(null);
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(initialAdding);
   const [filter, setFilter] = useState<'all' | 'movie' | 'show' | 'anime'>('all');
+  const [searched, setSearchedFilter] = useState<Searched>('all');
 
   useEffect(() => {
     actions
@@ -258,7 +411,19 @@ export function ListModal({
       .catch(() => setEntries([]));
   }, [actions, list.id, list.count]);
 
-  const shown = (entries ?? []).filter((e) => filter === 'all' || e.type === filter);
+  function markSearched(e: ListEntry, on: boolean) {
+    setEntries((all) => (all ?? []).map((x) => (x.simklId === e.simklId ? { ...x, searchedAt: on ? new Date().toISOString() : null } : x)));
+    actions.setSearched(list.id, e.simklId, on).catch(() => undefined);
+  }
+  function google(e: ListEntry) {
+    tick();
+    markSearched(e, true);
+    void Linking.openURL(googleUrl(e)).catch(() => undefined);
+  }
+
+  const ofKind = (entries ?? []).filter((e) => filter === 'all' || e.type === filter);
+  const doneCount = ofKind.filter((e) => e.searchedAt).length;
+  const shown = ofKind.filter((e) => searched === 'all' || (searched === 'done' ? !!e.searchedAt : !e.searchedAt));
   const types = new Set((entries ?? []).map((e) => e.type));
   const cols = 3;
   const w = Math.floor((width - 32 - 16) / cols);
@@ -270,6 +435,7 @@ export function ListModal({
         <View style={styles.listHeader}>
           <IconButton icon="back" label="Back" onPress={onClose} />
           <View style={{ flex: 1 }} />
+          <IconButton icon="plus" label="Add many" onPress={() => setAdding(true)} />
           <IconButton icon="more" label="List options" onPress={() => setMenu(true)} />
         </View>
         <FlatList
@@ -282,7 +448,9 @@ export function ListModal({
             <View style={styles.listTop}>
               <Text style={styles.listIcon}>{list.icon ?? '🍿'}</Text>
               <Text style={styles.listName}>{list.name}</Text>
-              <Text style={styles.listCount}>{entries ? `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}` : ' '}</Text>
+              <Text style={styles.listCount}>
+                {entries ? `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}${ofKind.length ? ` · ${doneCount} searched` : ''}` : ' '}
+              </Text>
               {types.size > 1 && (
                 <View style={styles.filters}>
                   {(['all', 'movie', 'show', 'anime'] as const)
@@ -296,25 +464,65 @@ export function ListModal({
                     ))}
                 </View>
               )}
+              {ofKind.length > 0 && (
+                <View style={styles.filters}>
+                  {(
+                    [
+                      ['all', 'Everything'],
+                      ['todo', `Not searched · ${ofKind.length - doneCount}`],
+                      ['done', `Searched · ${doneCount}`],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <TouchableOpacity key={k} style={[styles.filter, searched === k && styles.filterOn]} onPress={() => setSearchedFilter(k)}>
+                      <Text style={[styles.filterText, searched === k && styles.filterTextOn]}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </View>
           }
           ListEmptyComponent={
             entries === null ? (
               <ActivityIndicator color={p.textSecondary} style={{ marginTop: 30 }} />
+            ) : entries.length ? (
+              <Text style={styles.empty}>{searched === 'todo' ? 'You have searched every one of these.' : 'Nothing here.'}</Text>
             ) : (
-              <Text style={styles.empty}>Nothing here yet. Open any title and tap My lists to add it.</Text>
+              <View style={{ alignItems: 'center', gap: 14 }}>
+                <Text style={styles.empty}>Nothing here yet. Open any title and tap My lists, or add a whole list of names at once.</Text>
+                <TouchableOpacity style={styles.addMany} onPress={() => setAdding(true)}>
+                  <Icon name="plus" size={16} color="#fff" weight="bold" />
+                  <Text style={styles.addManyText}>Add many</Text>
+                </TouchableOpacity>
+              </View>
             )
           }
           renderItem={({ item }) => (
-            <TouchableOpacity style={{ width: w }} onPress={() => onOpenTitle(item)} accessibilityLabel={item.title}>
-              <Poster path={item.poster} title={item.title} width={w} height={h} radius={10} />
-              <Text style={styles.gridTitle} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Text style={styles.gridSub}>
-                {[item.year, SIMKL_TYPES.find((t) => t.key === item.type)?.label].filter(Boolean).join(' · ')}
-              </Text>
-            </TouchableOpacity>
+            <View style={{ width: w }}>
+              <TouchableOpacity onPress={() => onOpenTitle(item)} accessibilityLabel={item.title}>
+                <Poster path={item.poster} title={item.title} width={w} height={h} radius={10} />
+                {item.searchedAt && (
+                  <View style={styles.searchedBadge}>
+                    <Icon name="check" size={12} color="#fff" weight="bold" />
+                  </View>
+                )}
+                <Text style={styles.gridTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={styles.gridSub}>
+                  {[item.year, SIMKL_TYPES.find((t) => t.key === item.type)?.label].filter(Boolean).join(' · ')}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.googleBtn, item.searchedAt && styles.googleBtnDone]}
+                onPress={() => google(item)}
+                onLongPress={() => {
+                  tick();
+                  markSearched(item, !item.searchedAt);
+                }}
+                accessibilityLabel={item.searchedAt ? `Searched. Search ${item.title} on Google again` : `Search ${item.title} on Google`}>
+                <Text style={[styles.googleText, item.searchedAt && styles.googleTextDone]}>{item.searchedAt ? '✓ Searched' : 'Google'}</Text>
+              </TouchableOpacity>
+            </View>
           )}
         />
       </View>
@@ -322,7 +530,15 @@ export function ListModal({
         <OptionsSheet
           title={list.name}
           options={[
+            { label: 'Add many titles', onPress: () => setAdding(true) },
             { label: 'Rename or change icon', onPress: () => setEditing(true) },
+            {
+              label: 'Mark all as not searched',
+              onPress: () =>
+                confirmAction('Start the searches over?', 'Every title in the list goes back to Not searched.', () => {
+                  for (const e of entries ?? []) if (e.searchedAt) markSearched(e, false);
+                }),
+            },
             {
               label: 'Delete list',
               danger: true,
@@ -336,6 +552,8 @@ export function ListModal({
         />
       )}
       {editing && <ListEditor list={list} actions={actions} onClose={() => setEditing(false)} />}
+      {adding && <AddManySheet list={list} initialType={type} actions={actions} onClose={() => setAdding(false)} />}
+      {children}
     </Modal>
   );
 }
@@ -390,4 +608,21 @@ const makeStyles = (p: Palette) =>
     gridTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
     gridSub: { color: p.textSecondary, fontSize: 12 },
     empty: { color: p.textSecondary, textAlign: 'center', marginTop: 30, paddingHorizontal: 30, fontSize: 15 },
+
+    searchedBadge: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: p.success, alignItems: 'center', justifyContent: 'center' },
+    googleBtn: { marginTop: 6, borderRadius: 999, paddingVertical: 6, alignItems: 'center', backgroundColor: p.elevated },
+    googleBtnDone: { backgroundColor: `${p.success}26` },
+    googleText: { color: p.link, fontSize: 12, fontWeight: '800' },
+    googleTextDone: { color: p.success },
+    addMany: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 11 },
+    addManyText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+    filtersLeft: { flexDirection: 'row', gap: 8 },
+    bigInput: { minHeight: 180, maxHeight: 320, backgroundColor: p.card, borderRadius: 12, padding: 14, paddingTop: 12, color: p.text, fontSize: 16, textAlignVertical: 'top' },
+    progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    resultBig: { alignItems: 'center', paddingVertical: 6 },
+    resultNum: { color: p.text, fontSize: 48, fontWeight: '900', letterSpacing: -1 },
+    sectionLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+    notFound: { color: p.text, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
+    rowActions: { flexDirection: 'row', gap: 20 },
+    link: { color: p.link, fontWeight: '700', fontSize: 15 },
   });

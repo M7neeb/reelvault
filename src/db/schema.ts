@@ -464,4 +464,11 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_audio_bookmarks_item ON audio_bookmarks(item_id);
     `,
   },
+  {
+    version: 11,
+    sql: `
+      -- A list entry you looked up on Google ("which have I searched?"); NULL = not yet.
+      ALTER TABLE simkl_list_items ADD COLUMN searched_at TEXT;
+    `,
+  },
 ];

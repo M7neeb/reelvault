@@ -132,14 +132,11 @@ export const OV_SORTS: { key: OvSort; label: string }[] = [
 export const videoName = (v: Pick<OvVideo, 'title' | 'filename'> & { createdAt?: number }) => friendlyName(v);
 
 /**
- * Watched = you set it to Watched, or you have watched 80% of its length in
- * total (any one play counts when the length is unknown). A few seconds of
- * peeking never counts.
+ * Watched = you set it to Watched. Playing it, however much, never marks it:
+ * everything starts as To Watch until you say you've finished it.
  */
-export function isWatched(v: OvVideo, watchedMs: number, plays: number): boolean {
-  if (v.status === 'completed') return true;
-  if (v.durationMs && v.durationMs > 0) return watchedMs >= v.durationMs * 0.8;
-  return plays > 0;
+export function isWatched(v: OvVideo, _watchedMs?: number, _plays?: number): boolean {
+  return v.status === 'completed';
 }
 
 function episodeOf(v: OvVideo, number: number, label: string | null, byVideo: Map<string, OvPlay[]>): OvEpisode {
@@ -173,7 +170,8 @@ function sum<T>(list: T[], f: (x: T) => number): number {
 function derivedStatus(eps: OvEpisode[]): OvStatus {
   const watched = eps.filter((e) => e.watched).length;
   if (eps.length > 0 && watched === eps.length) return 'completed';
-  if (watched > 0 || eps.some((e) => e.plays > 0)) return 'watching';
+  // Watching: some episodes of a series marked Watched (playing alone never moves it).
+  if (watched > 0) return 'watching';
   return 'plantowatch';
 }
 

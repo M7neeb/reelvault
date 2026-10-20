@@ -15,7 +15,7 @@ import { Section, SheetFrame, ToggleRow } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultActions, VaultItem } from './types';
 
-const FIELD_NAMES: Record<string, string> = { filename: 'file names', keywords: 'keywords', rating: 'ratings', title: 'titles', caption: 'captions', flag: 'flags', size: 'sizes', durationMs: 'lengths' };
+const FIELD_NAMES: Record<string, string> = { filename: 'file names', keywords: 'keywords', rating: 'ratings', title: 'titles', caption: 'captions', flag: 'flags', size: 'sizes', durationMs: 'lengths', takenAt: 'dates' };
 
 export function MetaImportSheet({
   items,
@@ -78,7 +78,7 @@ export function MetaImportSheet({
     <SheetFrame title="HashPhotos Info" onClose={onClose}>
       {!picked ? (
         <>
-          <Text style={styles.lead}>Bring your HashPhotos keywords, ratings, titles and captions across to the videos you imported. Videos are matched by file name (and by size or length when the file has them).</Text>
+          <Text style={styles.lead}>Bring your HashPhotos dates, keywords, ratings, titles and captions across to the videos you imported. Videos are matched by file name (and by size or length when the file has them).</Text>
           <Section label="In HashPhotos">
             {['Open the album (or All Items) and tap Select → Select All.', 'Tap ⋯ → Export Metadata, and pick CSV (JSON or XML work too).', 'Save the file to Files (On My iPhone is fine).', 'Come back here and choose that file.'].map((t, i) => (
               <View key={i} style={styles.step}>
@@ -128,6 +128,7 @@ export function MetaImportSheet({
                 { icon: 'star' as const, text: `${plan.ratings} ${plan.ratings === 1 ? 'rating' : 'ratings'}` },
                 { icon: 'edit' as const, text: `${titles} ${titles === 1 ? 'title' : 'titles'} · ${captions} ${captions === 1 ? 'caption' : 'captions'}` },
                 { icon: 'flag' as const, text: `${flags} picks or rejects` },
+                { icon: 'calendar' as const, text: picked.file.recognised.includes('takenAt') ? `${plan.dates} ${plan.dates === 1 ? 'date' : 'dates'} set to the HashPhotos date` : 'No dates in this file' },
               ].map((r) => (
                 <View key={r.text} style={styles.change}>
                   <Icon name={r.icon} size={15} color={p.accent} />
@@ -135,7 +136,7 @@ export function MetaImportSheet({
                 </View>
               ))}
               <ToggleRow label="Replace what's already there" value={overwrite} onChange={setOverwrite} />
-              <Text style={styles.hint}>Off: only fills in ratings, titles and captions a video doesn't have yet. Keywords are always added, never removed.</Text>
+              <Text style={styles.hint}>Off: only fills in ratings, titles and captions a video doesn't have yet. Keywords are always added, never removed. Dates always follow HashPhotos, so the library is in the same order.</Text>
             </Section>
 
             {plan.unmatched.length > 0 && (

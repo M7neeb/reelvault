@@ -40,15 +40,15 @@ const vid = (id, over = {}) => ({
 });
 const play = (videoId, startedAt, watchedMs) => ({ videoId, startedAt, watchedMs });
 
-test('watched means 80% of the length, or set by hand', () => {
-  assert.equal(isWatched(vid('a'), 7 * MIN, 1), false);
-  assert.equal(isWatched(vid('a'), 8 * MIN, 2), true);
+test('watched only when you mark it: playing it, however much, never does', () => {
+  assert.equal(isWatched(vid('a'), 4 * MIN, 1), false);
+  assert.equal(isWatched(vid('a'), 30 * MIN, 5), false);
+  assert.equal(isWatched(vid('a', { durationMs: null }), 5000, 1), false);
   assert.equal(isWatched(vid('a', { status: 'completed' }), 0, 0), true);
-  assert.equal(isWatched(vid('a', { durationMs: null }), 5000, 1), true);
 });
 
 test('videos in a series become one title; the rest stay single', () => {
-  const videos = [vid('e1', { rating: 8 }), vid('e2', { rating: 6 }), vid('e3'), vid('solo', { title: 'Solo clip', rating: 9 })];
+  const videos = [vid('e1', { rating: 8, status: 'completed' }), vid('e2', { rating: 6 }), vid('e3'), vid('solo', { title: 'Solo clip', rating: 9 })];
   const series = [{ id: 's', name: 'My Show', description: null, cover: null, rating: 7, status: null, createdAt: 50, updatedAt: 50 }];
   const members = [
     { videoId: 'e2', seriesId: 's', position: 2, label: null },
@@ -89,7 +89,7 @@ test('kept videos stay with their rating; private ones are hidden', () => {
 });
 
 test('filters, search, stats', () => {
-  const videos = [vid('a', { rating: 9, tagNames: ['Funny'] }), vid('b', { status: 'dropped' }), vid('c', { where: 'kept' })];
+  const videos = [vid('a', { rating: 9, tagNames: ['Funny'], status: 'completed' }), vid('b', { status: 'dropped' }), vid('c', { where: 'kept' })];
   const out = buildOverview(videos, [], [], [play('a', 10, 10 * MIN)]);
   const c = filterCounts(out);
   assert.equal(c.all, 3);
@@ -124,7 +124,7 @@ test('continue shows series you are in the middle of', () => {
     { videoId: 'x', seriesId: 's', position: 1, label: null },
     { videoId: 'y', seriesId: 's', position: 2, label: null },
   ];
-  const out = buildOverview([vid('x'), vid('y')], series, members, [play('x', 5, 10 * MIN)]);
+  const out = buildOverview([vid('x', { status: 'completed' }), vid('y')], series, members, [play('x', 5, 10 * MIN)]);
   assert.equal(continueSeries(out).length, 1);
   assert.equal(continueSeries(out)[0].next.video.id, 'y');
 });
@@ -150,7 +150,7 @@ test('series names and suggestions', () => {
 test('play skips removed episodes', () => {
   const series = [{ id: 's', name: 'S', description: null, cover: null, rating: 0, status: null, createdAt: 1, updatedAt: 1 }];
   const members = ['a', 'b', 'c'].map((id, i) => ({ videoId: id, seriesId: 's', position: i + 1, label: null }));
-  const out = buildOverview([vid('a'), vid('b', { where: 'kept' }), vid('c')], series, members, [play('a', 1, 10 * MIN)]);
+  const out = buildOverview([vid('a', { status: 'completed' }), vid('b', { where: 'kept' }), vid('c')], series, members, [play('a', 1, 10 * MIN)]);
   assert.equal(out[0].next.video.id, 'b');
   assert.equal(playable(out[0]).video.id, 'c');
 });
