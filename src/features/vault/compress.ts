@@ -162,8 +162,10 @@ export async function editVideo(
     return { kind: 'done', before: video.size, after: size };
   } catch (e) {
     if (output.exists) output.delete();
-    const reason = e instanceof Error ? e.message : String(e);
-    console.log(`[EDIT] ${video.filename} failed: ${reason}`);
+    const raw = e instanceof Error ? e.message : String(e);
+    console.log(`[EDIT] ${video.filename} failed: ${raw}`);
+    // Expo adds where in its own code the error passed through; that means nothing to people.
+    const reason = raw.replace(/\s*\(at ExpoModulesCore[\s\S]*$/, '').trim() || raw;
     return { kind: 'failed', reason };
   } finally {
     sub.remove();
