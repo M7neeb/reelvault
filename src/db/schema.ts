@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 12;
 
 export type Migration = {
   version: number;
@@ -469,6 +469,82 @@ export const MIGRATIONS: Migration[] = [
     sql: `
       -- A list entry you looked up on Google ("which have I searched?"); NULL = not yet.
       ALTER TABLE simkl_list_items ADD COLUMN searched_at TEXT;
+    `,
+  },
+  {
+    version: 12,
+    sql: `
+      -- The Manga section: manga, manhwa and comics. A series holds chapters;
+      -- each chapter's pages are pictures in its own folder, stored RELATIVE to
+      -- the app's documents ("manga/<series>/<chapter>"). The source columns are
+      -- for chapters that come from a source later (NULL = added from a file).
+      CREATE TABLE IF NOT EXISTS manga_series (
+        id           TEXT PRIMARY KEY,
+        folder       TEXT NOT NULL,              -- relative: manga/<id>
+        title        TEXT NOT NULL,
+        alt_title    TEXT,
+        author       TEXT,
+        artist       TEXT,
+        description  TEXT,
+        kind         TEXT,                        -- manga | manhwa | comic
+        pub_status   TEXT,                        -- ongoing | completed | hiatus | cancelled
+        status       TEXT,                        -- reading | planned | completed | onHold | dropped
+        rating       REAL NOT NULL DEFAULT 0,     -- 0 = none, else 1.0..10.0
+        notes        TEXT,
+        cover        TEXT,                        -- file name in the folder
+        is_private   INTEGER NOT NULL DEFAULT 0,
+        reading_mode TEXT,                        -- rtl | ltr | vertical | webtoon (NULL = from kind)
+        source_id    TEXT,
+        source_key   TEXT,
+        source_url   TEXT,
+        created_at   INTEGER NOT NULL,
+        imported_at  INTEGER NOT NULL,
+        last_read_at INTEGER,
+        finished_at  INTEGER,
+        deleted_at   INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS manga_chapters (
+        id          TEXT PRIMARY KEY,
+        series_id   TEXT NOT NULL REFERENCES manga_series(id) ON DELETE CASCADE,
+        folder      TEXT,                         -- relative: manga/<series>/<id> (NULL = not on the phone)
+        number      REAL,
+        volume      REAL,
+        title       TEXT,
+        filename    TEXT,
+        pages_json  TEXT NOT NULL DEFAULT '[]',   -- file names of the pages, in order
+        page_count  INTEGER NOT NULL DEFAULT 0,
+        size        INTEGER NOT NULL DEFAULT 0,
+        content_key TEXT,
+        source_key  TEXT,
+        source_url  TEXT,
+        scanlator   TEXT,
+        uploaded_at INTEGER,
+        added_at    INTEGER NOT NULL,
+        read_at     INTEGER,                      -- NULL = unread
+        last_page   INTEGER NOT NULL DEFAULT 0,
+        downloaded  INTEGER NOT NULL DEFAULT 1,
+        position    INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_manga_chapters_series ON manga_chapters(series_id);
+      CREATE INDEX IF NOT EXISTS idx_manga_chapters_key ON manga_chapters(content_key);
+
+      CREATE TABLE IF NOT EXISTS manga_tags (
+        series_id TEXT NOT NULL REFERENCES manga_series(id) ON DELETE CASCADE,
+        name      TEXT NOT NULL COLLATE NOCASE,
+        PRIMARY KEY (series_id, name)
+      );
+
+      -- Every reading session: for history, stats and Wrapped.
+      CREATE TABLE IF NOT EXISTS manga_reads (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        series_id  TEXT NOT NULL,
+        chapter_id TEXT,
+        started_at INTEGER NOT NULL,
+        read_ms    INTEGER NOT NULL,
+        pages      INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_manga_reads_time ON manga_reads(started_at);
     `,
   },
 ];

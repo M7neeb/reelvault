@@ -90,7 +90,7 @@ export default function OverviewScreen({
   prefs: VaultPrefs;
   actions: VaultActions;
   onPlay: (videoId: string) => void;
-  onMode: (m: 'watch' | 'overview' | 'audio') => void;
+  onMode: (m: 'watch' | 'overview' | 'audio' | 'manga') => void;
   onStats: () => void;
   onPersonalise: () => void;
   devKey?: string;

@@ -329,7 +329,7 @@ function parsePrefs(json: string | null): VaultPrefs {
       ratingLabels: parseRatingLabels(JSON.stringify(r?.ratingLabels ?? {})),
       resumeEnabled: typeof r?.resumeEnabled === 'boolean' ? r.resumeEnabled : DEFAULT_VAULT_PREFS.resumeEnabled,
       holdForSpeed: typeof r?.holdForSpeed === 'boolean' ? r.holdForSpeed : DEFAULT_VAULT_PREFS.holdForSpeed,
-      videosMode: r?.videosMode === 'overview' || r?.videosMode === 'audio' ? r.videosMode : 'watch',
+      videosMode: r?.videosMode === 'overview' || r?.videosMode === 'audio' || r?.videosMode === 'manga' ? r.videosMode : 'watch',
       keepUnrated: typeof r?.keepUnrated === 'boolean' ? r.keepUnrated : DEFAULT_VAULT_PREFS.keepUnrated,
       hiddenSuggestions: Array.isArray(r?.hiddenSuggestions) ? r.hiddenSuggestions.filter((x: unknown) => typeof x === 'string').slice(0, 200) : [],
       showcase: Array.isArray(r?.showcase) ? r.showcase.filter((x: unknown) => typeof x === 'string').slice(0, 3) : [],
