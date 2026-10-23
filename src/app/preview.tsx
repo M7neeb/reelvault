@@ -47,6 +47,8 @@ import {
 import VaultScreen from '@/features/vault/ui/VaultScreen';
 import { FIXTURE_LISTS, FIXTURE_SIMKL, fixtureBridge, fixtureSimklActions } from '@/features/simkl/ui/fixtures';
 import SearchScreen from '@/features/simkl/ui/SearchScreen';
+import type { LocalSearch } from '@/features/simkl/ui/EverythingParts';
+import { findEverything, jumpBackIn, type FindInput } from '@/features/home/everything';
 import SimklScreen from '@/features/simkl/ui/SimklScreen';
 import { Text, View } from 'react-native';
 import { TabBarSpace } from '@/features/vault/ui/chrome';
@@ -215,10 +217,37 @@ function SimklPreview({ category, surface, look }: { category: Exclude<Category,
   );
 }
 
-function SearchPreview() {
+function SearchPreview({ q, mine }: { q?: string; mine?: boolean }) {
   const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
   const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
-  return <SearchScreen connected items={items} lists={FIXTURE_LISTS} actions={actions} />;
+  const local = useMemo<LocalSearch>(() => {
+    const audio = fixtureAudioData().items;
+    const manga = fixtureMangaData().items;
+    const input: FindInput = { videos: FIXTURE_ITEMS, audio, manga, titles: items };
+    const resume = FIXTURE_ITEMS.slice(0, 2).map((v, i) => ({ id: v.id, ms: (v.durationMs ?? 60_000) * 0.4, at: Date.now() - (i + 1) * 3_600_000 }));
+    return {
+      find: (s) => findEverything(s, input),
+      jump: jumpBackIn({ ...input, resume }),
+      thumb: (kind, id) =>
+        (kind === 'video' ? FIXTURE_ITEMS.find((v) => v.id === id)?.thumbSource : kind === 'manga' ? manga.find((m) => m.id === id)?.coverSource : audio.find((a) => a.id === id)?.coverSource) ?? null,
+      poster: (id) => items.find((t) => t.simklId === id)?.poster ?? null,
+      open: () => undefined,
+      week: {
+        videoMs: 4_920_000,
+        episodes: 6,
+        movies: 1,
+        watchMs: 410 * 60_000,
+        chapters: 23,
+        listenMs: 7_400_000,
+        activeDays: 5,
+        before: { videoMs: 3_100_000, episodes: 8, movies: 0, watchMs: 400 * 60_000, chapters: 9, listenMs: 0 },
+      },
+      recent: ['Harbour', 'Lighthouse', 'night walks'],
+      remember: () => undefined,
+      clearRecent: () => undefined,
+    };
+  }, [items]);
+  return <SearchScreen connected items={items} lists={FIXTURE_LISTS} actions={actions} local={local} initialQuery={q} key={mine ? 'mine' : 'all'} />;
 }
 
 const noop = async () => {};
@@ -289,6 +318,15 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'manga-reader': { manga: { reader: true } },
   'manga-strip': { manga: { reader: true, seriesId: 'tower' } },
   'manga-deleted': { manga: { deleted: true } },
+  'manga-browse': { manga: { browse: 'sources' } },
+  'manga-ext': { manga: { browse: 'extensions' } },
+  'manga-source': { manga: { browse: 'sources', source: 'mangadex' } },
+  'manga-server': { manga: { browse: 'sources', source: 'server:home' } },
+  'manga-title': { manga: { browse: 'sources', source: 'mangadex', openKey: 'mangadex-0' } },
+  'manga-repo': { manga: { browse: 'extensions', form: 'repo' } },
+  'manga-addserver': { manga: { browse: 'sources', form: 'server' } },
+  'manga-stats': { manga: { dashboard: true } },
+  'manga-downloads': { manga: { downloadsOpen: true } },
   'meta-import': { metaImportOpen: true },
   wifi: { wifiOpen: true },
   keywords: { keywordsOpen: true },
@@ -335,7 +373,9 @@ function optionsFromUrl(params: Record<string, string | undefined>): ViewOptions
 }
 
 export default function PreviewRoute() {
-  const { view, theme, layout, size, info, group, cat, sview, look, accent } = useLocalSearchParams<{
+  const { view, theme, layout, size, info, group, cat, sview, look, accent, q } = useLocalSearchParams<{
+    /** Search tab: words already typed. */
+    q?: string;
     look?: string;
     accent?: string;
     view?: string;
@@ -494,7 +534,7 @@ export default function PreviewRoute() {
       ],
       backupNow: async () => ({ name: 'ReelVault info 2026-10-19.json', uri: 'file:///b0', at: Date.now(), size: 48_200 }),
       restoreAutoBackup: async () => ({ matched: 12, total: 12, plays: 0 }),
-      getAppStorage: async () => ({ videos: 2.1e9, deleted: 3.4e8, covers: 1.8e7, filmstrips: 4.2e7, temporary: 9.6e7, database: 2.3e6, audio: 4.1e8, measured: true }),
+      getAppStorage: async () => ({ videos: 2.1e9, deleted: 3.4e8, covers: 1.8e7, filmstrips: 4.2e7, temporary: 9.6e7, database: 2.3e6, audio: 4.1e8, manga: 1.9e9, measured: true }),
       tidyStorage: async () => ({ freed: 1.24e8, covers: 41, files: 7 }),
       emptyRecentlyDeleted: async () => 3,
       getMonthWrappedReminder: async () => true,
@@ -567,7 +607,7 @@ export default function PreviewRoute() {
     return (
       <ThemeContext.Provider value={palette}>
         <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
-          {category === 'search' ? <SearchPreview /> : <SimklPreview category={category} surface={sview ?? 'list'} look={viewOptions.look} />}
+          {category === 'search' ? <SearchPreview q={q} /> : <SimklPreview category={category} surface={sview ?? 'list'} look={viewOptions.look} />}
           <TabBarMock active={category} />
         </TabBarSpace.Provider>
       </ThemeContext.Provider>

@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RankedBars } from '@/features/simkl/ui/charts';
 import type { SimklBridge } from '@/features/simkl/ui/types';
 
-import { achievements, summarize, type AchEvent, type AchInput } from '../achievements';
+import { achievements, summarize, type AchEvent, type AchInput, listeningFrom, readingFrom, type AchListening, type AchReading } from '../achievements';
 import { buildOverview } from '../overview';
 import { customMemory, homeOf, memories as buildMemories, type CustomMemory, type Memory } from '../memories';
 import { growth, journey, levelFor, monthRanges, personalRecords, spaceForecast, spaceGrade, spaceIdeas, storyFacts, treemap, yearRange } from '../recap';
@@ -107,6 +107,9 @@ function TabStrip({ value, onChange, dots = {} }: { value: InsightsTab; onChange
   );
 }
 
+type ReadingSeries = { isPrivate: boolean; deletedAt: number | null; rating: number; status: string | null; finishedAt: number | null; chapters: { readAt: number | null; pageCount: number }[] };
+type ListeningItem = { isPrivate: boolean; kind: string; deletedAt: number | null; rating: number; finishedAt: number | null };
+
 export default function VideoInsightsModal({
   initialTab = 'dashboard',
   items,
@@ -133,7 +136,13 @@ export default function VideoInsightsModal({
   onMakeSmaller,
   onFilter,
   onClose,
+  reading,
+  listening,
 }: {
+  /** The Manga section, for the Reading badges. */
+  reading?: { items: ReadingSeries[]; loadReads: () => Promise<{ startedAt: number; readMs: number; pages: number }[]> };
+  /** The Audio section, for the Listening badges. */
+  listening?: { items: ListeningItem[]; loadPlays: () => Promise<{ startedAt: number; listenedMs: number }[]> };
   initialTab?: InsightsTab;
   items: VaultItem[];
   deleted: VaultItem[];
@@ -185,6 +194,24 @@ export default function VideoInsightsModal({
     if (next !== prefsRef.current.freezes) savePrefs({ freezes: next });
   }, [plays]); // eslint-disable-line react-hooks/exhaustive-deps
   const [bookmarks, setBookmarks] = useState(0);
+  const [readingIn, setReadingIn] = useState<AchReading | null>(null);
+  const [listeningIn, setListeningIn] = useState<AchListening | null>(null);
+  useEffect(() => {
+    if (!reading) return;
+    const mine = reading.items.filter((s) => !s.isPrivate);
+    reading
+      .loadReads()
+      .then((r) => setReadingIn(readingFrom(mine, r)))
+      .catch(() => setReadingIn(readingFrom(mine, [])));
+  }, [reading?.items]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!listening) return;
+    const mine = listening.items.filter((a) => !a.isPrivate);
+    listening
+      .loadPlays()
+      .then((x) => setListeningIn(listeningFrom(mine, x)))
+      .catch(() => setListeningIn(listeningFrom(mine, [])));
+  }, [listening?.items]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sk, setSk] = useState<SimklNumbers | null>(null);
   const [story, setStory] = useState<StoryInput | null>(null);
   const [memory, setMemory] = useState<Memory | null>(null);
@@ -251,10 +278,12 @@ export default function VideoInsightsModal({
         : null,
       memories: { total: memoryList.filter((m) => m.kind !== 'custom').length, trips: memoryList.filter((m) => m.kind === 'trip').length },
       home,
+      reading: readingIn,
+      listening: listeningIn,
       events: prefs.events,
       now: Date.now(),
     };
-  }, [plays, located, bookmarks, albums, smartFilters, overview, sk, entries, memoryList, home, prefs.events]);
+  }, [plays, located, bookmarks, albums, smartFilters, overview, sk, entries, memoryList, home, prefs.events, readingIn, listeningIn]);
   const badgeList = useMemo(() => (achInput ? achievements(achInput) : []), [achInput]);
   const badgeAll = useMemo(() => (achInput ? achievements(achInput, { everyStep: true }) : []), [achInput]);
   // Badges earned since you last looked. The very first time, everything already earned counts as seen.

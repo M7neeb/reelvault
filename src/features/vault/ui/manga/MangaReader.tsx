@@ -5,11 +5,16 @@
  * the middle for the controls: the chapter, how it reads, a page slider and
  * the chapters before and after. The page you are on is saved as you go;
  * reaching the last page marks the chapter read, and the end of a chapter
- * offers the next. Presentational only (see types.ts).
+ * offers the next. The next few pages, and near the end the next chapter,
+ * load ahead so turning a page never waits; the screen stays on while it is
+ * open, and leaving the app ends the reading session (so stats stay true).
+ * Presentational only (see types.ts).
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  AppState,
   FlatList,
   Modal,
   Platform,
@@ -31,6 +36,9 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { READING_MODES, chapterAfter, chapterLabel, modeOf, type MangaChapter, type ReadingMode } from '../../manga/mangaLogic';
+import { DEFAULT_READER, type ReaderPrefs } from '../../manga/sources/prefs';
+import { pageSlots, slotOfPage } from '../../manga/readerLogic';
+import type { ImageRef } from '../../manga/sources/types';
 import { tick } from '../haptics';
 import Icon from '../Icon';
 import { OptionsSheet } from '../prompts';
@@ -39,10 +47,33 @@ import type { MangaActions, MangaUiSeries } from './mangaTypes';
 
 const END = '__end__';
 
-type Item = { key: string; uri: string | null; index: number };
+/** One screen: a page, two pages side by side, or (img null) the end card. */
+type Item = { key: string; img: ImageRef | null; index: number; pair?: ImageRef | null };
+
+const PAGE_BG: Record<ReaderPrefs['page'], string> = { black: '#000', grey: '#2b2b2e', white: '#f4f4f2' };
 
 /** One page in a paged mode: fills the screen, pinch to zoom, taps go to the reader. */
-const PagedPage = memo(function PagedPage({ uri, width, height, onTap }: { uri: string; width: number; height: number; onTap: (x: number) => void }) {
+const PagedPage = memo(function PagedPage({ img, pair, rtl, width, height, onTap }: { img: ImageRef; pair?: ImageRef | null; rtl?: boolean; width: number; height: number; onTap: (x: number) => void }) {
+  if (pair) {
+    // Two pages side by side; in manga the first page is on the right.
+    const [left, right] = rtl ? [pair, img] : [img, pair];
+    return (
+      <ScrollView
+        style={{ width, height }}
+        contentContainerStyle={{ width, height }}
+        maximumZoomScale={Platform.OS === 'ios' ? 4 : 1}
+        minimumZoomScale={1}
+        centerContent
+        bouncesZoom
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}>
+        <Pressable style={{ width, height, flexDirection: 'row' }} onPress={(e: GestureResponderEvent) => onTap(e.nativeEvent.locationX / width)}>
+          <Image source={left} style={{ width: width / 2, height }} contentFit="contain" contentPosition="right" transition={0} recyclingKey={left.uri} />
+          <Image source={right} style={{ width: width / 2, height }} contentFit="contain" contentPosition="left" transition={0} recyclingKey={right.uri} />
+        </Pressable>
+      </ScrollView>
+    );
+  }
   return (
     <ScrollView
       style={{ width, height }}
@@ -54,22 +85,22 @@ const PagedPage = memo(function PagedPage({ uri, width, height, onTap }: { uri: 
       showsHorizontalScrollIndicator={false}
       showsVerticalScrollIndicator={false}>
       <Pressable style={{ width, height }} onPress={(e: GestureResponderEvent) => onTap(e.nativeEvent.locationX / width)}>
-        <Image source={{ uri }} style={{ width, height }} contentFit="contain" transition={0} recyclingKey={uri} />
+        <Image source={img} style={{ width, height }} contentFit="contain" transition={0} recyclingKey={img.uri} />
       </Pressable>
     </ScrollView>
   );
 });
 
 /** One page of the webtoon strip: full width, as tall as the picture is. */
-const StripPage = memo(function StripPage({ uri, width, aspect, onAspect, onTap }: { uri: string; width: number; aspect: number; onAspect: (a: number) => void; onTap: () => void }) {
+const StripPage = memo(function StripPage({ img, width, aspect, onAspect, onTap }: { img: ImageRef; width: number; aspect: number; onAspect: (a: number) => void; onTap: () => void }) {
   return (
     <Pressable onPress={onTap}>
       <Image
-        source={{ uri }}
+        source={img}
         style={{ width, height: Math.round(width * aspect) }}
         contentFit="contain"
         transition={0}
-        recyclingKey={uri}
+        recyclingKey={img.uri}
         onLoad={(e) => {
           const { width: w, height: h } = e.source;
           if (w > 0 && h > 0) onAspect(h / w);
@@ -84,13 +115,21 @@ export default function MangaReader({
   chapter: startChapter,
   fromStart = false,
   actions,
+  prefs = DEFAULT_READER,
+  onPrefs,
   onClose,
+  onOpenUrl,
 }: {
   series: MangaUiSeries;
   chapter: MangaChapter;
   fromStart?: boolean;
-  actions: MangaActions;
+  actions: Pick<MangaActions, 'loadPages' | 'saveProgress' | 'addRead' | 'update' | 'keepAwake'>;
+  /** Tap zones, page colour, two pages side by side. */
+  prefs?: ReaderPrefs;
+  onPrefs?: (patch: Partial<ReaderPrefs>) => void;
   onClose: () => void;
+  /** Chapters hosted on another website open there. */
+  onOpenUrl?: (url: string) => void;
 }) {
   const insets = useSafeAreaInsets();
   const accent = usePalette().accent;
@@ -99,34 +138,79 @@ export default function MangaReader({
   // The newest copy of the chapter (read marks change while reading).
   const chapter = series.chapters.find((c) => c.id === chapterId) ?? startChapter;
   const mode: ReadingMode = modeOf(series);
-  const uris = useMemo(() => actions.pageUris(chapter), [actions, chapter]);
-  const count = uris.length;
-  const firstPage = useRef(fromStart || chapter.readAt ? 0 : Math.min(chapter.lastPage, Math.max(0, count - 1)));
-  const [page, setPage] = useState(firstPage.current);
+  // The pages arrive from the phone at once, or from the source over the network.
+  const [loaded, setLoaded] = useState<{ chapterId: string; pages: ImageRef[] } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const resume = useRef(!(fromStart || chapter.readAt));
+  const uris = loaded?.chapterId === chapter.id ? loaded.pages : null;
+  const count = uris?.length ?? 0;
+  const firstPage = useRef(0);
+  const [page, setPage] = useState(0);
+  const external = !chapter.folder && !!chapter.sourceUrl;
+  // The next chapter, loaded while you read the end of this one.
+  const ahead = useRef<{ chapterId: string; pages: ImageRef[] } | null>(null);
+  useEffect(() => {
+    if (external) return;
+    let live = true;
+    setLoadError(null);
+    const early = ahead.current?.chapterId === chapter.id ? ahead.current.pages : null;
+    (early ? Promise.resolve(early) : actions.loadPages(series, chapter))
+      .then((pages) => {
+        if (!live) return;
+        const at = resume.current ? Math.min(chapter.lastPage, Math.max(0, pages.length - 1)) : 0;
+        firstPage.current = at;
+        session.current = { startedAt: Date.now(), pages: new Set([at]) };
+        setPage(at);
+        setLoaded({ chapterId: chapter.id, pages });
+      })
+      .catch((e) => live && setLoadError(String(e).replace(/^Error:\s*/, '')));
+    return () => {
+      live = false;
+    };
+  }, [chapter.id, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const [chrome, setChrome] = useState(true);
   const [menu, setMenu] = useState(false);
   const [scrubAt, setScrubAt] = useState<number | null>(null);
   const [aspects, setAspects] = useState<Record<number, number>>({});
   const listRef = useRef<FlatList<Item>>(null);
   const atEnd = useRef(false);
-  const session = useRef({ startedAt: Date.now(), pages: new Set<number>([firstPage.current]) });
+  const session = useRef({ startedAt: Date.now(), pages: new Set<number>([0]) });
+  const pageRef = useRef(0);
+  pageRef.current = page;
+
+  // The screen stays on while you read.
+  useEffect(() => {
+    actions.keepAwake?.(true);
+    return () => actions.keepAwake?.(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const prev = chapterAfter(series, chapter.id, -1);
   const next = chapterAfter(series, chapter.id, 1);
   const paged = mode === 'rtl' || mode === 'ltr';
   const rtl = mode === 'rtl';
 
-  // Pages in screen order (right to left: reversed, so swiping left goes back), plus the end card.
+  // Sideways, in page modes: two pages per screen (the cover on its own).
+  const spread = paged && prefs.spreads && W > H * 1.15;
+  const slots = useMemo(() => pageSlots(count, spread), [count, spread]);
+  const S = slots.length;
+  const slotOf = useCallback((page: number) => (page >= count ? S : slotOfPage(slots, page)), [slots, count, S]);
+
+  // Screens in order (right to left: reversed, so swiping left goes back), plus the end card.
   const items: Item[] = useMemo(() => {
-    const list: Item[] = uris.map((uri, index) => ({ key: `${chapter.id}:${index}`, uri, index }));
-    list.push({ key: `${chapter.id}:${END}`, uri: null, index: count });
+    const list: Item[] = slots.map((sl, i) => ({ key: `${chapter.id}:${sl.join('-')}`, img: uris![sl[0]], pair: sl.length > 1 ? uris![sl[1]] : null, index: i }));
+    list.push({ key: `${chapter.id}:${END}`, img: null, index: S });
     return rtl ? list.reverse() : list;
-  }, [uris, chapter.id, count, rtl]);
-  const toList = useCallback((index: number) => (rtl ? count - index : index), [rtl, count]);
+  }, [uris, chapter.id, slots, S, rtl]);
+  /** A screen's place in the list. */
+  const toList = useCallback((slot: number) => (rtl ? S - slot : slot), [rtl, S]);
 
   /* ------------------------------------------------------------ saving */
 
+  // Set while the app is in the background: that session was already saved.
+  const away = useRef(false);
   const endSession = useCallback(() => {
+    if (away.current) return;
     const s = session.current;
     actions
       .addRead({ seriesId: series.id, chapterId: chapter.id, startedAt: s.startedAt, readMs: Date.now() - s.startedAt, pages: s.pages.size })
@@ -141,6 +225,53 @@ export default function MangaReader({
     return () => clearTimeout(t);
   }, [page, count, actions, series.id, chapter.id]);
 
+  // Leaving the app ends this reading session; coming back starts a new one.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'background' && !away.current) {
+        endSession();
+        away.current = true;
+      } else if (st === 'active' && away.current) {
+        away.current = false;
+        session.current = { startedAt: Date.now(), pages: new Set([pageRef.current]) };
+      }
+    });
+    return () => sub.remove();
+  }, [endSession]);
+
+  // The next pages load ahead (pages on the phone need nothing).
+  useEffect(() => {
+    if (!uris) return;
+    const soon = uris.slice(page + 1, page + 5).filter((u) => !u.uri.startsWith('file:'));
+    if (!soon.length) return;
+    const byHeaders = new Map<string, { headers?: Record<string, string>; urls: string[] }>();
+    for (const u of soon) {
+      const k = JSON.stringify(u.headers ?? {});
+      const g = byHeaders.get(k) ?? { headers: u.headers, urls: [] };
+      g.urls.push(u.uri);
+      byHeaders.set(k, g);
+    }
+    for (const g of byHeaders.values()) Image.prefetch(g.urls, { headers: g.headers, cachePolicy: 'memory-disk' }).catch(() => undefined);
+  }, [uris, page]);
+
+  // Close to the end: get the next chapter ready, and its first pages.
+  useEffect(() => {
+    if (!count || page < count - 4 || !next || (!next.folder && next.sourceUrl) || ahead.current?.chapterId === next.id) return;
+    let live = true;
+    actions
+      .loadPages(series, next)
+      .then((pages) => {
+        if (!live) return;
+        ahead.current = { chapterId: next.id, pages };
+        const first = pages.slice(0, 3).filter((u) => !u.uri.startsWith('file:'));
+        if (first.length) Image.prefetch(first.map((u) => u.uri), { headers: first[0].headers, cachePolicy: 'memory-disk' }).catch(() => undefined);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [count, page, next?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const close = () => {
     endSession();
     onClose();
@@ -150,13 +281,12 @@ export default function MangaReader({
     if (!c) return;
     tick();
     endSession();
-    const n = actions.pageUris(c).length;
-    const at = startAt === 'end' ? Math.max(0, n - 1) : 0;
-    session.current = { startedAt: Date.now(), pages: new Set([at]) };
+    void startAt;
+    resume.current = false;
     atEnd.current = false;
-    firstPage.current = at;
+    firstPage.current = 0;
     setAspects({});
-    setPage(at);
+    setPage(0);
     setChapterId(c.id);
   };
 
@@ -168,55 +298,59 @@ export default function MangaReader({
       if (mode === 'webtoon') {
         if (i >= count) listRef.current?.scrollToEnd({ animated });
         else listRef.current?.scrollToIndex({ index: i, animated, viewPosition: 0 });
-      } else listRef.current?.scrollToIndex({ index: toList(i), animated });
+      } else listRef.current?.scrollToIndex({ index: toList(slotOf(i)), animated });
       atEnd.current = i >= count;
       if (i < count) {
-        setPage(i);
-        session.current.pages.add(i);
+        // Both pages of a spread count as seen; the later one is where you are.
+        const sl = slots[slotOf(i)] ?? [i];
+        for (const x of sl) session.current.pages.add(x);
+        setPage(sl[sl.length - 1]);
       }
     },
-    [count, mode, toList]
+    [count, mode, toList, slotOf, slots]
   );
 
   // Back to the right page whenever the chapter or mode changes (and after a rotation).
   useEffect(() => {
     const t = setTimeout(() => goTo(firstPage.current, false), 30);
     return () => clearTimeout(t);
-  }, [chapter.id, mode, W]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chapter.id, mode, W, uris, spread]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onTapPage = useCallback(
     (x: number) => {
-      if (x > 0.3 && x < 0.7) {
+      if (!prefs.tapZones || (x > 0.3 && x < 0.7)) {
         setChrome((c) => !c);
         return;
       }
-      const forward = rtl ? x <= 0.3 : x >= 0.7;
+      const left = x <= 0.3;
+      const forward = (rtl ? left : !left) !== prefs.tapInvert;
       setChrome(false);
-      goTo(page + (forward ? 1 : -1));
+      const at = slotOf(page);
+      goTo(forward ? (slots[at + 1]?.[0] ?? count) : (slots[at - 1]?.[0] ?? 0));
     },
-    [rtl, page, goTo]
+    [rtl, page, goTo, prefs.tapZones, prefs.tapInvert, slotOf, slots, count]
   );
   const toggleChrome = useCallback(() => setChrome((c) => !c), []);
 
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset } = e.nativeEvent;
     const pos = mode === 'vertical' ? Math.round(contentOffset.y / H) : Math.round(contentOffset.x / W);
-    const index = rtl ? count - pos : pos;
-    atEnd.current = index >= count;
-    if (index >= count) {
+    const slot = rtl ? S - pos : pos;
+    atEnd.current = slot >= S;
+    if (slot >= S) {
       setPage(count - 1);
       return;
     }
-    const i = Math.max(0, index);
-    session.current.pages.add(i);
-    setPage(i);
+    const sl = slots[Math.max(0, slot)] ?? [0];
+    for (const x of sl) session.current.pages.add(x);
+    setPage(sl[sl.length - 1]);
   };
 
   // Webtoon: the page at the top of the screen is the one you are on.
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken<Item>[] }) => {
-    const first = viewableItems.find((v) => v.item && v.item.uri);
+    const first = viewableItems.find((v) => v.item && v.item.img);
     const last = viewableItems[viewableItems.length - 1];
-    if (last?.item && last.item.uri === null) atEnd.current = true;
+    if (last?.item && last.item.img === null) atEnd.current = true;
     if (first?.item) {
       session.current.pages.add(first.item.index);
       setPage(first.item.index);
@@ -244,13 +378,13 @@ export default function MangaReader({
   );
 
   const renderPaged = ({ item }: { item: Item }) =>
-    item.uri === null ? endCard : <PagedPage uri={item.uri} width={W} height={H} onTap={onTapPage} />;
+    item.img === null ? endCard : <PagedPage img={item.img} pair={item.pair} rtl={rtl} width={W} height={H} onTap={onTapPage} />;
 
   const renderStrip = ({ item }: { item: Item }) =>
-    item.uri === null ? (
+    item.img === null ? (
       endCard
     ) : (
-      <StripPage uri={item.uri} width={W} aspect={aspects[item.index] ?? 1.45} onAspect={(a) => setAspects((m) => (Math.abs((m[item.index] ?? 0) - a) < 0.001 ? m : { ...m, [item.index]: a }))} onTap={toggleChrome} />
+      <StripPage img={item.img} width={W} aspect={aspects[item.index] ?? 1.45} onAspect={(a) => setAspects((m) => (Math.abs((m[item.index] ?? 0) - a) < 0.001 ? m : { ...m, [item.index]: a }))} onTap={toggleChrome} />
     );
 
   const stripItems = useMemo(() => (rtl ? [...items].reverse() : items), [items, rtl]);
@@ -269,10 +403,40 @@ export default function MangaReader({
   return (
     <Modal visible animationType="fade" presentationStyle="fullScreen" onRequestClose={close} supportedOrientations={['portrait', 'landscape']}>
       <StatusBar hidden={!chrome} animated barStyle="light-content" />
-      <View style={s.screen}>
+      <View style={[s.screen, { backgroundColor: PAGE_BG[prefs.page] }]}>
         {!count ? (
           <View style={s.empty}>
-            <Text style={s.endTitle}>{chapter.folder ? 'This chapter has no pages' : 'This chapter is not on the phone'}</Text>
+            {external ? (
+              <>
+                <Text style={s.endTitle}>This chapter is on another website</Text>
+                <Text style={s.endHint}>It is published there (often the official site), so it opens in Safari.</Text>
+                {onOpenUrl && chapter.sourceUrl && (
+                  <TouchableOpacity style={[s.endBtn, { backgroundColor: accent }]} onPress={() => onOpenUrl(chapter.sourceUrl!)}>
+                    <Text style={s.endBtnText}>Open the website</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : loadError ? (
+              <>
+                <Text style={s.endTitle}>The pages did not load</Text>
+                <Text style={s.endHint}>{loadError}</Text>
+                <TouchableOpacity style={[s.endBtn, { backgroundColor: accent }]} onPress={() => setAttempt((n) => n + 1)}>
+                  <Text style={s.endBtnText}>Try again</Text>
+                </TouchableOpacity>
+              </>
+            ) : !uris ? (
+              <>
+                <ActivityIndicator color="#fff" />
+                <Text style={s.endHint}>{chapter.folder ? 'Opening…' : 'Loading the pages…'}</Text>
+              </>
+            ) : (
+              <Text style={s.endTitle}>This chapter has no pages</Text>
+            )}
+            {next && (external || loadError) && (
+              <TouchableOpacity style={s.endGhost} onPress={() => openChapter(next)}>
+                <Text style={s.endGhostText}>Next: {chapterLabel(next, true)}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={s.endGhost} onPress={close}>
               <Text style={s.endGhostText}>Back</Text>
             </TouchableOpacity>
@@ -298,7 +462,7 @@ export default function MangaReader({
           />
         ) : (
           <FlatList
-            key={`paged:${chapter.id}:${mode}:${W}`}
+            key={`paged:${chapter.id}:${mode}:${W}:${spread}`}
             ref={listRef}
             data={items}
             keyExtractor={(i) => i.key}
@@ -308,7 +472,7 @@ export default function MangaReader({
             initialNumToRender={3}
             maxToRenderPerBatch={3}
             windowSize={5}
-            initialScrollIndex={paged ? toList(firstPage.current) : firstPage.current}
+            initialScrollIndex={paged ? toList(slotOf(firstPage.current)) : firstPage.current}
             getItemLayout={(_, index) => (paged ? { length: W, offset: W * index, index } : { length: H, offset: H * index, index })}
             onMomentumScrollEnd={settle}
             showsHorizontalScrollIndicator={false}
@@ -378,14 +542,47 @@ export default function MangaReader({
       {menu && (
         <OptionsSheet
           title="How it reads"
-          options={READING_MODES.map((m) => ({
-            label: m.label,
-            hint: `${m.hint}${m.key === mode ? '  ✓' : ''}`,
-            onPress: () => {
-              firstPage.current = page;
-              actions.update([series.id], { readingMode: m.key }).catch(() => undefined);
-            },
-          }))}
+          options={[
+            ...READING_MODES.map((m) => ({
+              label: m.label,
+              hint: `${m.hint}${m.key === mode ? '  ✓' : ''}`,
+              onPress: () => {
+                firstPage.current = page;
+                actions.update([series.id], { readingMode: m.key }).catch(() => undefined);
+              },
+            })),
+            ...(onPrefs
+              ? [
+                  {
+                    label: `Tap the sides to turn · ${prefs.tapZones ? 'On' : 'Off'}`,
+                    hint: prefs.tapZones ? 'Off: every tap shows the controls; swipe to turn' : 'On: tap near the left or right edge to turn the page',
+                    onPress: () => onPrefs({ tapZones: !prefs.tapZones }),
+                  },
+                  ...(prefs.tapZones
+                    ? [
+                        {
+                          label: `Tap sides the other way · ${prefs.tapInvert ? 'On' : 'Off'}`,
+                          hint: rtl ? (prefs.tapInvert ? 'Now: right side goes forward' : 'Now: left side goes forward (manga)') : prefs.tapInvert ? 'Now: left side goes forward' : 'Now: right side goes forward',
+                          onPress: () => onPrefs({ tapInvert: !prefs.tapInvert }),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: `Around the pages · ${prefs.page === 'black' ? 'Black' : prefs.page === 'grey' ? 'Grey' : 'White'}`,
+                    hint: 'Tap to change: black, grey, white',
+                    onPress: () => onPrefs({ page: prefs.page === 'black' ? 'grey' : prefs.page === 'grey' ? 'white' : 'black' }),
+                  },
+                  {
+                    label: `Two pages when sideways · ${prefs.spreads ? 'On' : 'Off'}`,
+                    hint: 'Turn the phone sideways to read pages side by side, like a book',
+                    onPress: () => {
+                      firstPage.current = page;
+                      onPrefs({ spreads: !prefs.spreads });
+                    },
+                  },
+                ]
+              : []),
+          ]}
           onClose={() => setMenu(false)}
         />
       )}

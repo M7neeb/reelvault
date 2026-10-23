@@ -6,7 +6,10 @@
 
 import type { MangaChapter, MangaKind, MangaSeries, MangaStatus } from '../../manga/mangaLogic';
 import { sortChapters } from '../../manga/mangaLogic';
-import type { MangaActions, MangaData, MangaUiSeries } from './mangaTypes';
+import type { BrowsePrefs } from '../../manga/sources/prefs';
+import type { MangaSource, SourceChapter, SourceDetails, SourceSeries } from '../../manga/sources/types';
+import { infoOf } from '../../manga/sources/types';
+import type { BrowseActions, MangaActions, MangaData, MangaUiSeries } from './mangaTypes';
 
 const DAY = 86_400_000;
 const NOW = Date.now();
@@ -147,10 +150,173 @@ export function fixtureMangaData(): MangaData {
     markPreviousRead: none,
     saveProgress: none,
     addRead: none,
-    pageUris: (c) => c.pages.map((_, i) => page(i + 1, c.seriesId === 'tower')),
+    loadPages: async (_s, c) => Array.from({ length: c.pageCount || 18 }, (_, i) => ({ uri: page(i + 1, c.seriesId === 'tower') })),
+    refresh: async () => 0,
+    refreshAll: async () => ({ added: 0, failed: [] }),
     setCoverFromPhoto: none,
     setCoverFromPage: none,
     storageBytes: async () => 1_900_000_000,
+    download: async () => 3,
+    downloadLibrary: async () => 40,
+    removeDownloads: none,
+    cancelDownloads: none,
+    retryDownloads: none,
+    pauseDownloads: () => undefined,
+    exportCbz: async () => 'Saved 12 .cbz files to Files › On My iPhone › ReelVault › Exports › Lighthouse Keeper.',
+    shareCbz: none,
+    importBackup: none,
+    linkSeries: async () => ({ matched: 20, added: 4 }),
+    autoLink: async () => 0,
+    loadReads: async () => fixtureReads(items),
   };
-  return { items, deleted, busy: false, status: '', actions };
+  const reading = items[0];
+  const downloads = {
+    queue: [
+      ...reading.chapters.slice(12, 16).map((c) => ({ chapterId: c.id, seriesId: reading.id, state: 'queued' as const, error: null })),
+      { chapterId: items[2].chapters[30].id, seriesId: items[2].id, state: 'failed' as const, error: 'Could not reach api.mangadex.org. Check the address and that it is on.' },
+    ],
+    current: { chapterId: reading.chapters[12].id, seriesId: reading.id, done: 7, total: 18 },
+    paused: false,
+  };
+  // Some chapters online (not downloaded), to show both.
+  for (const s of items) for (const c of s.chapters.slice(Math.ceil(s.chapters.length * 0.6))) Object.assign(c, { folder: null, pages: [], sourceKey: `k-${c.id}`, downloaded: false });
+  for (const s of items.slice(0, 3)) Object.assign(s, { sourceId: 'mangadex', sourceKey: `md-${s.id}` });
+  return { items, deleted, busy: false, status: '', actions, browse: fixtureBrowse(), downloads };
+}
+
+/* ------------------------------------------------------------- Browse */
+
+const NAMES = ['Starfall Academy', 'The Quiet Blacksmith', 'Neon Ronin', 'Moss and Iron', 'Paper Lanterns', 'Second Sun', 'Glass Garden', 'Wolf Harbor', 'Night Bakery', 'Comet Club', 'River Witch', 'Last Train Home'];
+const HUES: [string, string][] = [['#ff512f', '#3b0a12'], ['#36d1dc', '#0b2a4a'], ['#a18cd1', '#2a1350'], ['#43e97b', '#0b3d2a'], ['#f7971e', '#4a2600'], ['#fc466b', '#2c0b3d']];
+
+function fakeSource(id: string, name: string, kind: MangaSource['kind'], hint: string, extra: Partial<MangaSource> = {}): MangaSource {
+  const list = (offset: number): SourceSeries[] =>
+    NAMES.map((_, i) => {
+      const n = (i + offset) % NAMES.length;
+      return { key: `${id}-${n}`, title: NAMES[n], cover: { uri: cover(NAMES[n], ...HUES[n % HUES.length]) }, author: 'Rin Takahashi' };
+    });
+  const chapters = (key: string): SourceChapter[] =>
+    Array.from({ length: 14 }, (_, i) => ({
+      key: `${key}-c${i + 1}`,
+      number: i + 1,
+      volume: null,
+      title: i === 0 ? 'A new term' : null,
+      scanlator: kind === 'builtin' ? 'Moonlight Scans' : null,
+      uploadedAt: NOW - (14 - i) * 3 * DAY,
+      pageCount: 18,
+      externalUrl: i === 13 && kind === 'builtin' ? 'https://example.org/official' : null,
+      lang: 'en',
+    }));
+  return {
+    id,
+    name,
+    lang: 'en',
+    kind,
+    nsfw: false,
+    hint,
+    canLatest: kind !== 'server',
+    search: async (q) => ({ items: list(0).filter((x) => x.title.toLowerCase().includes(q.toLowerCase())), hasMore: false }),
+    popular: async (n) => ({ items: n === 1 ? list(0) : [], hasMore: false }),
+    latest: async () => ({ items: list(5), hasMore: false }),
+    details: async (key): Promise<SourceDetails> => {
+      const it = list(0).find((x) => x.key === key) ?? list(0)[0];
+      return {
+        ...it,
+        altTitles: [],
+        artist: null,
+        description: 'A small-town student finds a map of a city that only exists at night, and a club that has been waiting for her.',
+        genres: ['Fantasy', 'School', 'Mystery'],
+        pubStatus: 'ongoing',
+        kind: 'manga',
+        webUrl: 'https://example.org',
+      };
+    },
+    chapters: async (key) => chapters(key),
+    pages: async () => Array.from({ length: 18 }, (_, i) => ({ uri: page(i + 1) })),
+    ...extra,
+  };
+}
+
+export function fixtureBrowse(): { prefs: BrowsePrefs; actions: BrowseActions } {
+  const md = fakeSource('mangadex', 'MangaDex', 'builtin', 'Fan translations, credited to their groups');
+  const komga = fakeSource('server:home', 'Komga on My PC', 'server', 'Your server (OPDS)', {
+    folder: async () => ({ items: NAMES.slice(4, 10).map((t, i) => ({ key: `home-f${i}`, title: t, cover: { uri: cover(t, ...HUES[i % HUES.length]) } })), hasMore: false }),
+    popular: async () => ({
+      items: [
+        { key: 'feed:1', title: 'Libraries', cover: null, folder: true },
+        { key: 'feed:2', title: 'Collections', cover: null, folder: true },
+        ...NAMES.slice(0, 4).map((t, i) => ({ key: `home-${i}`, title: t, cover: { uri: cover(t, ...HUES[i]) } })),
+      ],
+      hasMore: false,
+    }),
+  });
+  const ext = fakeSource('ext:example', 'Public Domain Comics', 'extension', 'Golden-age comics that are free to share');
+  const all = [md, komga, ext];
+  const repoUrl = 'https://example.org/reelvault/index.json';
+  const prefs: BrowsePrefs = {
+    languages: ['en', 'de'],
+    adult: false,
+    servers: [{ id: 'home', kind: 'opds', name: 'My PC', url: 'http://192.168.1.20:25600/opds/v1.2/catalog', user: 'muneeb' }],
+    repos: [
+      {
+        url: repoUrl,
+        name: 'Example repo',
+        addedAt: NOW - 3 * DAY,
+        checkedAt: NOW,
+        extensions: [
+          { id: 'example', name: 'Public Domain Comics', version: 2, lang: 'en', nsfw: false, url: 'https://example.org/reelvault/example.js', domains: ['example.org'], description: 'Golden-age comics that are free to share' },
+          { id: 'webcomics', name: 'Creator Webcomics', version: 1, lang: 'en', nsfw: false, url: 'https://example.org/reelvault/webcomics.js', domains: ['example.org'], description: 'Comics their creators publish for free' },
+        ],
+      },
+    ],
+    installed: [{ id: 'example', name: 'Public Domain Comics', version: 1, lang: 'en', nsfw: false, url: 'https://example.org/reelvault/example.js', domains: ['example.org'], description: null, repoUrl, installedAt: NOW }],
+
+    smallerPages: true,
+    checkOnOpen: true,
+    autoDownload: false,
+    reader: { tapZones: true, tapInvert: false, page: 'black', spreads: true },
+  };
+  const none = async () => undefined;
+  return {
+    prefs,
+    actions: {
+      groups: async () => [
+        { title: 'Built in', items: [infoOf(md)] },
+        { title: 'My PC', serverId: 'home', items: [infoOf(komga)] },
+        { title: 'Extensions', items: [infoOf(ext)] },
+      ],
+      source: (id) => all.find((x) => x.id === id) ?? null,
+      setLanguages: none,
+      setAdult: none,
+      setOption: none,
+      setReader: none,
+      addServer: none,
+      removeServer: none,
+      addRepo: none,
+      refreshRepos: async () => [],
+      removeRepo: none,
+      install: none,
+      uninstall: none,
+      addToLibrary: async () => 'lighthouse',
+      openUrl: () => undefined,
+    },
+  };
+}
+
+
+/** A few months of reading, for the dashboard preview. */
+export function fixtureReads(items: MangaUiSeries[]): import('../../manga/mangaLogic').MangaRead[] {
+  const out: import('../../manga/mangaLogic').MangaRead[] = [];
+  let seed = 7;
+  const rnd = () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+  for (let d = 200; d >= 0; d--) {
+    if (rnd() < 0.35) continue;
+    const s = items[Math.floor(rnd() * Math.min(5, items.length))];
+    const sessions = 1 + Math.floor(rnd() * 3);
+    for (let k = 0; k < sessions; k++) out.push({ seriesId: s.id, chapterId: s.chapters[0]?.id ?? null, startedAt: NOW - d * DAY - k * 3_600_000 - 20 * 3_600_000 * rnd(), readMs: (6 + rnd() * 25) * 60_000, pages: 15 + Math.floor(rnd() * 40) });
+  }
+  return out;
 }

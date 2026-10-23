@@ -1,12 +1,14 @@
 /**
- * The Search tab: search Simkl for movies, shows and anime at once (or one
- * kind), and, before you type, what is trending on Simkl today / this week /
- * this month - a big banner for the top title, then a shelf per kind.
+ * The Search tab: one box for everything. As you type it finds your own
+ * videos, audio, books, manga and the Simkl titles you follow; press Search
+ * and it looks on Simkl for movies, shows and anime too. Before you type:
+ * "Jump back in" (what you were in the middle of in every section), then
+ * what is trending on Simkl today / this week / this month.
  * Section titles say "Simkl" (API rule 6).
  * Presentational only (see simkl/ui/types.ts).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
@@ -21,6 +23,7 @@ import { rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/va
 
 import { posterUrl, SIMKL_TYPES } from '../logic';
 import DetailModal from './DetailModal';
+import { JumpShelf, LocalResults, RecentSearches, WeekCard, type LocalSearch } from './EverythingParts';
 import { IMDB_YELLOW } from './parts';
 import Poster, { hueFor } from './Poster';
 import type { CatalogTitle, SimklActions, SimklItem, SimklList, SimklPrefs, SimklType, Timeframe } from './types';
@@ -31,7 +34,9 @@ const TIMEFRAMES: { key: Timeframe; label: string }[] = [
   { key: 'month', label: 'This Month' },
 ];
 
-type Scope = 'all' | SimklType;
+type Scope = 'all' | 'mine' | SimklType;
+
+const asTitle = (i: SimklItem): CatalogTitle => ({ simklId: i.simklId, type: i.type, title: i.title, year: i.year, poster: i.poster, slug: i.slug, imdbRating: i.imdbRating, simklRating: i.simklRating, rank: i.rank });
 
 export default function SearchScreen({
   connected,
@@ -39,12 +44,18 @@ export default function SearchScreen({
   lists = [],
   prefs,
   actions,
+  local,
+  initialQuery,
 }: {
   connected: boolean;
   items: SimklItem[];
   lists?: SimklList[];
   prefs?: SimklPrefs;
   actions: SimklActions;
+  /** Your own library (videos, audio, books, manga): searched as you type. */
+  local?: LocalSearch;
+  /** The browser preview starts with words typed. */
+  initialQuery?: string;
 }) {
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
@@ -52,7 +63,7 @@ export default function SearchScreen({
   const p = usePalette();
   const { width } = useWindowDimensions();
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery ?? '');
   const [submitted, setSubmitted] = useState('');
   const [scope, setScope] = useState<Scope>('all');
   const [timeframe, setTimeframe] = useState<Timeframe>('week');
@@ -61,7 +72,29 @@ export default function SearchScreen({
   const [error, setError] = useState('');
   const [open, setOpen] = useState<CatalogTitle | null>(null);
 
-  const types: SimklType[] = scope === 'all' ? ['show', 'movie', 'anime'] : [scope];
+  const types: SimklType[] = scope === 'all' || scope === 'mine' ? ['show', 'movie', 'anime'] : [scope];
+  const live = useDeferredValue(query.trim());
+  const openTitle = (simklId: number) => {
+    const it = items.find((i) => i.simklId === simklId);
+    if (live) local?.remember(live);
+    if (it) setOpen(asTitle(it));
+  };
+  // Opening one of your own results remembers what you typed.
+  const localHere = useMemo<LocalSearch | undefined>(
+    () =>
+      local && {
+        ...local,
+        open: (kind, id, resume) => {
+          if (live) local.remember(live);
+          local.open(kind, id, resume);
+        },
+      },
+    [local, live]
+  );
+  const searchFor = (q: string) => {
+    setQuery(q);
+    setSubmitted(scope === 'mine' ? '' : q);
+  };
   const library = useMemo(() => new Map(items.map((i) => [i.simklId, i])), [items]);
 
   useEffect(() => {
@@ -78,7 +111,7 @@ export default function SearchScreen({
   }, [actions, timeframe]);
 
   useEffect(() => {
-    if (!submitted) {
+    if (!submitted || scope === 'mine') {
       setResults(null);
       return;
     }
@@ -120,14 +153,18 @@ export default function SearchScreen({
           <Icon name="search" size={17} color={p.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Movies, shows and anime on Simkl"
+            placeholder={local ? 'Your library and Simkl' : 'Movies, shows and anime on Simkl'}
             placeholderTextColor={p.textMuted}
             value={query}
             onChangeText={(t) => {
               setQuery(t);
-              if (!t.trim()) setSubmitted('');
+              // Simkl results belong to the words you searched; new words, new search.
+              if (t.trim() !== submitted) setSubmitted('');
             }}
-            onSubmitEditing={() => setSubmitted(query.trim())}
+            onSubmitEditing={() => {
+              setSubmitted(query.trim());
+              local?.remember(query);
+            }}
             returnKeyType="search"
             autoCorrect={false}
             keyboardAppearance={p.scheme}
@@ -135,7 +172,7 @@ export default function SearchScreen({
           />
         </View>
         <View style={styles.scopes}>
-          {(['all', 'show', 'movie', 'anime'] as const).map((s) => (
+          {((local ? ['all', 'mine', 'show', 'movie', 'anime'] : ['all', 'show', 'movie', 'anime']) as Scope[]).map((s) => (
             <TouchableOpacity
               key={s}
               style={[styles.scope, scope === s && styles.scopeOn]}
@@ -144,14 +181,31 @@ export default function SearchScreen({
                 setScope(s);
               }}>
               <Text style={[styles.scopeText, scope === s && styles.scopeTextOn]}>
-                {s === 'all' ? 'All' : SIMKL_TYPES.find((t) => t.key === s)!.plural}
+                {s === 'all' ? 'All' : s === 'mine' ? 'Mine' : SIMKL_TYPES.find((t) => t.key === s)!.plural}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {results ? (
+        {localHere && live && (scope === 'all' || scope === 'mine') && <LocalResults key={live} local={localHere} query={live} compact={scope === 'all'} onTitle={openTitle} />}
+        {live && !results && scope !== 'mine' && (
+          <TouchableOpacity
+            style={styles.simklAsk}
+            onPress={() => {
+              setSubmitted(query.trim());
+              local?.remember(query);
+            }}
+            accessibilityLabel="Search Simkl">
+            <Icon name="globe" size={16} color={p.accent} />
+            <Text style={styles.simklAskText} numberOfLines={1}>
+              Search Simkl for "{live}"
+            </Text>
+            <Icon name="forward" size={12} color={p.textMuted} />
+          </TouchableOpacity>
+        )}
+        {live && !results ? null : results && scope !== 'mine' ? (
           <>
+            {local && <Text style={styles.onSimkl}>On Simkl</Text>}
             {!connected && <Text style={styles.note}>Sign in to Simkl on the Movies, Shows or Anime tab to search.</Text>}
             {loading && <ActivityIndicator color={p.textSecondary} style={{ marginTop: 24 }} />}
             {!loading && found === 0 && <Text style={styles.note}>{error || `Nothing on Simkl for "${submitted}".`}</Text>}
@@ -168,8 +222,20 @@ export default function SearchScreen({
               ) : null
             )}
           </>
+        ) : scope === 'mine' ? (
+          live ? null : localHere ? (
+            <>
+              <RecentSearches list={localHere.recent} onPick={searchFor} onClear={localHere.clearRecent} />
+              {localHere.jump.length ? <JumpShelf local={localHere} onTitle={openTitle} /> : null}
+              <WeekCard week={localHere.week} />
+              {!localHere.jump.length && !localHere.recent.length && <Text style={styles.note}>Type to find your videos, audio, books, manga and the titles you follow.</Text>}
+            </>
+          ) : null
         ) : (
           <>
+            {localHere && <RecentSearches list={localHere.recent} onPick={searchFor} onClear={localHere.clearRecent} />}
+            {localHere && <JumpShelf local={localHere} onTitle={openTitle} />}
+            {localHere && <WeekCard week={localHere.week} />}
             <View style={styles.timeframes}>
               {TIMEFRAMES.map((t) => (
                 <TouchableOpacity key={t.key} onPress={() => setTimeframe(t.key)} style={[styles.tf, timeframe === t.key && styles.tfOn]}>
@@ -298,6 +364,9 @@ const makeStyles = (p: Palette) =>
     scopeText: { color: p.textSecondary, fontSize: 14, fontWeight: '700' },
     scopeTextOn: { color: p.text },
     note: { color: p.textSecondary, fontSize: 15, textAlign: 'center', marginTop: 30, paddingHorizontal: 30 },
+    simklAsk: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 16, backgroundColor: p.elevated, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13 },
+    simklAskText: { flex: 1, color: p.text, fontSize: 15, fontWeight: '600' },
+    onSimkl: { color: p.textMuted, fontSize: 12, fontWeight: '800', letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 22, textTransform: 'uppercase' },
 
     timeframes: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginTop: 16 },
     tf: { backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },

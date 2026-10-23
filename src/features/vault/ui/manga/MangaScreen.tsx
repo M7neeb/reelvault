@@ -37,7 +37,7 @@ import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import MangaCover from './MangaCover';
-import type { MangaActions, MangaUiSeries } from './mangaTypes';
+import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
 
 const SIDE = 16;
 const GAP = 12;
@@ -55,6 +55,10 @@ export default function MangaScreen({
   onOpen,
   onContinue,
   onMode,
+  onBrowse,
+  onDashboard,
+  onDownloads,
+  downloads,
   initialDeleted = false,
 }: {
   items: MangaUiSeries[];
@@ -69,6 +73,11 @@ export default function MangaScreen({
   /** Straight into the reader, where you left off. */
   onContinue: (s: MangaUiSeries) => void;
   onMode: (m: VideosMode) => void;
+  /** Sources, servers and extensions. */
+  onBrowse: () => void;
+  onDashboard: () => void;
+  onDownloads: () => void;
+  downloads: DownloadState;
   initialDeleted?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -84,7 +93,7 @@ export default function MangaScreen({
   const [sort, setSort] = useState<MangaSort>('recentRead');
   const [inDeleted, setInDeleted] = useState(initialDeleted);
   const [selected, setSelected] = useState<Set<string> | null>(null);
-  const [menu, setMenu] = useState<null | 'add' | 'more' | 'sort' | 'status' | 'deleted-one'>(null);
+  const [menu, setMenu] = useState<null | 'add' | 'more' | 'sort' | 'status' | 'deleted-one' | 'download-all'>(null);
   const [rating, setRating] = useState(false);
   const [tagPrompt, setTagPrompt] = useState(false);
   const [deletedTarget, setDeletedTarget] = useState<MangaUiSeries | null>(null);
@@ -128,9 +137,17 @@ export default function MangaScreen({
   const addOptions: OptionItem[] = [
     { label: 'From Files', hint: 'CBZ, ZIP, PDF or pictures', onPress: () => actions.importFiles().catch(() => undefined) },
     { label: 'A whole folder', hint: 'A series, or many: one chapter per sub-folder', onPress: () => actions.importFolder().catch(() => undefined) },
+    { label: 'A Tachimanga backup', hint: 'Your library, chapters read and categories (.tachibk)', onPress: () => actions.importBackup().catch(() => undefined) },
+    { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
   ];
   const moreOptions: OptionItem[] = [
     { label: 'Sort', hint: MANGA_SORTS.find((s) => s.key === sort)?.label, onPress: () => setTimeout(() => setMenu('sort'), 250) },
+    ...(items.some((s) => s.sourceId) ? [{ label: 'Check for new chapters', hint: 'Every title from a source', onPress: () => actions.refreshAll().catch(() => undefined) }] : []),
+    { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
+    { label: 'Reading stats and Wrapped', onPress: onDashboard },
+    { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
+    ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
+    ...(items.some((s) => s.sourceId?.startsWith('tachi:')) ? [{ label: 'Link backup titles', hint: 'Through your Suwayomi server', onPress: () => actions.autoLink().catch(() => undefined) }] : []),
     { label: 'Select', onPress: () => setSelected(new Set()) },
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
@@ -141,6 +158,8 @@ export default function MangaScreen({
       <View style={styles.titleRow}>
         <Text style={styles.title}>{inDeleted ? 'Recently Deleted' : 'Manga'}</Text>
         <View style={styles.buttons}>
+          {!inDeleted && <IconButton icon="stats" label="Reading stats" onPress={onDashboard} />}
+          {!inDeleted && <IconButton icon="globe" label="Browse sources" onPress={onBrowse} />}
           {!inDeleted && <IconButton icon="plus" label="Add manga or comics" onPress={() => setMenu('add')} />}
           <IconButton icon="more" label="More" onPress={() => setMenu('more')} />
         </View>
@@ -155,6 +174,19 @@ export default function MangaScreen({
           {busy ? '⏳ ' : ''}
           {status}
         </Animated.Text>
+      )}
+      {(downloads.current || downloads.queue.length > 0) && !inDeleted && (
+        <TouchableOpacity style={styles.dlBar} onPress={onDownloads} accessibilityLabel="Downloads">
+          <Icon name={downloads.paused ? 'pause' : 'import'} size={14} color={p.accent} />
+          <Text style={styles.dlText} numberOfLines={1}>
+            {downloads.paused
+              ? `Downloads paused · ${downloads.queue.length} waiting`
+              : downloads.current
+                ? `Downloading · page ${downloads.current.done} of ${downloads.current.total} · ${downloads.queue.filter((q) => q.state === 'queued').length} chapters left`
+                : `${downloads.queue.filter((q) => q.state === 'failed').length} downloads failed · tap to retry`}
+          </Text>
+          <Icon name="forward" size={12} color={p.textMuted} />
+        </TouchableOpacity>
       )}
       {!inDeleted && visible.length > 0 && (
         <Text style={styles.summary}>
@@ -255,6 +287,9 @@ export default function MangaScreen({
           <Text style={styles.emptyText}>Rate them, set a status, add keywords and notes, and pick up on the page you left.</Text>
           <TouchableOpacity style={styles.emptyBtn} onPress={() => setMenu('add')}>
             <Text style={styles.emptyBtnText}>Add manga</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.emptyGhost} onPress={onBrowse}>
+            <Text style={styles.emptyGhostText}>Browse sources</Text>
           </TouchableOpacity>
         </>
       )}
@@ -369,7 +404,20 @@ export default function MangaScreen({
       )}
 
       {menu === 'add' && <OptionsSheet title="Add to Manga" options={addOptions} onClose={() => setMenu(null)} />}
-      {menu === 'more' && <OptionsSheet title="Manga" options={moreOptions} onClose={() => setMenu(null)} />}
+      {menu === 'more' && <OptionsSheet title="Manga" options={moreOptions} onClose={() => setMenu((m) => (m === 'more' ? null : m))} />}
+      {menu === 'download-all' && (
+        <OptionsSheet
+          title="Download everything?"
+          options={[
+            {
+              label: `Download ${items.filter((s) => s.sourceId && !s.sourceId.startsWith('tachi:')).reduce((a, s) => a + s.chapters.filter((c) => !c.folder && c.sourceKey && !c.sourceUrl).length, 0)} chapters`,
+              hint: 'About 5 to 10 MB each (half with Smaller pages). Runs while the app is open.',
+              onPress: () => actions.downloadLibrary().then(() => onDownloads()),
+            },
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
       {menu === 'sort' && (
         <OptionsSheet
           title="Sort by"
@@ -435,6 +483,8 @@ const makeStyles = (p: Palette) =>
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
     status: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
     summary: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
+    dlBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 10, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
+    dlText: { flex: 1, color: p.text, fontSize: 13, fontWeight: '600' },
     search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 12, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
     searchInput: { flex: 1, color: p.text, fontSize: 16 },
     section: { color: p.text, fontSize: 20, fontWeight: '800', paddingHorizontal: SIDE, marginBottom: 10 },
@@ -472,4 +522,6 @@ const makeStyles = (p: Palette) =>
     emptyText: { color: p.textSecondary, fontSize: 15, lineHeight: 21, textAlign: 'center' },
     emptyBtn: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 12, marginTop: 6 },
     emptyBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+    emptyGhost: { paddingHorizontal: 22, paddingVertical: 10 },
+    emptyGhostText: { color: p.link, fontSize: 16, fontWeight: '700' },
   });

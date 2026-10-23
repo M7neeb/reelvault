@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export type Migration = {
   version: number;
@@ -545,6 +545,21 @@ export const MIGRATIONS: Migration[] = [
         pages      INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_manga_reads_time ON manga_reads(started_at);
+    `,
+  },
+  {
+    version: 13,
+    sql: `
+      -- Chapters waiting to be downloaded from their source (the queue survives closing the app).
+      CREATE TABLE IF NOT EXISTS manga_downloads (
+        chapter_id TEXT PRIMARY KEY,
+        series_id  TEXT NOT NULL,
+        state      TEXT NOT NULL DEFAULT 'queued',  -- queued | failed
+        error      TEXT,
+        attempts   INTEGER NOT NULL DEFAULT 0,
+        added_at   INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_manga_downloads_added ON manga_downloads(added_at);
     `,
   },
 ];

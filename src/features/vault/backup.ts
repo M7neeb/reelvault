@@ -4,6 +4,7 @@
  * Private videos are left out of the export: the file leaves the app.
  */
 
+import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 
@@ -11,7 +12,20 @@ import { getDb } from '@/db';
 
 
 import { addToAlbums, createAlbum, createFolder, listAlbums, listFolders } from './albums';
-import { BACKUP_KIND, BACKUP_VERSION, matchAudio, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupAudio, type BackupSeries } from './backupFormat';
+import { BACKUP_KIND, BACKUP_VERSION, matchAudio, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupAudio, type BackupMangaTitle, type BackupSeries } from './backupFormat';
+import { normTitle } from './manga/mangaLogic';
+import {
+  addMangaTag,
+  addRead,
+  allReads,
+  getSeries as getMangaSeries,
+  insertChapter,
+  insertSeries,
+  listManga,
+  saveProgress as saveMangaProgress,
+  setChaptersRead,
+  updateSeries as updateMangaSeries,
+} from './manga/mangaStore';
 import { getSetting, saveSmartFilter, setSetting, setTagPinned } from './library';
 import { mergeOvExtra, OV_EXTRA_KEY, ovExtraForBackup, parseOvExtra } from './ovExtra';
 import { addToSeries, createSeries, listSeries, setEpisodeLabel, updateSeries } from './overviewStore';
@@ -152,6 +166,7 @@ async function buildBackup(): Promise<{ json: string; videos: number }> {
     prefs,
     overview,
     audio: await audioForBackup(),
+    manga: await mangaForBackup(),
     albums: albums.map((a) => ({ name: a.name, folder: folderName(a.folder_id), pinned: a.pinned === 1 })),
     folders: folders.map((f) => f.name),
     smartFilters: smart.map((s) => ({
@@ -391,6 +406,8 @@ export async function importLibraryInfo(uri?: string): Promise<{ matched: number
 
   // The Audio section.
   if (backup.audio?.length) playsAdded += await restoreAudio(backup.audio);
+  // The Manga section.
+  if (backup.manga?.length) await restoreManga(backup.manga);
 
   return { matched: matches.size, total: backup.videos.length, plays: playsAdded };
 }
@@ -491,4 +508,142 @@ async function restoreAudio(entries: BackupAudio[]): Promise<number> {
     }
   }
   return added;
+}
+
+/* ------------------------------------------------------------------ manga */
+
+async function mangaForBackup(): Promise<BackupMangaTitle[]> {
+  let all: Awaited<ReturnType<typeof listManga>> = [];
+  try {
+    all = await listManga();
+  } catch {
+    return [];
+  }
+  const reads = await allReads().catch(() => []);
+  return all
+    .filter((s) => !s.deletedAt && !s.isPrivate)
+    .map((s) => ({
+      title: s.title,
+      altTitle: s.altTitle,
+      author: s.author,
+      artist: s.artist,
+      description: s.description,
+      kind: s.kind,
+      pubStatus: s.pubStatus,
+      status: s.status,
+      rating: s.rating,
+      notes: s.notes,
+      readingMode: s.readingMode,
+      sourceId: s.sourceId,
+      sourceKey: s.sourceKey,
+      sourceUrl: s.sourceUrl,
+      keywords: s.tags,
+      createdAt: s.createdAt,
+      lastReadAt: s.lastReadAt,
+      finishedAt: s.finishedAt,
+      chapters: s.chapters.map((c) => ({
+        key: c.sourceKey,
+        number: c.number,
+        volume: c.volume,
+        title: c.title ?? c.filename,
+        scanlator: c.scanlator,
+        uploadedAt: c.uploadedAt,
+        externalUrl: c.sourceUrl,
+        readAt: c.readAt,
+        lastPage: c.lastPage,
+      })),
+      reads: reads.filter((r) => r.seriesId === s.id).map((r): [number, number, number] => [r.startedAt, r.readMs, r.pages]),
+    }));
+}
+
+/**
+ * Puts manga info back: titles you have (same source title, or the same
+ * name) get their rating, status, notes, keywords, read marks and reading
+ * sessions; titles from a source you don't have are added again with their
+ * chapters (online, ready to download). Titles made from your own files need
+ * those files: their info waits until you add them again.
+ */
+async function restoreManga(entries: BackupMangaTitle[]): Promise<void> {
+  const library = await listManga();
+  const live = library.filter((s) => !s.deletedAt);
+  const known = new Set((await allReads().catch(() => [])).map((r) => `${r.seriesId}:${r.startedAt}`));
+  for (const e of entries) {
+    let s = live.find((x) => e.sourceId && x.sourceId === e.sourceId && x.sourceKey === e.sourceKey) ?? live.find((x) => normTitle(x.title) === normTitle(e.title));
+    if (!s && e.sourceId && e.sourceKey) {
+      const id = Crypto.randomUUID();
+      await insertSeries({
+        id,
+        folder: `manga/${id}`,
+        title: e.title,
+        altTitle: e.altTitle,
+        author: e.author,
+        artist: e.artist,
+        description: e.description,
+        kind: (e.kind as 'manga' | 'manhwa' | 'comic' | null) ?? null,
+        pubStatus: e.pubStatus,
+        status: (e.status as never) ?? null,
+        rating: e.rating,
+        notes: e.notes,
+        cover: null,
+        isPrivate: false,
+        readingMode: (e.readingMode as never) ?? null,
+        sourceId: e.sourceId,
+        sourceKey: e.sourceKey,
+        sourceUrl: e.sourceUrl,
+        createdAt: e.createdAt || Date.now(),
+        importedAt: Date.now(),
+        lastReadAt: e.lastReadAt,
+        finishedAt: e.finishedAt,
+        deletedAt: null,
+      });
+      for (const [i, c] of e.chapters.entries()) {
+        if (!c.key) continue;
+        await insertChapter({
+          id: Crypto.randomUUID(),
+          seriesId: id,
+          folder: null,
+          number: c.number,
+          volume: c.volume,
+          title: c.title,
+          filename: null,
+          pages: [],
+          pageCount: 0,
+          size: 0,
+          contentKey: null,
+          sourceKey: c.key,
+          sourceUrl: c.externalUrl,
+          scanlator: c.scanlator,
+          uploadedAt: c.uploadedAt,
+          addedAt: Date.now(),
+          readAt: c.readAt,
+          lastPage: c.lastPage || 0,
+          downloaded: false,
+          position: i,
+        });
+      }
+      s = (await getMangaSeries(id)) ?? undefined;
+    } else if (s) {
+      await updateMangaSeries([s.id], {
+        rating: e.rating || s.rating,
+        status: (e.status as never) ?? s.status,
+        notes: e.notes ?? s.notes,
+        readingMode: (e.readingMode as never) ?? s.readingMode,
+        lastReadAt: Math.max(s.lastReadAt ?? 0, e.lastReadAt ?? 0) || null,
+      });
+      // Read marks: a chapter with the same source key, else the same number.
+      for (const c of e.chapters) {
+        if (!c.readAt && !c.lastPage) continue;
+        const hit = s.chapters.find((x) => (c.key && x.sourceKey === c.key) || (c.number !== null && x.number === c.number && (x.volume ?? null) === (c.volume ?? null)));
+        if (!hit) continue;
+        if (c.readAt && !hit.readAt) await setChaptersRead([hit.id], true, c.readAt);
+        else if (c.lastPage > hit.lastPage && !hit.readAt) await saveMangaProgress(s.id, hit.id, c.lastPage, false, s.lastReadAt ?? Date.now());
+      }
+    }
+    if (!s) continue;
+    for (const k of e.keywords) await addMangaTag(s.id, k);
+    for (const [startedAt, readMs, pages] of e.reads) {
+      if (known.has(`${s.id}:${startedAt}`)) continue;
+      await addRead({ seriesId: s.id, chapterId: null, startedAt, readMs, pages: pages || 0 });
+    }
+  }
 }

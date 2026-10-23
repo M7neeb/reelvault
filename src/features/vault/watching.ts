@@ -70,11 +70,20 @@ export async function bookmarkCount(): Promise<number> {
 
 /* ------------------------------------------------------------------- resume */
 
+let savedAt = new Map<string, number>();
+
+/** Where you stopped each unfinished video, most recent first. */
 export async function resumePoints(): Promise<Map<string, number>> {
   const db = await getDb();
-  const rows = await db.getAllAsync<{ video_id: string; position_ms: number }>('SELECT video_id, position_ms FROM vault_resume;');
+  const rows = await db.getAllAsync<{ video_id: string; position_ms: number; saved_at: number | null }>(
+    'SELECT video_id, position_ms, saved_at FROM vault_resume ORDER BY saved_at DESC;'
+  );
+  savedAt = new Map(rows.map((r) => [r.video_id, r.saved_at ?? 0]));
   return new Map(rows.map((r) => [r.video_id, r.position_ms]));
 }
+
+/** When each resume point was saved (as of the last resumePoints()). */
+export const resumeSavedAt = (id: string): number => savedAt.get(id) ?? 0;
 
 /** null clears it (played to the end, or "start over"). */
 export async function setResumePoint(videoId: string, positionMs: number | null): Promise<void> {

@@ -6,7 +6,7 @@
  * Presentational only (see the note at the top of types.ts).
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 
 import { useTabBarSpace } from '../chrome';
@@ -27,6 +27,8 @@ export default function AudioSection({
   showPrivate,
   onUnlockPrivate,
   onWifi,
+  openRequest,
+  onOpenHandled,
   dev,
 }: {
   data: AudioData;
@@ -34,6 +36,9 @@ export default function AudioSection({
   showPrivate: boolean;
   onUnlockPrivate?: () => void;
   onWifi?: () => void;
+  /** From the Search tab: carry on playing an item, or show its page. */
+  openRequest?: { id: string; play: boolean } | null;
+  onOpenHandled?: () => void;
   /** The browser preview opens one surface at once. */
   dev?: AudioDev;
 }) {
@@ -50,6 +55,17 @@ export default function AudioSection({
     else if (!pb.playing) pb.resume();
     setFull(true);
   };
+
+  useEffect(() => {
+    if (!openRequest) return;
+    const item = data.items.find((i) => i.id === openRequest.id);
+    // Not loaded yet: wait for the library.
+    if (!item && !data.items.length) return;
+    onOpenHandled?.();
+    if (!item) return;
+    if (openRequest.play) open(item);
+    else setInfoId(item.id);
+  }, [openRequest, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View style={styles.fill}>

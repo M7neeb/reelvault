@@ -256,8 +256,73 @@ export async function deleteSeriesRows(ids: string[]): Promise<void> {
     await db.runAsync('DELETE FROM manga_chapters WHERE series_id = ?;', [id]);
     await db.runAsync('DELETE FROM manga_tags WHERE series_id = ?;', [id]);
     await db.runAsync('DELETE FROM manga_reads WHERE series_id = ?;', [id]);
+    await db.runAsync('DELETE FROM manga_downloads WHERE series_id = ?;', [id]);
     await db.runAsync('DELETE FROM manga_series WHERE id = ?;', [id]);
   }
+}
+
+/** A chapter's pages are now on the phone (downloaded). */
+export async function setChapterFiles(id: string, folder: string, pages: string[], size: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE manga_chapters SET folder = ?, pages_json = ?, page_count = ?, size = ?, downloaded = 1 WHERE id = ?;', [folder, JSON.stringify(pages), pages.length, size, id]);
+}
+
+/** A downloaded chapter's pages are gone again (it stays, readable online). */
+export async function clearChapterFiles(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE manga_chapters SET folder = NULL, pages_json = '[]', size = 0, downloaded = 0 WHERE id = ?;", [id]);
+}
+
+/** Links a chapter to its place on a source (after importing a backup, or linking a series by hand). */
+export async function setChapterSource(id: string, key: string, externalUrl: string | null, pageCount: number | null): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE manga_chapters SET source_key = ?, source_url = ?, page_count = CASE WHEN ? > 0 THEN ? ELSE page_count END WHERE id = ?;', [key, externalUrl, pageCount ?? 0, pageCount ?? 0, id]);
+}
+
+export async function setSeriesSource(id: string, sourceId: string | null, sourceKey: string | null, sourceUrl: string | null): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE manga_series SET source_id = ?, source_key = ?, source_url = COALESCE(?, source_url) WHERE id = ?;', [sourceId, sourceKey, sourceUrl, id]);
+}
+
+/* ------------------------------------------------------------ downloads */
+
+export type DownloadRow = { chapterId: string; seriesId: string; state: 'queued' | 'failed'; error: string | null; attempts: number; addedAt: number };
+
+export async function queueDownloads(rows: { chapterId: string; seriesId: string }[], at: number): Promise<void> {
+  const db = await getDb();
+  for (const [i, r] of rows.entries()) {
+    await db.runAsync(
+      "INSERT INTO manga_downloads (chapter_id, series_id, state, added_at) VALUES (?, ?, 'queued', ?) ON CONFLICT(chapter_id) DO UPDATE SET state = 'queued', error = NULL;",
+      [r.chapterId, r.seriesId, at + i]
+    );
+  }
+}
+
+export async function listDownloads(): Promise<DownloadRow[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ chapter_id: string; series_id: string; state: string; error: string | null; attempts: number; added_at: number }>('SELECT * FROM manga_downloads ORDER BY added_at;');
+  return rows.map((r) => ({ chapterId: r.chapter_id, seriesId: r.series_id, state: r.state === 'failed' ? 'failed' : 'queued', error: r.error, attempts: r.attempts, addedAt: r.added_at }));
+}
+
+export async function finishDownload(chapterId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM manga_downloads WHERE chapter_id = ?;', [chapterId]);
+}
+
+export async function failDownload(chapterId: string, error: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE manga_downloads SET state = 'failed', error = ?, attempts = attempts + 1 WHERE chapter_id = ?;", [error.slice(0, 300), chapterId]);
+}
+
+export async function cancelDownloads(chapterIds: string[] | null): Promise<void> {
+  const db = await getDb();
+  if (!chapterIds) await db.runAsync('DELETE FROM manga_downloads;');
+  else for (const id of chapterIds) await db.runAsync('DELETE FROM manga_downloads WHERE chapter_id = ?;', [id]);
+}
+
+export async function retryDownloads(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE manga_downloads SET state = 'queued', error = NULL WHERE state = 'failed';");
 }
 
 export async function setChapterKey(id: string, key: string): Promise<void> {
@@ -267,7 +332,10 @@ export async function setChapterKey(id: string, key: string): Promise<void> {
 
 export async function deleteChapterRows(ids: string[]): Promise<void> {
   const db = await getDb();
-  for (const id of ids) await db.runAsync('DELETE FROM manga_chapters WHERE id = ?;', [id]);
+  for (const id of ids) {
+    await db.runAsync('DELETE FROM manga_chapters WHERE id = ?;', [id]);
+    await db.runAsync('DELETE FROM manga_downloads WHERE chapter_id = ?;', [id]);
+  }
 }
 
 export async function expiredSeries(now: number, days: number): Promise<{ id: string; folder: string }[]> {

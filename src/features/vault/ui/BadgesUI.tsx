@@ -45,6 +45,8 @@ const GROUPS: { key: AchGroup; blurb: string; icon: string; color: string }[] = 
   { key: 'Library', blurb: 'What you collect, rate and film', icon: 'videos', color: '#30D158' },
   { key: 'Organising', blurb: 'Keywords, albums, captions, series and Overview', icon: 'tag', color: '#BF5AF2' },
   { key: 'Simkl', blurb: 'Movies, shows and anime', icon: 'tv', color: '#64D2FF' },
+  { key: 'Reading', blurb: 'Manga, manhwa and comics', icon: 'bookOpen', color: '#FF6482' },
+  { key: 'Listening', blurb: 'Audio and books', icon: 'headphones', color: '#5E5CE6' },
 ];
 
 const day = (t: number) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });

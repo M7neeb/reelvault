@@ -3,30 +3,38 @@
  * reader, put together. Presentational only (see the note at the top of types.ts).
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
 import { nextChapter, type MangaChapter } from '../../manga/mangaLogic';
 import type { VideosMode } from '../overviewParts';
 import { sheet, useStyles, type Palette } from '../theme';
+import BrowseScreen from './BrowseScreen';
+import DownloadsSheet from './DownloadsSheet';
+import MangaDashboard from './MangaDashboard';
 import MangaDetail from './MangaDetail';
 import MangaReader from './MangaReader';
 import MangaScreen from './MangaScreen';
 import type { MangaData } from './mangaTypes';
 
-export type MangaDev = { detail?: boolean; reader?: boolean; deleted?: boolean; /** Which series the reader opens (default: the first). */ seriesId?: string };
+export type MangaDev = { dashboard?: boolean; downloadsOpen?: boolean; detail?: boolean; reader?: boolean; deleted?: boolean; browse?: 'sources' | 'extensions'; source?: string; openKey?: string; form?: 'server' | 'repo' | 'languages'; /** Which series the reader opens (default: the first). */ seriesId?: string };
 
 export default function MangaSection({
   data,
   onMode,
   showPrivate,
   onUnlockPrivate,
+  openRequest,
+  onOpenHandled,
   dev,
 }: {
   data: MangaData;
   onMode: (m: VideosMode) => void;
   showPrivate: boolean;
   onUnlockPrivate?: () => void;
+  /** From the Search tab: carry on reading a series, or show its page. */
+  openRequest?: { id: string; read: boolean } | null;
+  onOpenHandled?: () => void;
   /** The browser preview opens one surface at once. */
   dev?: MangaDev;
 }) {
@@ -43,6 +51,47 @@ export default function MangaSection({
   const readChapter = readSeries?.chapters.find((c) => c.id === reading?.chapterId) ?? null;
 
   const read = (seriesId: string, c: MangaChapter, fromStart = false) => setReading({ seriesId, chapterId: c.id, fromStart });
+  const [browseOpen, setBrowseOpen] = useState(!!dev?.browse);
+  const [dashOpen, setDashOpen] = useState(!!dev?.dashboard);
+  const [dlOpen, setDlOpen] = useState(!!dev?.downloadsOpen);
+
+  useEffect(() => {
+    if (!openRequest) return;
+    const s = data.items.find((x) => x.id === openRequest.id);
+    // Not loaded yet: wait for the library.
+    if (!s && !data.items.length) return;
+    onOpenHandled?.();
+    if (!s) return;
+    setBrowseOpen(false);
+    setDashOpen(false);
+    setDlOpen(false);
+    setDetailId(s.id);
+    const c = openRequest.read ? (nextChapter(s) ?? null) : null;
+    if (c) read(s.id, c);
+  }, [openRequest, data.items]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Titles from sources already in the library, so Browse can mark them.
+  const index = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of data.items) if (x.sourceId && x.sourceKey) m.set(`${x.sourceId}|${x.sourceKey}`, x.id);
+    return m;
+  }, [data.items]);
+  const libraryIdOf = useCallback((sourceId: string, key: string) => index.get(`${sourceId}|${key}`) ?? null, [index]);
+
+  const reader =
+    readSeries && readChapter ? (
+      <MangaReader
+        key={`${readSeries.id}:${reading?.fromStart}`}
+        series={readSeries}
+        chapter={readChapter}
+        fromStart={reading?.fromStart}
+        actions={data.actions}
+        prefs={data.browse.prefs.reader}
+        onPrefs={(patch) => void data.browse.actions.setReader(patch).catch(() => undefined)}
+        onOpenUrl={data.browse.actions.openUrl}
+        onClose={() => setReading(null)}
+      />
+    ) : null;
 
   return (
     <View style={styles.fill}>
@@ -61,11 +110,53 @@ export default function MangaSection({
           else setDetailId(s.id);
         }}
         onMode={onMode}
+        onBrowse={() => setBrowseOpen(true)}
+        onDashboard={() => setDashOpen(true)}
+        onDownloads={() => setDlOpen(true)}
+        downloads={data.downloads}
         initialDeleted={dev?.deleted}
       />
-      {detail && <MangaDetail series={detail} actions={data.actions} onRead={(c, fromStart) => read(detail.id, c, fromStart)} onClose={() => setDetailId(null)} />}
-      {readSeries && readChapter && (
-        <MangaReader key={`${readSeries.id}:${reading?.fromStart}`} series={readSeries} chapter={readChapter} fromStart={reading?.fromStart} actions={data.actions} onClose={() => setReading(null)} />
+      {/* One full-screen window at a time on the iPhone: the reader opens inside the series page when it is open. */}
+      {detail ? (
+        <MangaDetail
+          series={detail}
+          actions={data.actions}
+          downloads={data.downloads}
+          browse={data.browse.actions}
+          onRead={(c, fromStart) => read(detail.id, c, fromStart)}
+          onOpenUrl={data.browse.actions.openUrl}
+          onClose={() => setDetailId(null)}>
+          {reader}
+        </MangaDetail>
+      ) : (
+        reader
+      )}
+      {dashOpen && !detail && (
+        <MangaDashboard
+          items={data.items.filter((s) => showPrivate || !s.isPrivate)}
+          actions={data.actions}
+          onOpen={(s) => {
+            setDashOpen(false);
+            setDetailId(s.id);
+          }}
+          onClose={() => setDashOpen(false)}
+        />
+      )}
+      {dlOpen && !detail && <DownloadsSheet downloads={data.downloads} items={data.items} actions={data.actions} onClose={() => setDlOpen(false)} />}
+      {browseOpen && !detail && (
+        <BrowseScreen
+          browse={data.browse}
+          libraryIdOf={libraryIdOf}
+          initialTab={dev?.browse}
+          initialSourceId={dev?.source ?? null}
+          initialOpenKey={dev?.openKey ?? null}
+          initialForm={dev?.form ?? null}
+          onOpenInLibrary={(id) => {
+            setBrowseOpen(false);
+            setDetailId(id);
+          }}
+          onClose={() => setBrowseOpen(false)}
+        />
       )}
     </View>
   );

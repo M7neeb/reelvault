@@ -6,8 +6,8 @@
  * delete), and its details and your notes. Presentational only.
  */
 
-import { useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useMemo, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -30,8 +30,10 @@ import Icon from '../Icon';
 import { OptionsSheet, PromptSheet } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
+import { tachiSourceOf } from '../../manga/mangaBackup';
+import LinkSheet from './LinkSheet';
 import MangaCover from './MangaCover';
-import type { MangaActions, MangaEdit, MangaUiSeries } from './mangaTypes';
+import type { BrowseActions, DownloadState, MangaActions, MangaEdit, MangaUiSeries } from './mangaTypes';
 
 type Field = { key: 'title' | 'altTitle' | 'author' | 'artist' | 'notes' | 'description'; label: string; placeholder: string; multiline?: boolean };
 const FIELDS: Field[] = [
@@ -47,13 +49,23 @@ export default function MangaDetail({
   series,
   actions,
   onRead,
+  onOpenUrl,
   onClose,
+  children,
+  downloads,
+  browse,
 }: {
   series: MangaUiSeries;
   actions: MangaActions;
+  downloads?: DownloadState;
+  /** For "Find on a source". */
+  browse?: BrowseActions;
   /** Opens the reader on this chapter (at the page you left, or the start). */
   onRead: (chapter: MangaChapter, fromStart?: boolean) => void;
+  onOpenUrl?: (url: string) => void;
   onClose: () => void;
+  /** The reader, shown inside this window (one full-screen window at a time on the iPhone). */
+  children?: ReactNode;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -64,6 +76,24 @@ export default function MangaDetail({
   const [menu, setMenu] = useState<null | 'mode' | 'kind' | 'more' | 'delete'>(null);
   const [chapterMenu, setChapterMenu] = useState<MangaChapter | null>(null);
   const [newestFirst, setNewestFirst] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  const tachi = tachiSourceOf(series.sourceId);
+  const fromSource = !!series.sourceId && !tachi;
+  const queue = new Map((downloads?.queue ?? []).filter((q) => q.seriesId === series.id).map((q) => [q.chapterId, q]));
+  const current = downloads?.current?.seriesId === series.id ? downloads.current : null;
+  const online = series.chapters.filter((c) => !c.folder && c.sourceKey && !c.sourceUrl);
+  const onPhone = series.chapters.filter((c) => c.folder && c.pages.length);
+  const say = (job: Promise<unknown>, text: (v: never) => string) => {
+    job.then((v) => setChecking(text(v as never))).catch((e) => setChecking(String(e).replace(/^Error:\s*/, '')));
+  };
+  const checkNew = () => {
+    setChecking('Checking for new chapters…');
+    actions
+      .refresh(series.id)
+      .then((n) => setChecking(n ? `${n} new ${n === 1 ? 'chapter' : 'chapters'}` : 'No new chapters'))
+      .catch((e) => setChecking(String(e).replace(/^Error:\s*/, '')));
+  };
 
   const next = nextChapter(series);
   const unread = unreadCount(series);
@@ -145,6 +175,46 @@ export default function MangaDetail({
                 </Text>
               </TouchableOpacity>
             )}
+            {tachi && browse && (
+              <TouchableOpacity style={styles.linkBox} onPress={() => setLinking(true)}>
+                <Icon name="link" size={16} color={p.link} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.linkTitle}>Find on a source</Text>
+                  <Text style={styles.facts}>From your Tachimanga backup ({tachi.name}). Link it to read, download and get new chapters; your read marks stay.</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            {fromSource && (
+              <View style={styles.dlRow}>
+                <TouchableOpacity
+                  style={styles.dlBtn}
+                  disabled={!online.length}
+                  onPress={() => say(actions.download(series.id, 'unread'), (n: number) => (n ? `${n} ${n === 1 ? 'chapter' : 'chapters'} added to Downloads` : 'Every unread chapter is on the phone or waiting'))}>
+                  <Icon name="import" size={15} color={online.length ? p.text : p.textMuted} />
+                  <Text style={[styles.dlText, !online.length && { color: p.textMuted }]}>Download unread</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.dlBtn}
+                  disabled={!online.length}
+                  onPress={() => say(actions.download(series.id, 'all'), (n: number) => (n ? `${n} ${n === 1 ? 'chapter' : 'chapters'} added to Downloads` : 'Everything is on the phone or waiting'))}>
+                  <Icon name="import" size={15} color={online.length ? p.text : p.textMuted} />
+                  <Text style={[styles.dlText, !online.length && { color: p.textMuted }]}>All</Text>
+                </TouchableOpacity>
+                {onPhone.length > 0 && (
+                  <TouchableOpacity style={styles.dlBtn} onPress={() => say(actions.exportCbz(series.id, 'all'), (m: string) => m)}>
+                    <Icon name="share" size={15} color={p.text} />
+                    <Text style={styles.dlText}>.cbz</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+            {(current || queue.size > 0) && (
+              <Text style={styles.facts}>
+                {current ? `Downloading ${chapterLabel(series.chapters.find((c) => c.id === current.chapterId) ?? { number: null, volume: null, title: null, filename: null }, true)} · page ${current.done} of ${current.total}` : 'Waiting to download'}
+                {queue.size > (current ? 1 : 0) ? ` · ${queue.size - (current ? 1 : 0)} more waiting` : ''}
+              </Text>
+            )}
+            {!!checking && <Text style={styles.facts}>{checking}</Text>}
             {pr > 0 && pr < 1 && (
               <View style={styles.bar}>
                 <View style={[styles.barFill, { width: `${Math.round(pr * 100)}%` }]} />
@@ -221,7 +291,7 @@ export default function MangaDetail({
                   <TouchableOpacity
                     key={c.id}
                     style={styles.chRow}
-                    onPress={() => onRead(c)}
+                    onPress={() => (!c.folder && c.sourceUrl && onOpenUrl ? onOpenUrl(c.sourceUrl) : onRead(c))}
                     onLongPress={() => {
                       tick();
                       setChapterMenu(c);
@@ -232,9 +302,26 @@ export default function MangaDetail({
                         {chapterLabel(c)}
                       </Text>
                       <Text style={styles.chMeta} numberOfLines={1}>
-                        {[`${c.pageCount} pages`, started ? `page ${c.lastPage + 1}` : null, c.scanlator, fmtDateTime(c.uploadedAt ?? c.addedAt).date].filter(Boolean).join(' · ')}
+                        {[
+                          !c.folder ? (c.sourceUrl ? 'On another website' : 'Online') : null,
+                          c.pageCount ? `${c.pageCount} pages` : null,
+                          started ? `page ${c.lastPage + 1}` : null,
+                          c.scanlator,
+                          fmtDateTime(c.uploadedAt ?? c.addedAt).date,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </Text>
                     </View>
+                    {current?.chapterId === c.id ? (
+                      <Text style={styles.dlPct}>{Math.round((current.done / Math.max(1, current.total)) * 100)}%</Text>
+                    ) : queue.get(c.id)?.state === 'failed' ? (
+                      <Icon name="info" size={15} color={p.danger} />
+                    ) : queue.has(c.id) ? (
+                      <ActivityIndicator size="small" color={p.textMuted} />
+                    ) : c.folder && c.sourceKey ? (
+                      <Icon name="import" size={13} color={p.textMuted} />
+                    ) : null}
                     {read ? (
                       <Icon name="checkCircle" size={18} color={p.textMuted} />
                     ) : started ? (
@@ -297,6 +384,11 @@ export default function MangaDetail({
         <OptionsSheet
           title={series.title}
           options={[
+            ...(fromSource ? [{ label: 'Check for new chapters', onPress: checkNew }] : []),
+            ...(onPhone.some((c) => c.sourceKey) ? [{ label: 'Remove downloads', hint: 'The chapters stay, readable online', onPress: () => actions.removeDownloads(series.id, 'all').catch(() => undefined) }] : []),
+            ...(onPhone.length ? [{ label: 'Save all as .cbz', hint: 'Files › On My iPhone › ReelVault › Exports', onPress: () => say(actions.exportCbz(series.id, 'all'), (m: string) => m) }] : []),
+            ...(browse ? [{ label: fromSource ? 'Link to another source' : 'Find on a source', onPress: () => setTimeout(() => setLinking(true), 250) }] : []),
+            ...(series.sourceUrl && onOpenUrl ? [{ label: 'Open on the website', onPress: () => onOpenUrl(series.sourceUrl!) }] : []),
             { label: 'Mark all as read', onPress: () => actions.setRead(series.chapters.map((c) => c.id), true).catch(() => undefined) },
             { label: 'Mark all as unread', onPress: () => actions.setRead(series.chapters.map((c) => c.id), false).catch(() => undefined) },
             { label: 'Change the cover', hint: 'A picture from Files', onPress: () => actions.setCoverFromPhoto(series.id).catch(() => undefined) },
@@ -330,14 +422,20 @@ export default function MangaDetail({
             isRead(chapterMenu)
               ? { label: 'Mark as unread', onPress: () => actions.setRead([chapterMenu.id], false).catch(() => undefined) }
               : { label: 'Mark as read', onPress: () => actions.setRead([chapterMenu.id], true).catch(() => undefined) },
+            ...(!chapterMenu.folder && chapterMenu.sourceKey && !chapterMenu.sourceUrl && !queue.has(chapterMenu.id) ? [{ label: 'Download', onPress: () => actions.download(series.id, [chapterMenu.id]).catch(() => undefined) }] : []),
+            ...(queue.has(chapterMenu.id) ? [{ label: 'Cancel download', onPress: () => actions.cancelDownloads([chapterMenu.id]).catch(() => undefined) }] : []),
+            ...(chapterMenu.folder && chapterMenu.sourceKey ? [{ label: 'Remove download', hint: 'Stays readable online', onPress: () => actions.removeDownloads(series.id, [chapterMenu.id]).catch(() => undefined) }] : []),
+            ...(chapterMenu.folder ? [{ label: 'Share as .cbz', onPress: () => actions.shareCbz(series.id, chapterMenu.id).catch(() => undefined) }] : []),
             { label: 'Mark everything before as read', onPress: () => actions.markPreviousRead(series.id, chapterMenu.id).catch(() => undefined) },
             { label: 'Read from the first page', onPress: () => onRead(chapterMenu, true) },
-            { label: 'Use its first page as the cover', onPress: () => actions.setCoverFromPage(series.id, chapterMenu, 0).catch(() => undefined) },
+            ...(chapterMenu.folder ? [{ label: 'Use its first page as the cover', onPress: () => actions.setCoverFromPage(series.id, chapterMenu, 0).catch(() => undefined) }] : []),
             { label: 'Delete this chapter', danger: true, hint: 'Removes its pages', onPress: () => actions.deleteChapters(series.id, [chapterMenu.id]).catch(() => undefined) },
           ]}
           onClose={() => setChapterMenu(null)}
         />
       )}
+      {linking && browse && <LinkSheet series={series} browse={browse} actions={actions} hint={tachi?.name ?? null} onClose={() => setLinking(false)} />}
+      {children}
     </Modal>
   );
 }
@@ -380,6 +478,12 @@ const makeStyles = (p: Palette) =>
     chTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
     chRead: { color: p.textMuted },
     chMeta: { color: p.textSecondary, fontSize: 12 },
+    linkBox: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: p.card, borderRadius: 14, padding: 14 },
+    linkTitle: { color: p.link, fontSize: 16, fontWeight: '800' },
+    dlRow: { flexDirection: 'row', gap: 8 },
+    dlBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: p.card, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, flexGrow: 1 },
+    dlText: { color: p.text, fontSize: 14, fontWeight: '700' },
+    dlPct: { color: p.accent, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
     unreadDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: p.accent },
     startedDot: { width: 9, height: 9, borderRadius: 5, borderWidth: 2, borderColor: p.accent },
     field: { gap: 4 },
