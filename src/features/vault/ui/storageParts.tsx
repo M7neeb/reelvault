@@ -39,6 +39,7 @@ const KINDS: { key: keyof Omit<AppStorage, 'measured'>; label: string; hint: str
   { key: 'videos', label: 'Your videos', hint: 'The videos themselves', color: '#0A84FF' },
   { key: 'deleted', label: 'Recently Deleted', hint: 'Waiting to be removed for good', color: '#FF453A' },
   { key: 'audio', label: 'Audio and books', hint: 'Your audio files and EPUB books, each kept once', color: '#64D2FF' },
+  { key: 'manga', label: 'Manga and comics', hint: 'Downloaded chapters, your comic files and saved .cbz files', color: '#FF375F' },
   { key: 'covers', label: 'Covers', hint: 'One small picture per video', color: '#30D158' },
   { key: 'filmstrips', label: 'Filmstrips', hint: 'Frames under the player, remade when needed', color: '#BF5AF2' },
   { key: 'temporary', label: 'Temporary files', hint: 'Picture cache, picker copies, finished edits', color: '#FF9F0A' },

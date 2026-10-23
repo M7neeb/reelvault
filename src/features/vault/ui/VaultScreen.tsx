@@ -89,6 +89,7 @@ import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
 import { onQuick, pickFavourite, type QuickKind } from '../quickOpen';
+import { onJump, type JumpRequest } from '../jump';
 import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
 import OverviewScreen from './OverviewScreen';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -407,6 +408,27 @@ function VaultScreenBody({
     setQuick(null);
     if (v) setPlaying(v);
   }, [quick, publicItems]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Something picked in the Search tab: play the video, or open the audio item / manga in its section.
+  const [jump, setJump] = useState<JumpRequest | null>(null);
+  const [sectionJump, setSectionJump] = useState<JumpRequest | null>(null);
+  useEffect(() => onJump(setJump), []);
+  useEffect(() => {
+    if (!jump) return;
+    if (jump.kind === 'video') {
+      const v = publicItems.find((x) => x.id === jump.id);
+      // Not loaded yet: wait for the library.
+      if (!v && !items.length) return;
+      setJump(null);
+      if (!v) return;
+      if (prefs.videosMode === 'audio' || prefs.videosMode === 'manga') switchMode('watch');
+      setPlaying(v);
+      return;
+    }
+    setJump(null);
+    if (prefs.videosMode !== jump.kind) switchMode(jump.kind);
+    setSectionJump(jump);
+  }, [jump, publicItems]); // eslint-disable-line react-hooks/exhaustive-deps
   const privateOpen = privateUnlocked && !decoy;
   const privateItems = useMemo(() => (privateOpen ? items.filter((v) => v.isPrivate) : []), [items, privateOpen]);
   const publicIds = useMemo(() => new Set(publicItems.map((v) => v.id)), [publicItems]);
@@ -1661,7 +1683,15 @@ function VaultScreenBody({
 
       {videosMode === 'manga' && manga && (
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
-          <MangaSection data={manga} onMode={switchMode} showPrivate={privateOpen} onUnlockPrivate={() => void requestUnlock(() => undefined)} dev={dev?.manga} />
+          <MangaSection
+            data={manga}
+            onMode={switchMode}
+            showPrivate={privateOpen}
+            onUnlockPrivate={() => void requestUnlock(() => undefined)}
+            openRequest={sectionJump?.kind === 'manga' ? sectionJump : null}
+            onOpenHandled={() => setSectionJump(null)}
+            dev={dev?.manga}
+          />
         </Animated.View>
       )}
 
@@ -1673,6 +1703,8 @@ function VaultScreenBody({
             showPrivate={privateOpen}
             onUnlockPrivate={() => void requestUnlock(() => undefined)}
             onWifi={() => setWifiOpen(true)}
+            openRequest={sectionJump?.kind === 'audio' ? sectionJump : null}
+            onOpenHandled={() => setSectionJump(null)}
             dev={dev?.audio}
           />
         </Animated.View>
@@ -1742,6 +1774,8 @@ function VaultScreenBody({
           }}
           actions={actions}
           simkl={simkl}
+          reading={manga ? { items: manga.items, loadReads: manga.actions.loadReads } : undefined}
+          listening={audio ? { items: audio.items, loadPlays: audio.actions.loadPlays } : undefined}
           ratingLabels={prefs.ratingLabels}
           onOpenVideo={(id) => {
             const v = items.find((x) => x.id === id);

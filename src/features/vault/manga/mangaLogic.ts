@@ -468,3 +468,50 @@ export function pageFileName(index: number, source: string): string {
   const ext = (source.match(/\.([a-z0-9]{2,4})$/i)?.[1] ?? 'jpg').toLowerCase().replace('jpeg', 'jpg');
   return `${String(index + 1).padStart(4, '0')}.${ext}`;
 }
+
+/* ----------------------------------------------------------------- export */
+
+const xmlText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** ComicInfo.xml for a chapter saved as .cbz, so other readers know the series, number and people. */
+export function comicInfoXml(s: Pick<MangaSeries, 'title' | 'author' | 'artist' | 'description' | 'tags' | 'sourceUrl' | 'kind' | 'readingMode'>, c: Pick<MangaChapter, 'number' | 'volume' | 'title' | 'scanlator' | 'pageCount' | 'uploadedAt'>): string {
+  const fields: [string, string | number | null | undefined][] = [
+    ['Series', s.title],
+    ['Number', c.number],
+    ['Volume', c.volume],
+    ['Title', c.title],
+    ['Writer', s.author],
+    ['Penciller', s.artist],
+    ['Summary', s.description],
+    ['Genre', s.tags.join(', ') || null],
+    ['Web', s.sourceUrl],
+    ['ScanlationGroup', c.scanlator],
+    ['PageCount', c.pageCount || null],
+    ['Year', c.uploadedAt ? new Date(c.uploadedAt).getFullYear() : null],
+    ['Manga', modeOf(s) === 'rtl' ? 'YesAndRightToLeft' : s.kind === 'comic' ? 'No' : 'Yes'],
+  ];
+  const body = fields
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `  <${k}>${xmlText(String(v))}</${k}>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="utf-8"?>\n<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n${body}\n</ComicInfo>\n`;
+}
+
+/** A file name that is safe on every system ("One Piece - Ch. 12.cbz"). */
+export function safeFileName(s: string, max = 80): string {
+  return (
+    s
+      .replace(/[\/:*?"<>|\u0000-\u001f]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, max)
+      .replace(/[. ]+$/, '') || 'Untitled'
+  );
+}
+
+/** "One Piece - Vol. 3 Ch. 012.cbz": zero-padded so the files sort in order. */
+export function cbzName(seriesTitle: string, c: Pick<MangaChapter, 'number' | 'volume' | 'title' | 'filename'>): string {
+  const pad = (n: number) => (Number.isInteger(n) ? String(n).padStart(3, '0') : String(n).replace(/^(\d+)/, (d) => d.padStart(3, '0')));
+  const parts = [c.volume !== null ? `Vol. ${c.volume}` : null, c.number !== null ? `Ch. ${pad(c.number)}` : safeFileName(c.title ?? c.filename ?? 'Chapter', 40)].filter(Boolean);
+  return `${safeFileName(seriesTitle, 60)} - ${parts.join(' ')}.cbz`;
+}

@@ -17,7 +17,7 @@
  * is tested in Node.
  */
 
-export type AchGroup = 'Library' | 'Watching' | 'Habits' | 'Organising' | 'Memories' | 'Monthly' | 'Simkl';
+export type AchGroup = 'Library' | 'Watching' | 'Habits' | 'Organising' | 'Memories' | 'Monthly' | 'Simkl' | 'Reading' | 'Listening';
 
 /** Something you did in the app that leaves no other trace, and when ("memory", "quiz-right"…). */
 export type AchEvent = { k: string; at: number; v?: string };
@@ -90,6 +90,10 @@ export type AchInput = {
     /** When each Simkl watch happened (counts for streaks and active days). */
     times: number[];
   } | null;
+  /** The Manga section (null = no manga yet: its badges stay out of sight). */
+  reading?: AchReading | null;
+  /** The Audio section (null = nothing to listen to yet). */
+  listening?: AchListening | null;
   /** Memories made from the library, and how many are trips. */
   memories?: { total: number; trips: number } | null;
   /** Where most videos were filmed. */
@@ -97,6 +101,74 @@ export type AchInput = {
   events?: AchEvent[];
   now: number;
 };
+
+export type AchReading = {
+  /** When each chapter was finished. */
+  chapterTimes: number[];
+  pages: number;
+  /** Series in the library, and how many you finished. */
+  series: number;
+  finished: number;
+  /** When each finished series was finished. */
+  finishedTimes: number[];
+  hours: number;
+  /** Reading sessions (for the streak). */
+  sessionTimes: number[];
+  rated: number;
+};
+
+export type AchListening = {
+  items: number;
+  books: number;
+  /** When each item (audio or book) was finished. */
+  finishedTimes: number[];
+  hours: number;
+  /** Listening sessions (for the streak). */
+  sessionTimes: number[];
+  rated: number;
+};
+
+/** Reading badges' numbers from the manga library and its reading sessions. */
+export function readingFrom(
+  series: { deletedAt: number | null; rating: number; status: string | null; finishedAt: number | null; chapters: { readAt: number | null; pageCount: number }[] }[],
+  reads: { startedAt: number; readMs: number; pages: number }[]
+): AchReading | null {
+  const mine = series.filter((s) => !s.deletedAt);
+  if (!mine.length) return null;
+  const chapters = mine.flatMap((s) => s.chapters).filter((c) => c.readAt !== null);
+  const finished = mine.filter((s) => s.status === 'completed' || (s.chapters.length > 0 && s.chapters.every((c) => c.readAt !== null)));
+  return {
+    chapterTimes: chapters.map((c) => c.readAt!),
+    // Pages turned in sessions, or the pages of finished chapters when sessions say less (older imports).
+    pages: Math.max(
+      reads.reduce((a, r) => a + r.pages, 0),
+      chapters.reduce((a, c) => a + c.pageCount, 0)
+    ),
+    series: mine.length,
+    finished: finished.length,
+    finishedTimes: finished.map((s) => s.finishedAt ?? Math.max(0, ...s.chapters.map((c) => c.readAt ?? 0))).filter((t) => t > 0),
+    hours: reads.reduce((a, r) => a + r.readMs, 0) / 3_600_000,
+    sessionTimes: reads.filter((r) => r.readMs >= 60_000 || r.pages >= 5).map((r) => r.startedAt),
+    rated: mine.filter((s) => s.rating > 0).length,
+  };
+}
+
+/** Listening badges' numbers from the audio library and its listening sessions. */
+export function listeningFrom(
+  items: { kind: string; deletedAt: number | null; rating: number; finishedAt: number | null }[],
+  plays: { startedAt: number; listenedMs: number }[]
+): AchListening | null {
+  const mine = items.filter((a) => !a.deletedAt);
+  if (!mine.length) return null;
+  return {
+    items: mine.length,
+    books: mine.filter((a) => a.kind === 'book').length,
+    finishedTimes: mine.map((a) => a.finishedAt).filter((t): t is number => t !== null),
+    hours: plays.reduce((a, x) => a + x.listenedMs, 0) / 3_600_000,
+    sessionTimes: plays.filter((x) => x.listenedMs >= 60_000).map((x) => x.startedAt),
+    rated: mine.filter((a) => a.rating > 0).length,
+  };
+}
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -538,6 +610,125 @@ const LADDERS: Ladder[] = [
     title: (n) => (n === 1 ? 'First list' : `${n} lists`),
     detail: (n) => (n === 1 ? 'Make a list of your own' : `Make ${n} of your own lists`),
     value: (i) => i.simkl?.lists ?? 0,
+  },
+
+  /* Reading (the Manga section) */
+  {
+    family: 'chapters-read',
+    group: 'Reading',
+    icon: 'bookOpen',
+    tiers: [10, 100, 500, 1000, 5000],
+    title: (n) => `${n.toLocaleString()} chapters`,
+    detail: (n) => `Read ${n.toLocaleString()} chapters of manga or comics`,
+    value: (i) => i.reading?.chapterTimes.length ?? 0,
+    when: (i, n) => whenReached((i.reading?.chapterTimes ?? []).map((at) => ({ at, add: 1 })), n),
+  },
+  {
+    family: 'pages-read',
+    group: 'Reading',
+    icon: 'book',
+    tiers: [500, 5000, 25_000, 100_000],
+    title: (n) => `${n.toLocaleString()} pages`,
+    detail: (n) => `Turn ${n.toLocaleString()} pages`,
+    value: (i) => i.reading?.pages ?? 0,
+  },
+  {
+    family: 'series-finished',
+    group: 'Reading',
+    icon: 'checkCircle',
+    tiers: [1, 5, 25, 100],
+    title: (n) => (n === 1 ? 'The end' : `${n} series finished`),
+    detail: (n) => (n === 1 ? 'Read a series to its last chapter' : `Finish ${n} series`),
+    value: (i) => i.reading?.finished ?? 0,
+    when: (i, n) => whenReached((i.reading?.finishedTimes ?? []).map((at) => ({ at, add: 1 })), n),
+  },
+  {
+    family: 'manga-shelf',
+    group: 'Reading',
+    icon: 'bookOpen',
+    tiers: [5, 25, 100, 250],
+    title: (n) => `Shelf of ${n}`,
+    detail: (n) => `Have ${n} series in Manga`,
+    value: (i) => i.reading?.series ?? 0,
+  },
+  {
+    family: 'reading-hours',
+    group: 'Reading',
+    icon: 'clock',
+    tiers: [5, 25, 100, 500],
+    title: (n) => `${n} hours reading`,
+    detail: (n) => `Spend ${n} hours in the reader`,
+    unit: 'h',
+    value: (i) => Math.round((i.reading?.hours ?? 0) * 10) / 10,
+  },
+  {
+    family: 'reading-streak',
+    group: 'Reading',
+    icon: 'fire',
+    tiers: [3, 7, 30, 100],
+    title: (n) => `Reading streak · ${n}`,
+    detail: (n) => `Read on ${n} days in a row`,
+    value: (i) => once(i, 'readStreak', () => streaks(i.reading?.sessionTimes ?? [], i.now)).best,
+    when: (i, n) => dated(once(i, 'readStreak', () => streaks(i.reading?.sessionTimes ?? [], i.now)).reachedAt.get(n)),
+  },
+  {
+    family: 'manga-critic',
+    group: 'Reading',
+    icon: 'star',
+    tiers: [5, 25, 100],
+    title: (n) => `Manga critic · ${n}`,
+    detail: (n) => `Rate ${n} series`,
+    value: (i) => i.reading?.rated ?? 0,
+  },
+
+  /* Listening (the Audio section) */
+  {
+    family: 'listen-hours',
+    group: 'Listening',
+    icon: 'headphones',
+    tiers: [5, 25, 100, 500, 1000],
+    title: (n) => `${n.toLocaleString()} hours listened`,
+    detail: (n) => `Listen for ${n.toLocaleString()} hours`,
+    unit: 'h',
+    value: (i) => Math.round((i.listening?.hours ?? 0) * 10) / 10,
+  },
+  {
+    family: 'audio-finished',
+    group: 'Listening',
+    icon: 'checkCircle',
+    tiers: [1, 5, 25, 100],
+    title: (n) => (n === 1 ? 'Heard it all' : `${n} finished`),
+    detail: (n) => (n === 1 ? 'Listen to a book or an album to the end' : `Finish ${n} books or albums`),
+    value: (i) => i.listening?.finishedTimes.length ?? 0,
+    when: (i, n) => whenReached((i.listening?.finishedTimes ?? []).map((at) => ({ at, add: 1 })), n),
+  },
+  {
+    family: 'audio-shelf',
+    group: 'Listening',
+    icon: 'audio',
+    tiers: [10, 50, 200],
+    title: (n) => `${n} to listen to`,
+    detail: (n) => `Have ${n} audio files or books`,
+    value: (i) => i.listening?.items ?? 0,
+  },
+  {
+    family: 'bookworm',
+    group: 'Listening',
+    icon: 'book',
+    tiers: [1, 10, 50],
+    title: (n) => (n === 1 ? 'First book' : `Bookworm · ${n}`),
+    detail: (n) => (n === 1 ? 'Add an audiobook or an EPUB book' : `Have ${n} books`),
+    value: (i) => i.listening?.books ?? 0,
+  },
+  {
+    family: 'listen-streak',
+    group: 'Listening',
+    icon: 'fire',
+    tiers: [3, 7, 30],
+    title: (n) => `Listening streak · ${n}`,
+    detail: (n) => `Listen on ${n} days in a row`,
+    value: (i) => once(i, 'listenStreak', () => streaks(i.listening?.sessionTimes ?? [], i.now)).best,
+    when: (i, n) => dated(once(i, 'listenStreak', () => streaks(i.listening?.sessionTimes ?? [], i.now)).reachedAt.get(n)),
   },
 ];
 
@@ -1133,6 +1324,8 @@ function weeklies(i: AchInput, weeksBack = 8): Achievement[] {
 export function achievements(i: AchInput, opts: { everyStep?: boolean } = {}): Achievement[] {
   const out: Achievement[] = [];
   for (const l of LADDERS) {
+    // No manga or audio yet: their badges stay out of the way.
+    if ((l.group === 'Reading' && !i.reading) || (l.group === 'Listening' && !i.listening)) continue;
     const v = l.value(i);
     l.tiers.forEach((t, n) => {
       const unlocked = v >= t;

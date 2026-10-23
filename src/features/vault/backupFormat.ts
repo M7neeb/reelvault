@@ -105,6 +105,44 @@ export type Backup = {
   overview?: unknown;
   /** The Audio section (ratings, notes, keywords, progress, listens, bookmarks). */
   audio?: BackupAudio[];
+  /** The Manga section: each title's info, its chapters' read marks and where they come from, and your reading sessions. */
+  manga?: BackupMangaTitle[];
+};
+
+export type BackupMangaChapter = {
+  key: string | null;
+  number: number | null;
+  volume: number | null;
+  title: string | null;
+  scanlator: string | null;
+  uploadedAt: number | null;
+  externalUrl: string | null;
+  readAt: number | null;
+  lastPage: number;
+};
+
+export type BackupMangaTitle = {
+  title: string;
+  altTitle: string | null;
+  author: string | null;
+  artist: string | null;
+  description: string | null;
+  kind: string | null;
+  pubStatus: string | null;
+  status: string | null;
+  rating: number;
+  notes: string | null;
+  readingMode: string | null;
+  sourceId: string | null;
+  sourceKey: string | null;
+  sourceUrl: string | null;
+  keywords: string[];
+  createdAt: number;
+  lastReadAt: number | null;
+  finishedAt: number | null;
+  chapters: BackupMangaChapter[];
+  /** [started at, ms read, pages] */
+  reads: [number, number, number][];
 };
 
 /** Reads a backup file; null when it isn't one. */
@@ -130,6 +168,17 @@ export function parseBackup(json: string): Backup | null {
     kept: Array.isArray(b.kept) ? b.kept.filter((k) => k && typeof k.id === 'string' && typeof k.filename === 'string') : [],
     prefs: b.prefs && typeof b.prefs === 'object' && !Array.isArray(b.prefs) ? (b.prefs as Record<string, unknown>) : null,
     overview: b.overview && typeof b.overview === 'object' ? b.overview : null,
+    manga: Array.isArray(b.manga)
+      ? b.manga
+          .filter((m) => m && typeof m.title === 'string' && m.title.trim())
+          .map((m) => ({
+            ...m,
+            keywords: Array.isArray(m.keywords) ? m.keywords.filter((k) => typeof k === 'string') : [],
+            chapters: Array.isArray(m.chapters) ? m.chapters.filter((c) => c && typeof c === 'object') : [],
+            reads: Array.isArray(m.reads) ? m.reads.filter((x) => Array.isArray(x) && typeof x[0] === 'number' && typeof x[1] === 'number') : [],
+            rating: typeof m.rating === 'number' ? m.rating : 0,
+          }))
+      : [],
     audio: Array.isArray(b.audio)
       ? b.audio
           .filter((a) => a && typeof a.filename === 'string')
