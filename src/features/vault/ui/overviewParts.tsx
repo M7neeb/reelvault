@@ -58,14 +58,14 @@ export function toOvVideo(v: VaultItem): OvVideo {
 }
 
 /** Watch ⟷ Overview, at the top of the Videos tab in both modes. The pill slides across. */
-export type VideosMode = 'watch' | 'overview' | 'audio';
+export type VideosMode = 'watch' | 'overview' | 'audio' | 'manga';
 
-/** Watch · Overview · Audio: the three ways of the Videos tab. */
+/** Watch · Overview · Audio · Manga: the four ways of the Videos tab. */
 export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m: VideosMode) => void }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const [sizes, setSizes] = useState<{ x: number; w: number }[]>([]);
-  const index = mode === 'watch' ? 0 : mode === 'overview' ? 1 : 2;
+  const index = mode === 'watch' ? 0 : mode === 'overview' ? 1 : mode === 'audio' ? 2 : 3;
   const x = useSharedValue(0);
   const w = useSharedValue(0);
   useEffect(() => {
@@ -85,6 +85,7 @@ export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m:
     ['watch', 'Watch', 'play'],
     ['overview', 'Overview', 'star'],
     ['audio', 'Audio', 'headphones'],
+    ['manga', 'Manga', 'book'],
   ] as const;
   return (
     <View style={styles.mode} accessibilityRole="tablist">
@@ -161,9 +162,9 @@ export function Cover({
 
 const makeStyles = (p: Palette) =>
   sheet({
-    mode: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: p.elevated, borderRadius: 999, padding: 3 },
-    modeItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+    mode: { flexDirection: 'row', alignSelf: 'stretch', maxWidth: 460, backgroundColor: p.elevated, borderRadius: 999, padding: 3 },
+    modeItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 4, paddingVertical: 7, borderRadius: 999 },
     modePill: { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 999, backgroundColor: p.accent },
-    modeText: { color: p.textSecondary, fontSize: 14, fontWeight: '700' },
+    modeText: { color: p.textSecondary, fontSize: 13.5, fontWeight: '700' },
     modeTextOn: { color: '#fff' },
   });

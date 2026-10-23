@@ -1,5 +1,6 @@
 import AVFoundation
 import ExpoModulesCore
+import PDFKit
 import UIKit
 
 /// Storage housekeeping for ReelVault: video frames written straight to a
@@ -89,6 +90,43 @@ public class ReelVaultMediaModule: Module {
           promise.resolve(data.count)
         } catch {
           promise.resolve(before)
+        }
+      }
+    }
+
+    /// Every page of a PDF as a JPEG (0001.jpg, 0002.jpg...) in `outDir`, at most `maxSide`
+    /// pixels on the long side, one page at a time so memory stays flat. Returns the page count.
+    AsyncFunction("pdfPages") { (input: String, outDir: String, maxSide: Double, quality: Double, promise: Promise) in
+      guard let inURL = Self.url(input), let outURL = Self.url(outDir) else {
+        promise.reject("ERR_URL", "That file address could not be read.")
+        return
+      }
+      self.work.async {
+        guard let doc = PDFDocument(url: inURL) else {
+          promise.reject("ERR_PDF", "This PDF could not be opened (it may be locked with a password).")
+          return
+        }
+        do {
+          try FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
+          var written = 0
+          for i in 0..<doc.pageCount {
+            try autoreleasepool {
+              guard let page = doc.page(at: i) else { return }
+              let box = page.bounds(for: .mediaBox)
+              let longSide = max(box.width, box.height)
+              guard longSide > 0 else { return }
+              let scale = CGFloat(maxSide) / longSide
+              let size = CGSize(width: max(1, floor(box.width * scale)), height: max(1, floor(box.height * scale)))
+              let image = page.thumbnail(of: size, for: .mediaBox)
+              guard let data = image.jpegData(compressionQuality: CGFloat(max(0.1, min(1, quality)))) else { return }
+              let name = String(format: "%04d.jpg", i + 1)
+              try data.write(to: outURL.appendingPathComponent(name), options: .atomic)
+              written += 1
+            }
+          }
+          promise.resolve(written)
+        } catch {
+          promise.reject("ERR_PDF", error.localizedDescription)
         }
       }
     }

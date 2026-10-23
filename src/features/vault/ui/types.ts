@@ -588,8 +588,8 @@ export type VaultPrefs = {
   /** Hold the left or right edge of the video to play at 2×. */
   holdForSpeed: boolean;
   /** The Videos tab: watch your videos, or rate and track them (Overview). */
-  /** Watch (the grid), Overview (rate and track) or Audio (your audio files and books). */
-  videosMode: 'watch' | 'overview' | 'audio';
+  /** Watch (the grid), Overview (rate and track), Audio (your audio files and books) or Manga. */
+  videosMode: 'watch' | 'overview' | 'audio' | 'manga';
   /** Keep the info of removed videos you never rated too (not only rated ones). */
   keepUnrated: boolean;
   /** Series suggestions you dismissed (by their name). */
@@ -739,6 +739,8 @@ export type VaultScreenProps = {
   duplicateAsk?: DuplicateAsk | null;
   /** The Audio section (Audio mode of this tab). */
   audio?: import('./audio/audioTypes').AudioData;
+  /** The Manga section (manga, manhwa, comics). */
+  manga?: import('./manga/mangaTypes').MangaData;
   /**
    * Mount the real <VideoView>. Off in the browser preview, where fixture
    * videos have no playable source - the stage is black either way.
@@ -796,6 +798,7 @@ export type VaultScreenProps = {
     dupAsk?: boolean;
     /** Audio mode: open the player, an item's details, the stats or Recently Deleted. */
     audio?: import('./audio/AudioSection').AudioDev;
+    manga?: import('./manga/MangaSection').MangaDev;
     metaImportOpen?: boolean;
     wifiOpen?: boolean;
     historyStats?: boolean;

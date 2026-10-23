@@ -56,6 +56,7 @@ import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/
 import { resolveScheme } from '@/features/vault/ui/logic';
 import { themeFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
 import { fixtureAudioData } from '@/features/vault/ui/audio/audioFixtures';
+import { fixtureMangaData } from '@/features/vault/ui/manga/mangaFixtures';
 import { AudioPlaybackProvider, useAudioPlayback } from '@/features/vault/ui/audio/playback';
 
 /**
@@ -283,6 +284,11 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'audio-info': { audio: { info: true } },
   'audio-stats': { audio: { dashboard: true } },
   'audio-deleted': { audio: { deleted: true } },
+  manga: {},
+  'manga-detail': { manga: { detail: true } },
+  'manga-reader': { manga: { reader: true } },
+  'manga-strip': { manga: { reader: true, seriesId: 'tower' } },
+  'manga-deleted': { manga: { deleted: true } },
   'meta-import': { metaImportOpen: true },
   wifi: { wifiOpen: true },
   keywords: { keywordsOpen: true },
@@ -346,7 +352,7 @@ export default function PreviewRoute() {
   const [prefs, setPrefs] = useState<VaultPrefs>({
     ...DEFAULT_VAULT_PREFS,
     ratingLabels: SUGGESTED_LABELS,
-    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : view?.startsWith('audio') ? 'audio' : 'watch',
+    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : view?.startsWith('audio') ? 'audio' : view?.startsWith('manga') ? 'manga' : 'watch',
     // `badges-new` shows the reveal of newly earned badges.
     badgesSeen: view === 'badges-new' ? [] : null,
     events: [
@@ -553,6 +559,7 @@ export default function PreviewRoute() {
   const palette = themeFor(resolveScheme(viewOptions.theme, 'dark'), viewOptions);
   const bridge = useMemo(() => fixtureBridge(first), []);
   const audioData = useMemo(() => fixtureAudioData(), []);
+  const mangaData = useMemo(() => fixtureMangaData(), []);
 
   if (!inBrowser) return null;
 
@@ -574,6 +581,7 @@ export default function PreviewRoute() {
         {view?.startsWith('audio-player') || view === 'audio-read' ? <AudioPreviewStart book={view === 'audio-read'} items={audioData.items} /> : null}
         <VaultScreen
           audio={audioData}
+          manga={mangaData}
           items={items}
           allTags={FIXTURE_TAGS}
           tagMap={FIXTURE_TAG_MAP}

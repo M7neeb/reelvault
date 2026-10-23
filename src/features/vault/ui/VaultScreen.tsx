@@ -102,6 +102,7 @@ import { fmtClock } from '../stats';
 import { friendlyName } from '../names';
 import { DuplicatePrompt } from './dupPrompt';
 import AudioSection from './audio/AudioSection';
+import MangaSection from './manga/MangaSection';
 import { useAudioPlaybackOptional } from './audio/playback';
 
 const EMPTY_RESUME = new Map<string, number>();
@@ -151,6 +152,7 @@ function VaultScreenBody({
   actions,
   duplicateAsk = null,
   audio,
+  manga,
   enableVideo = true,
   simkl,
   resume = EMPTY_RESUME,
@@ -1655,6 +1657,12 @@ function VaultScreenBody({
           }}
           onClose={() => setSettingsOpen(false)}
         />
+      )}
+
+      {videosMode === 'manga' && manga && (
+        <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
+          <MangaSection data={manga} onMode={switchMode} showPrivate={privateOpen} onUnlockPrivate={() => void requestUnlock(() => undefined)} dev={dev?.manga} />
+        </Animated.View>
       )}
 
       {videosMode === 'audio' && audio && (
