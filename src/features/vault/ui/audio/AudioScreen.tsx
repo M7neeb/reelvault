@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -29,6 +29,10 @@ import type { AudioActions, AudioUiItem } from './audioTypes';
 const SIDE = 16;
 
 type Chip = { key: string; label: string; filter: AudioFilter };
+
+
+/** A picker or import that went wrong says so, instead of doing nothing. */
+const failed = (e: unknown) => Alert.alert('That did not work', String(e).replace(/^Error:\s*/, ''));
 
 export default function AudioScreen({
   items,
@@ -118,8 +122,8 @@ export default function AudioScreen({
     });
 
   const addOptions: OptionItem[] = [
-    { label: 'From Files', hint: 'Audio files and EPUB books', onPress: () => actions.importFiles().catch(() => undefined) },
-    { label: 'A whole folder', hint: 'Everything in it, sub-folders too', onPress: () => actions.importFolder().catch(() => undefined) },
+    { label: 'From Files', hint: 'Audio files and EPUB books', onPress: () => actions.importFiles().catch(failed) },
+    { label: 'A whole folder', hint: 'Everything in it, sub-folders too', onPress: () => actions.importFolder().catch(failed) },
     ...(onWifi ? [{ label: 'From your computer', hint: 'Wi-Fi transfer', onPress: onWifi }] : []),
   ];
   const moreOptions: OptionItem[] = [

@@ -4,7 +4,7 @@
  * absent in the browser preview, so these are drawn by hand.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal } from './screen';
 
@@ -13,6 +13,11 @@ import { sheet, usePalette, useStyles, type Palette } from './theme';
 
 export type OptionItem = { label: string; hint?: string; danger?: boolean; onPress: () => void };
 
+/**
+ * iOS shows one sheet, picker or page at a time, and refuses a new one while
+ * the last is still fading away - silently. So a choice runs only once this
+ * sheet is fully gone (onDismiss; a timer where that never comes).
+ */
 export function OptionsSheet({
   title,
   options,
@@ -23,10 +28,36 @@ export function OptionsSheet({
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
+  const [visible, setVisible] = useState(true);
+  const after = useRef<(() => void) | null>(null);
+  const done = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finish = () => {
+    if (done.current) return;
+    done.current = true;
+    if (timer.current) clearTimeout(timer.current);
+    onClose();
+    const run = after.current;
+    after.current = null;
+    run?.();
+  };
+  const close = (then?: () => void) => {
+    if (!visible) return;
+    after.current = then ?? null;
+    setVisible(false);
+    // onDismiss is iOS only; elsewhere (and as a safety net) a timer finishes.
+    timer.current = setTimeout(finish, Platform.OS === 'ios' ? 700 : 0);
+  };
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    []
+  );
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => close()} onDismiss={finish}>
       <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={onClose} />
+        <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={() => close()} />
         <View style={styles.card}>
           <Text style={styles.title} numberOfLines={1}>
             {title}
@@ -34,24 +65,26 @@ export function OptionsSheet({
           {options.map((o) => (
             <TouchableOpacity
               key={o.label}
-              style={styles.row}
+              style={[styles.row, long(o) && styles.rowStacked]}
               onPress={() => {
                 tick();
-                onClose();
-                o.onPress();
+                close(o.onPress);
               }}>
-              <Text style={[styles.rowLabel, o.danger && styles.danger]}>{o.label}</Text>
-              {!!o.hint && <Text style={[styles.rowHint, o.hint === '✓' && styles.rowCheck]}>{o.hint}</Text>}
+              <Text style={[styles.rowLabel, o.danger && styles.danger, !long(o) && styles.rowLabelShrink]}>{o.label}</Text>
+              {!!o.hint && <Text style={[styles.rowHint, o.hint === '✓' && styles.rowCheck, long(o) && styles.rowHintStacked]}>{o.hint}</Text>}
             </TouchableOpacity>
           ))}
         </View>
-        <TouchableOpacity style={styles.cancelCard} onPress={onClose}>
+        <TouchableOpacity style={styles.cancelCard} onPress={() => close()}>
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
       </View>
     </Modal>
   );
 }
+
+/** A label and hint too long for one line: the hint goes under the label. */
+const long = (o: OptionItem) => !!o.hint && o.hint !== '✓' && o.label.length + o.hint.length > 34;
 
 export function PromptSheet({
   title,
@@ -132,8 +165,11 @@ const makeStyles = (p: Palette) =>
       borderTopWidth: 1,
       borderTopColor: p.separator,
     },
+    rowStacked: { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 3, paddingVertical: 12 },
     rowLabel: { color: p.text, fontSize: 17 },
-    rowHint: { color: p.textSecondary, fontSize: 14 },
+    rowLabelShrink: { flexShrink: 1, marginRight: 12 },
+    rowHint: { color: p.textSecondary, fontSize: 14, textAlign: 'right', flexShrink: 1 },
+    rowHintStacked: { textAlign: 'left', fontSize: 13 },
     danger: { color: p.dangerText },
     cancelText: { color: p.text, fontSize: 17, fontWeight: '700' },
 

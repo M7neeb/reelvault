@@ -8,7 +8,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions, Alert } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -43,6 +43,10 @@ const SIDE = 16;
 const GAP = 12;
 
 type Chip = { key: string; label: string; filter: MangaFilter };
+
+
+/** A picker or import that went wrong says so, instead of doing nothing. */
+const failed = (e: unknown) => Alert.alert('That did not work', String(e).replace(/^Error:\s*/, ''));
 
 export default function MangaScreen({
   items,
@@ -135,9 +139,9 @@ export default function MangaScreen({
     });
 
   const addOptions: OptionItem[] = [
-    { label: 'From Files', hint: 'CBZ, ZIP, PDF or pictures', onPress: () => actions.importFiles().catch(() => undefined) },
-    { label: 'A whole folder', hint: 'A series, or many: one chapter per sub-folder', onPress: () => actions.importFolder().catch(() => undefined) },
-    { label: 'A Tachimanga backup', hint: 'Your library, chapters read and categories (.tachibk)', onPress: () => actions.importBackup().catch(() => undefined) },
+    { label: 'From Files', hint: 'CBZ, ZIP, PDF or pictures', onPress: () => actions.importFiles().catch(failed) },
+    { label: 'A whole folder', hint: 'A series, or many: one chapter per sub-folder', onPress: () => actions.importFolder().catch(failed) },
+    { label: 'A Tachimanga backup', hint: 'Your library, chapters read and categories (.tachibk)', onPress: () => actions.importBackup().catch(failed) },
     { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
   ];
   const moreOptions: OptionItem[] = [
@@ -147,7 +151,7 @@ export default function MangaScreen({
     { label: 'Reading stats and Wrapped', onPress: onDashboard },
     { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
-    ...(items.some((s) => s.sourceId?.startsWith('tachi:')) ? [{ label: 'Link backup titles', hint: 'Through your Suwayomi server', onPress: () => actions.autoLink().catch(() => undefined) }] : []),
+    ...(items.some((s) => s.sourceId?.startsWith('tachi:')) ? [{ label: 'Link backup titles', hint: 'Through your Suwayomi server', onPress: () => actions.autoLink().catch(failed) }] : []),
     { label: 'Select', onPress: () => setSelected(new Set()) },
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),

@@ -65,7 +65,8 @@ import {
 } from './mangaStore';
 
 /** What the Files picker offers: comic archives, PDFs and pictures. */
-const PICKER_TYPES = ['public.zip-archive', 'com.pkware.zip-archive', 'application/zip', 'application/x-cbz', 'application/vnd.comicbook+zip', 'application/x-cbr', 'application/pdf', 'image/*', '*/*'];
+// Any file: .cbz has no type iOS knows, so a narrower list greys those out. The import checks each file.
+const PICKER_TYPES = ['*/*'];
 
 function asUi(s: MangaSeries): MangaUiSeries {
   return { ...s, coverSource: s.cover ? fileUri(s.folder, s.cover) : null };
