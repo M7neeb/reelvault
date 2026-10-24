@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { strToU8, zipSync } from 'fflate';
 
 import { planTachiImport, readTachiBackup, TMB_QUERIES } from '../src/features/vault/manga/mangaBackup.ts';
+import { crc32, readEntry, readZipIndex } from '../src/features/vault/audio/zip.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'tmb-'));
 
@@ -85,4 +86,50 @@ test('a .tmb opens: titles in the library, chapters, read marks, categories and 
 test('a ZIP that is neither says so; a .tmb without its database says what is missing', async () => {
   await assert.rejects(readTachiBackup(zipSync({ 'notes.txt': strToU8('hi') }), openTmb), /not a Tachimanga or Tachiyomi backup/);
   await assert.rejects(readTachiBackup(zipSync({ 'meta.json': strToU8('{}'), 'contents.zip': zipSync({ 'pref.json': strToU8('{}') }) }), openTmb), /tachimanga\.db is missing/);
+});
+
+/** A stored ZIP written the ZIP64 way (sizes and offsets in ZIP64 fields, as Tachimanga does). */
+function zip64(files) {
+  const parts = [];
+  const central = [];
+  let off = 0;
+  const le = (v, n) => {
+    const b = new Uint8Array(n);
+    for (let i = 0; i < n; i++) b[i] = Math.floor(v / 2 ** (8 * i)) & 0xff;
+    return b;
+  };
+  const cat = (...xs) => {
+    const out = new Uint8Array(xs.reduce((a, x) => a + x.length, 0));
+    let o = 0;
+    for (const x of xs) (out.set(x, o), (o += x.length));
+    return out;
+  };
+  for (const [name, data] of Object.entries(files)) {
+    const nb = strToU8(name);
+    const crc = crc32(data);
+    const extraL = cat(le(1, 2), le(16, 2), le(data.length, 8), le(data.length, 8));
+    const local = cat(le(0x04034b50, 4), le(45, 2), le(0, 2), le(0, 2), le(0, 4), le(crc, 4), le(0xffffffff, 4), le(0xffffffff, 4), le(nb.length, 2), le(extraL.length, 2), nb, extraL, data);
+    const extraC = cat(le(1, 2), le(24, 2), le(data.length, 8), le(data.length, 8), le(off, 8));
+    central.push(cat(le(0x02014b50, 4), le(45, 2), le(45, 2), le(0, 2), le(0, 2), le(0, 4), le(crc, 4), le(0xffffffff, 4), le(0xffffffff, 4), le(nb.length, 2), le(extraC.length, 2), le(0, 2), le(0, 2), le(0, 2), le(0, 4), le(0xffffffff, 4), nb, extraC));
+    parts.push(local);
+    off += local.length;
+  }
+  const cd = cat(...central);
+  const cdAt = off;
+  const z64 = cat(le(0x06064b50, 4), le(44, 8), le(45, 2), le(45, 2), le(0, 4), le(0, 4), le(central.length, 8), le(central.length, 8), le(cd.length, 8), le(cdAt, 8));
+  const locator = cat(le(0x07064b50, 4), le(0, 4), le(cdAt + cd.length, 8), le(1, 4));
+  const eocd = cat(le(0x06054b50, 4), le(0, 2), le(0, 2), le(0xffff, 2), le(0xffff, 2), le(0xffffffff, 4), le(0xffffffff, 4), le(0, 2));
+  return cat(...parts, cd, z64, locator, eocd);
+}
+
+test('ZIP64 archives open (Tachimanga writes its .tmb this way)', async () => {
+  const inner = zip64({ 'pref.json': strToU8('{}'), 'tachimanga.db': new Uint8Array(makeDb()) });
+  const outer = zip64({ 'meta.json': strToU8('{}'), 'contents.zip': inner });
+  const src = { size: outer.length, read: (o, n) => outer.subarray(o, o + n) };
+  const idx = readZipIndex(src);
+  assert.deepEqual(idx.map((e) => e.name), ['meta.json', 'contents.zip']);
+  assert.equal(idx[1].size, inner.length);
+  assert.equal((await readEntry(src, idx[1])).length, inner.length);
+  const backup = await readTachiBackup(outer, openTmb);
+  assert.ok(backup.mangas.some((m) => m.title === 'Dandadan'));
 });
