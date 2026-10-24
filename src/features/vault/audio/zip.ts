@@ -30,6 +30,8 @@ export type ZipEntry = {
 
 const u16 = (b: Uint8Array, o: number) => b[o] | (b[o + 1] << 8);
 const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16)) + b[o + 3] * 0x1000000;
+const u64 = (b: Uint8Array, o: number) => u32(b, o) + u32(b, o + 4) * 0x100000000;
+const FULL32 = 0xffffffff;
 
 /* ---------------------------------------------------------------- crc-32 */
 
@@ -65,10 +67,21 @@ export function readZipIndex(src: ByteSource): ZipEntry[] {
     }
   }
   if (eocd < 0) throw new Error('Not a ZIP file (no end record)');
-  const count = u16(end, eocd + 10);
-  const cdSize = u32(end, eocd + 12);
-  const cdOffset = u32(end, eocd + 16);
-  if (cdOffset === 0xffffffff || count === 0xffff) throw new Error('This file is larger than 4 GB (ZIP64), which is not supported');
+  let count = u16(end, eocd + 10);
+  let cdSize = u32(end, eocd + 12);
+  let cdOffset = u32(end, eocd + 16);
+  // ZIP64 (big files, or tools that always write it, like Tachimanga's backups):
+  // the real numbers are in the ZIP64 end record, found through the locator just before.
+  const loc = eocd - 20;
+  if (loc >= 0 && u32(end, loc) === 0x07064b50) {
+    const at = u64(end, loc + 8);
+    const z = src.read(at, 56);
+    if (u32(z, 0) === 0x06064b50) {
+      count = u64(z, 32);
+      cdSize = u64(z, 40);
+      cdOffset = u64(z, 48);
+    }
+  } else if (cdOffset === FULL32 || count === 0xffff) throw new Error('Broken ZIP (its ZIP64 record is missing)');
   const cd = src.read(cdOffset, cdSize);
   const out: ZipEntry[] = [];
   let p = 0;
@@ -77,13 +90,30 @@ export function readZipIndex(src: ByteSource): ZipEntry[] {
     const flags = u16(cd, p + 8);
     const method = u16(cd, p + 10);
     const crc = u32(cd, p + 16);
-    const compressedSize = u32(cd, p + 20);
-    const size = u32(cd, p + 24);
+    let compressedSize = u32(cd, p + 20);
+    let size = u32(cd, p + 24);
     const nameLen = u16(cd, p + 28);
     const extraLen = u16(cd, p + 30);
     const commentLen = u16(cd, p + 32);
-    const localOffset = u32(cd, p + 42);
+    let localOffset = u32(cd, p + 42);
     const rawName = cd.subarray(p + 46, p + 46 + nameLen);
+    // ZIP64 extra field: 8-byte values for whichever of the three were too big (in this order).
+    if (size === FULL32 || compressedSize === FULL32 || localOffset === FULL32) {
+      let x = p + 46 + nameLen;
+      const xEnd = x + extraLen;
+      while (x + 4 <= xEnd) {
+        const id = u16(cd, x);
+        const len = u16(cd, x + 2);
+        if (id === 0x0001) {
+          let q = x + 4;
+          if (size === FULL32) (size = u64(cd, q)), (q += 8);
+          if (compressedSize === FULL32) (compressedSize = u64(cd, q)), (q += 8);
+          if (localOffset === FULL32) localOffset = u64(cd, q);
+          break;
+        }
+        x += 4 + len;
+      }
+    }
     // Bit 11 = UTF-8 names; older tools wrote Latin-1 (EPUB names are ASCII in practice).
     const name = flags & 0x800 ? strFromU8(rawName) : Array.from(rawName, (c) => String.fromCharCode(c)).join('');
     out.push({ name, method, compressedSize, size, crc, localOffset, isDir: name.endsWith('/') });
