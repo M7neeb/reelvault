@@ -215,6 +215,7 @@ export function SettingsSheet({
   onRemoveFake,
   onImportFolder,
   onExportBackup,
+  onExportSpreadsheet,
   onImportBackup,
   canMakeSmaller,
   importQuality,
@@ -243,6 +244,7 @@ export function SettingsSheet({
   onRemoveFake: () => void;
   onImportFolder: () => void;
   onExportBackup: () => void;
+  onExportSpreadsheet?: () => void;
   onImportBackup: () => void;
   canMakeSmaller: boolean;
   /** Make Smaller quality for every import; null = off. */
@@ -363,6 +365,7 @@ export function SettingsSheet({
         <Wrap>
           <Chip label="Export all my info" onPress={onExportBackup} />
           <Chip label="Restore from a file" onPress={onImportBackup} />
+          {onExportSpreadsheet && <Chip label="Export a spreadsheet (CSV)" onPress={onExportSpreadsheet} />}
         </Wrap>
         <Text style={styles.hint}>
           Everything you added, as one small file to save in Files or on your PC: ratings, titles, captions, keywords,

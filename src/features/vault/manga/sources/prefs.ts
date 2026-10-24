@@ -22,9 +22,21 @@ export type ReaderPrefs = {
   page: 'black' | 'grey' | 'white';
   /** Two pages side by side when the phone is sideways (page modes only). */
   spreads: boolean;
+  /** How a page fits the screen (page modes): all of it, the width, the height, or its own size. */
+  fit: 'screen' | 'width' | 'height' | 'original';
+  /** A look over the pages: grey (no colour), warm (easier at night) or dimmed. */
+  filter: 'none' | 'gray' | 'warm' | 'dim';
+  /** Auto-scroll speed in the long strip, 1 (slow) to 5 (fast). */
+  autoSpeed: number;
+  /** Titles you have not set a way of reading for open as one long strip. */
+  longStrip: boolean;
+  /** Cut plain white or black margins off the pages (app build 17 on). */
+  crop: boolean;
+  /** Around the page: the colour of its edges instead of black, grey or white (app build 17 on). */
+  autoBg: boolean;
 };
 
-export const DEFAULT_READER: ReaderPrefs = { tapZones: true, tapInvert: false, page: 'black', spreads: true };
+export const DEFAULT_READER: ReaderPrefs = { tapZones: true, tapInvert: false, page: 'black', spreads: true, fit: 'screen', filter: 'none', autoSpeed: 2, longStrip: false, crop: false, autoBg: false };
 
 export type BrowsePrefs = {
   languages: string[];
@@ -38,10 +50,20 @@ export type BrowsePrefs = {
   checkOnOpen: boolean;
   /** Download new chapters by themselves (of titles you are reading or plan to read). */
   autoDownload: boolean;
+  /** Free the space of downloaded chapters once you have read them (they stay readable online). */
+  removeAfterRead: boolean;
+  /** Download only on Wi-Fi (from app build 17). */
+  wifiOnly: boolean;
+  /** Busy sites: try each page more times, waiting longer in between. */
+  patient: boolean;
+  /** Pages downloaded at the same time (1, 3 or 5). */
+  parallel: 1 | 3 | 5;
+  /** Extensions update themselves (checked once a day when the app opens). */
+  autoUpdateExt: boolean;
   reader: ReaderPrefs;
 };
 
-export const DEFAULT_BROWSE: BrowsePrefs = { languages: ['en'], adult: false, servers: [], repos: [], installed: [], smallerPages: false, checkOnOpen: true, autoDownload: false, reader: DEFAULT_READER };
+export const DEFAULT_BROWSE: BrowsePrefs = { languages: ['en'], adult: false, servers: [], repos: [], installed: [], smallerPages: false, checkOnOpen: true, autoDownload: false, removeAfterRead: false, wifiOnly: false, patient: false, parallel: 3, autoUpdateExt: true, reader: DEFAULT_READER };
 
 /** Languages MangaDex offers that the picker lists (code, name). */
 export const LANGUAGES: [string, string][] = [
@@ -90,6 +112,11 @@ export function parseBrowsePrefs(json: string | null): BrowsePrefs {
     smallerPages: r.smallerPages === true,
     checkOnOpen: r.checkOnOpen !== false,
     autoDownload: r.autoDownload === true,
+    removeAfterRead: r.removeAfterRead === true,
+    wifiOnly: r.wifiOnly === true,
+    patient: r.patient === true,
+    parallel: r.parallel === 1 || r.parallel === 5 ? r.parallel : 3,
+    autoUpdateExt: r.autoUpdateExt !== false,
     reader: parseReader(r.reader),
   };
 }
@@ -101,6 +128,12 @@ function parseReader(v: unknown): ReaderPrefs {
     tapInvert: r.tapInvert === true,
     page: r.page === 'grey' || r.page === 'white' ? r.page : 'black',
     spreads: r.spreads !== false,
+    fit: r.fit === 'width' || r.fit === 'height' || r.fit === 'original' ? r.fit : 'screen',
+    filter: r.filter === 'gray' || r.filter === 'warm' || r.filter === 'dim' ? r.filter : 'none',
+    autoSpeed: typeof r.autoSpeed === 'number' && r.autoSpeed >= 1 && r.autoSpeed <= 5 ? Math.round(r.autoSpeed) : 2,
+    longStrip: r.longStrip === true,
+    crop: r.crop === true,
+    autoBg: r.autoBg === true,
   };
 }
 

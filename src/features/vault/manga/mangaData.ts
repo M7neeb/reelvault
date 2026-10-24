@@ -7,13 +7,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Linking, Share } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { keepAwake } from '../awake';
-import { getSetting } from '../library';
+import { useAniList } from './anilistData';
+import { getSetting, setSetting } from '../library';
+
+const EXT_CHECK_KEY = 'manga.extCheck';
+/** Cover colours already worked out (series id and cover file → colour). */
+const coverColors = new Map<string, string | null>();
+import { saveToPhotos } from '../sources';
+import { usableAccent } from './coverColor';
 import type { BrowseActions, DownloadState, MangaData, MangaUiSeries } from '../ui/manga/mangaTypes';
-import { downloadProgress, downloadsPaused, forgetDownloads, kickDownloads, setDownloadsPaused, startDownloads, subscribeDownloads } from './mangaDownloads';
+import { canTellWifi, downloadProgress, downloadsPaused, waitingForWifi, forgetDownloads, kickDownloads, setDownloadsPaused, startDownloads, subscribeDownloads } from './mangaDownloads';
 import { exportSeries, writeCbz } from './mangaExport';
 import { dueForCheck, markChecked, notifyNewChapters } from './mangaNotify';
 import { tachiSourceOf } from './mangaBackup';
@@ -34,6 +42,7 @@ import {
   loadSources,
   pagesOf,
   refreshRepos,
+  updateExtensions,
   refreshSeries,
   removeRepo,
   removeServer,
@@ -144,7 +153,7 @@ export function useMangaData(): MangaData {
   downloadsRef.current = downloads;
   const loadDownloads = useCallback(async () => {
     const queue = await listDownloads().catch(() => []);
-    setDownloads({ queue: queue.map((q) => ({ chapterId: q.chapterId, seriesId: q.seriesId, state: q.state, error: q.error })), current: downloadProgress(), paused: downloadsPaused() });
+    setDownloads({ queue: queue.map((q) => ({ chapterId: q.chapterId, seriesId: q.seriesId, state: q.state, error: q.error })), current: downloadProgress(), paused: downloadsPaused(), waitingWifi: waitingForWifi(), canTellWifi });
   }, []);
   useEffect(() => {
     const off = subscribeDownloads(() => {
@@ -177,6 +186,19 @@ export function useMangaData(): MangaData {
       setTimeout(() => {
         checkForNew(false).catch((e) => console.log(`[MANGA] check: ${String(e)}`));
       }, 40_000);
+      // Extensions update themselves, once a day.
+      setTimeout(() => {
+        (async () => {
+          const p = prefsRef.current;
+          if (!p.autoUpdateExt || !p.installed.length) return;
+          const last = Number((await getSetting(EXT_CHECK_KEY)) ?? 0);
+          if (Date.now() - last < 20 * 3_600_000) return;
+          await setSetting(EXT_CHECK_KEY, String(Date.now()));
+          const { prefs: next, updated } = await updateExtensions(prefsRef.current);
+          setPrefs(next);
+          if (updated.length) setStatus(`Updated ${updated.length === 1 ? updated[0] : `${updated.length} extensions`}`);
+        })().catch((e) => console.log(`[MANGA] extension updates: ${String(e)}`));
+      }, 55_000);
     })();
   }, [refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -351,6 +373,17 @@ export function useMangaData(): MangaData {
                 }
           )
         );
+        // "Remove downloads after reading": the chapters read before this one give their space back
+        // (not this one: its pages are still on screen). They stay readable online.
+        if (finished && prefsRef.current.removeAfterRead) {
+          const s = allRef.current.find((x) => x.id === seriesId);
+          const done = (s?.chapters ?? []).filter((c) => c.id !== chapterId && c.readAt && c.folder && c.sourceKey);
+          for (const c of done) {
+            removeDir(c.folder!);
+            await clearChapterFiles(c.id);
+          }
+          if (done.length) await refreshOne(seriesId);
+        }
       },
       addRead,
       loadPages: (series, chapter) => pagesOf(series, chapter, prefsRef.current),
@@ -364,10 +397,60 @@ export function useMangaData(): MangaData {
       setCoverFromPhoto: async (seriesId) => {
         const s = byId(seriesId);
         if (!s) return;
-        const picked = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true, multiple: false });
+        // From Photos, where your pictures are (the picker hands over a copy we can move).
+        const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: false, quality: 1 });
         if (picked.canceled || !picked.assets?.[0]) return;
         await setCover(s, new File(picked.assets[0].uri), true);
         await refresh();
+      },
+      setCoverFromImage: async (seriesId, img) => {
+        const s = byId(seriesId);
+        if (!s) return;
+        const f = await localPage(img);
+        await setCover(s, f.file, f.temp);
+        await refresh();
+      },
+      ...(typeof ReelVaultMedia?.pageMargins === 'function'
+        ? {
+            pageMargins: async (img: { uri: string; headers?: Record<string, string> }) => {
+              const f = await localPage(img);
+              try {
+                const found = await ReelVaultMedia!.pageMargins!(f.file.uri);
+                return found.edge ? found : null;
+              } finally {
+                if (f.temp) {
+                  try {
+                    f.file.delete();
+                  } catch {
+                    // already gone
+                  }
+                }
+              }
+            },
+          }
+        : {}),
+      ...(ReelVaultMedia
+        ? {
+            coverColor: async (seriesId: string) => {
+              const s = byId(seriesId);
+              if (!s?.cover) return null;
+              const key = `${s.id}:${s.cover}`;
+              if (coverColors.has(key)) return coverColors.get(key) ?? null;
+              const c = await ReelVaultMedia!.colors(fileUri(s.folder, s.cover)).catch(() => null);
+              const hex = usableAccent(c?.dominant);
+              coverColors.set(key, hex);
+              return hex;
+            },
+          }
+        : {}),
+      sharePage: async (img) => {
+        const f = await localPage(img);
+        await Share.share({ url: f.file.uri });
+      },
+      savePage: async (img) => {
+        const f = await localPage(img);
+        const n = await saveToPhotos([f.file.uri]);
+        return n !== null;
       },
       setCoverFromPage: async (seriesId, chapter, page) => {
         const s = byId(seriesId);
@@ -529,6 +612,12 @@ export function useMangaData(): MangaData {
         const next = { ...prefsRef.current, [key]: on };
         await saveBrowsePrefs(next);
         setPrefs(next);
+        if (key === 'wifiOnly' && !on) kickDownloads();
+      },
+      setParallel: async (n) => {
+        const next = { ...prefsRef.current, parallel: n };
+        await saveBrowsePrefs(next);
+        setPrefs(next);
       },
       setReader: async (patch) => {
         const next = { ...prefsRef.current, reader: { ...prefsRef.current.reader, ...patch } };
@@ -560,11 +649,21 @@ export function useMangaData(): MangaData {
 
   const items = useMemo(() => all.filter((s) => !s.deletedAt).map(asUi), [all]);
   const deleted = useMemo(() => all.filter((s) => s.deletedAt).map(asUi), [all]);
-  const browse = useMemo(() => ({ prefs, actions: browseActions }), [prefs, browseActions]);
-  return { items, deleted, busy, status, actions, browse, downloads };
+  const browse = useMemo(() => ({ prefs, actions: browseActions, canTellWifi }), [prefs, browseActions]);
+  const ani = useAniList(all, refresh);
+  return { items, deleted, busy, status, actions, browse, downloads, anilist: ani };
 }
 
 /** A new cover (a small copy), the old one removed. `move` for a picker's temporary copy. */
+/** A page as a file on the phone: itself when downloaded, else fetched into the cache (temp = ours to move or delete). */
+async function localPage(img: { uri: string; headers?: Record<string, string> }): Promise<{ file: File; temp: boolean }> {
+  if (img.uri.startsWith('file:')) return { file: new File(img.uri), temp: false };
+  const ext = /\.(png|webp|gif|jpe?g)(?:[?#]|$)/i.exec(img.uri)?.[1]?.toLowerCase() ?? 'jpg';
+  const target = new File(Paths.cache, `page-${Date.now()}.${ext}`);
+  const file = await File.downloadFileAsync(img.uri.replace(/#.*$/, ''), target, { headers: img.headers, idempotent: true });
+  return { file, temp: true };
+}
+
 async function setCover(s: MangaSeries, from: File, move: boolean): Promise<void> {
   const name = `cover-${Date.now()}.jpg`;
   const dest = fileIn(s.folder, name);

@@ -481,6 +481,10 @@ export type VaultActions = {
   onOpenMap: (lat: number, lon: number, label: string) => void;
   /** Library-info backup (ratings, keywords, albums...): export to Files / import back. */
   onExportBackup: () => Promise<void>;
+  /** Your library as a spreadsheet (CSV) to share or save. */
+  onExportSpreadsheet: () => Promise<void>;
+  /** Dropbox and OneDrive. */
+  cloud?: CloudBridge;
   onImportBackup: () => Promise<void>;
   /** App passcode, Face ID and fake passcode for the Private album. */
   getSecurity: () => Promise<SecurityState>;
@@ -566,6 +570,19 @@ export type VaultActions = {
   saveOvExtra: (x: import('../ovExtra').OvExtra) => Promise<void>;
 };
 
+/** Dropbox and OneDrive, as the UI sees them. */
+export type CloudKindUi = 'dropbox' | 'onedrive';
+export type CloudEntryUi = { id: string; name: string; folder: boolean; size: number; modified: number | null; downloadUrl?: string | null };
+export type CloudBridge = {
+  services: () => Promise<{ kind: CloudKindUi; name: string; configured: boolean; connected: boolean }[]>;
+  /** false = the sign-in sheet was closed. */
+  signIn: (kind: CloudKindUi) => Promise<boolean>;
+  signOut: (kind: CloudKindUi) => Promise<void>;
+  list: (kind: CloudKindUi, folder: string | null) => Promise<CloudEntryUi[]>;
+  /** Downloads them one after another and imports them (progress on the status line). */
+  importFiles: (kind: CloudKindUi, entries: CloudEntryUi[]) => void;
+};
+
 /** The Wi-Fi transfer server, as the UI sees it. */
 export type WifiBridge = {
   /** Starts the server; resolves with the address to type on the computer (null = no Wi-Fi). */
@@ -627,6 +644,10 @@ export type VaultPrefs = {
   trashDays: number;
   /** Streak freezes: banked ones, and the days they covered (start of day, ms). */
   freezes: { banked: number; used: number[]; lastEarnedWeek: number | null };
+  /** The library grid plays the video in the middle of the screen, silently. */
+  gridPreview: boolean;
+  /** Skip the start of every video in an album: album id → seconds. */
+  skipIntro: Record<string, number>;
 };
 
 export type PlayerOptions = {
@@ -693,6 +714,8 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   pinned: [],
   trashDays: 30,
   freezes: { banked: 1, used: [], lastEarnedWeek: null },
+  gridPreview: false,
+  skipIntro: {},
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */

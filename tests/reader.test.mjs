@@ -25,6 +25,36 @@ test('which screen a page is on', () => {
 
 test('reader settings: defaults, saved values, nonsense ignored', () => {
   assert.deepEqual(parseBrowsePrefs(null).reader, DEFAULT_BROWSE.reader);
-  assert.deepEqual(parseBrowsePrefs(JSON.stringify({ reader: { tapZones: false, tapInvert: true, page: 'white', spreads: false } })).reader, { tapZones: false, tapInvert: true, page: 'white', spreads: false });
+  assert.deepEqual(parseBrowsePrefs(JSON.stringify({ reader: { tapZones: false, tapInvert: true, page: 'white', spreads: false } })).reader, {
+    tapZones: false,
+    tapInvert: true,
+    page: 'white',
+    spreads: false,
+    fit: 'screen',
+    filter: 'none',
+    autoSpeed: 2,
+    longStrip: false,
+    crop: false,
+    autoBg: false,
+  });
   assert.equal(parseBrowsePrefs(JSON.stringify({ reader: { page: 'pink' } })).reader.page, 'black');
+});
+
+test('reader settings: fit, filter, auto-scroll speed and long strip', () => {
+  const r = parseBrowsePrefs(JSON.stringify({ reader: { fit: 'width', filter: 'warm', autoSpeed: 4, longStrip: true } })).reader;
+  assert.equal(r.fit, 'width');
+  assert.equal(r.filter, 'warm');
+  assert.equal(r.autoSpeed, 4);
+  assert.equal(r.longStrip, true);
+  const bad = parseBrowsePrefs(JSON.stringify({ reader: { fit: 'huge', filter: 'sepia', autoSpeed: 9, longStrip: 'yes' } })).reader;
+  assert.equal(bad.fit, 'screen');
+  assert.equal(bad.filter, 'none');
+  assert.equal(bad.autoSpeed, 2);
+  assert.equal(bad.longStrip, false);
+});
+
+test('a double page stands alone and the pairing carries on after it', () => {
+  assert.deepEqual(pageSlots(7, true, new Set([3])), [[0], [1, 2], [3], [4, 5], [6]]);
+  assert.deepEqual(pageSlots(6, true, new Set([2])), [[0], [1], [2], [3, 4], [5]]);
+  assert.deepEqual(pageSlots(4, false, new Set([2])), [[0], [1], [2], [3]]);
 });

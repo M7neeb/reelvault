@@ -12,6 +12,7 @@ import type { ReminderSettings } from '../reminders';
 import type {
   CatalogEpisode,
   CatalogTitle,
+  PausedItem,
   SimklItem,
   SimklStatus,
   SimklType,
@@ -25,6 +26,7 @@ export type {
   VideoLink,
   CatalogEpisode,
   CatalogTitle,
+  PausedItem,
   Meta,
   Play,
   ReminderSettings,
@@ -138,6 +140,9 @@ export type SimklActions = {
   matchFranchise: (entries: import('../franchise').FranchiseEntry[]) => Promise<import('../franchise').FranchiseItem[]>;
   /** The library as a CSV file, through the share sheet. */
   exportCsv: () => Promise<void>;
+  /** Movies and episodes you stopped halfway (Simkl's paused sessions). */
+  loadPlayback?: () => Promise<PausedItem[]>;
+  deletePlayback?: (playbackId: number) => Promise<void>;
   /** Your own lists (kept in ReelVault). */
   createList: (name: string, icon: string | null) => Promise<number>;
   updateList: (id: number, name: string, icon: string | null) => Promise<void>;

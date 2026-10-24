@@ -27,6 +27,7 @@ import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/
 
 import { fmtRating } from '../insights';
 import {
+  episodeCode,
   episodesLeft,
   fanartUrl,
   filterItems,
@@ -55,7 +56,7 @@ import { RatingsLine } from './parts';
 import Poster, { hueFor } from './Poster';
 import { fmtAgo, fmtDay } from './time';
 import { ImportSheet, PickModal } from './ToolsUI';
-import type { CatalogTitle, SimklItem, SimklList, SimklScreenProps, SimklStatus, SimklType } from './types';
+import type { CatalogTitle, PausedItem, SimklItem, SimklList, SimklScreenProps, SimklStatus, SimklType } from './types';
 
 const SIDE = 16;
 const GAP = 10;
@@ -116,8 +117,53 @@ export default function SimklScreen(props: SimklScreenProps) {
   const [openList, setOpenList] = useState<SimklList | null>(() => lists.find((l) => l.id === dev?.listOpen) ?? null);
   const [newList, setNewList] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Continue watching: what you stopped halfway (Simkl's paused sessions).
+  const [paused, setPaused] = useState<PausedItem[]>([]);
+  const [pausedMenu, setPausedMenu] = useState<PausedItem | null>(null);
+  useEffect(() => {
+    if (!connected || !actions.loadPlayback) return;
+    let on = true;
+    actions
+      .loadPlayback()
+      .then((r) => on && setPaused(r))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [actions, connected, syncing]);
+  // Select: change the status of many titles at once.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkMenu, setBulkMenu] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  function togglePick(id: number) {
+    tick();
+    setPicked((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  async function bulkStatus(to: SimklStatus) {
+    const chosen = items.filter((i) => picked.has(i.simklId));
+    setBulkBusy(true);
+    try {
+      // One at a time: Simkl takes at most one write a second.
+      for (const it of chosen) await actions.setStatus(it, to);
+      success();
+      setPicked(new Set());
+      setSelecting(false);
+    } catch {
+      // The status line says what went wrong.
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+  const tapItem = (item: SimklItem) => (selecting ? togglePick(item.simklId) : setOpen(asTitle(item)));
 
   const filter = statusBy[category];
+  const pausedHere = paused.filter((x) => x.type === category);
   const sort = sortBy[category];
   const typeInfo = SIMKL_TYPES.find((t) => t.key === category)!;
   const ofType = useMemo(() => items.filter((i) => i.type === category), [items, category]);
@@ -226,6 +272,49 @@ export default function SimklScreen(props: SimklScreenProps) {
       {connected && (
         <>
           {!!status && <Text style={styles.note}>{status}</Text>}
+
+          {pausedHere.length > 0 && (
+            <>
+              <SectionHead title="Continue watching" detail={`${pausedHere.length}`} />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+                {pausedHere.slice(0, 20).map((x) => {
+                  const it = libraryMap.get(x.simklId);
+                  const label = x.type === 'movie' ? 'Movie' : x.episode ? episodeCode(x.type, x.season ?? 1, x.episode) : '';
+                  return (
+                    <TouchableOpacity
+                      key={x.playbackId}
+                      style={{ width: 150 }}
+                      onPress={() => setOpen(it ? asTitle(it) : { simklId: x.simklId, type: x.type, title: x.title, year: null, poster: null, slug: null })}
+                      onLongPress={() => setPausedMenu(x)}
+                      accessibilityLabel={`${x.title} ${label}, ${Math.round(x.progress)} percent watched`}>
+                      <View style={styles.pausedArt}>
+                        {fanartUrl(it?.fanart ?? null) || it?.poster ? (
+                          <Image
+                            source={{ uri: fanartUrl(it?.fanart ?? null) ?? posterUrl(it!.poster!, '_m') }}
+                            style={StyleFill}
+                            contentFit="cover"
+                            transition={150}
+                            blurRadius={fanartUrl(it?.fanart ?? null) ? 0 : 18}
+                          />
+                        ) : (
+                          <Icon name={x.type === 'movie' ? 'movie' : 'tv'} size={22} color={p.textMuted} />
+                        )}
+                        <View style={styles.pausedTrack}>
+                          <View style={[styles.pausedFill, { width: `${Math.max(3, x.progress)}%` }]} />
+                        </View>
+                      </View>
+                      <Text style={styles.shelfTitle} numberOfLines={1}>
+                        {x.title}
+                      </Text>
+                      <Text style={styles.shelfSub} numberOfLines={1}>
+                        {[label, `${Math.round(x.progress)}%`, x.pausedAt ? fmtAgo(x.pausedAt) : null].filter(Boolean).join(' · ')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
 
           {next.length > 0 && (
             <>
@@ -417,6 +506,16 @@ export default function SimklScreen(props: SimklScreenProps) {
               <Icon name="sort" size={15} color={p.text} />
               <Text style={styles.sortText}>{sortLabel}</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortBtn, selecting && { backgroundColor: p.accent }]}
+              onPress={() => {
+                tick();
+                setSelecting(!selecting);
+                setPicked(new Set());
+              }}
+              accessibilityLabel={selecting ? 'Stop selecting' : 'Select titles to change their status'}>
+              <Icon name="select" size={15} color={selecting ? '#fff' : p.text} />
+            </TouchableOpacity>
           </View>
           )}
           {!!SORT_HINT[sort] && !query && look !== 'simple' && look !== 'compact' && <Text style={styles.hint}>{SORT_HINT[sort]}</Text>}
@@ -482,7 +581,11 @@ export default function SimklScreen(props: SimklScreenProps) {
           columnWrapperStyle={styles.gridRow}
           contentContainerStyle={{ paddingBottom: bottom }}
           refreshControl={refresh}
-          renderItem={({ item }) => <GridPoster item={item} width={posterW} height={posterH} bare={look === 'simple' || look === 'compact'} onPress={() => setOpen(asTitle(item))} />}
+          renderItem={({ item }) => (
+            <Pickable on={selecting ? picked.has(item.simklId) : null}>
+              <GridPoster item={item} width={posterW} height={posterH} bare={look === 'simple' || look === 'compact'} onPress={() => tapItem(item)} />
+            </Pickable>
+          )}
         />
       ) : (
         <FlatList
@@ -493,18 +596,58 @@ export default function SimklScreen(props: SimklScreenProps) {
           ListFooterComponent={footer}
           contentContainerStyle={{ paddingBottom: bottom }}
           refreshControl={refresh}
-          renderItem={({ item, index }) =>
-            look === 'desktop' ? (
-              <TableRow item={item} odd={index % 2 === 1} onPress={() => setOpen(asTitle(item))} />
-            ) : look === 'compact' ? (
-              <CompactRow item={item} onPress={() => setOpen(asTitle(item))} />
-            ) : (
-              <Row item={item} sort={sort} detailed={look === 'detailed'} onPress={() => setOpen(asTitle(item))} />
-            )
-          }
+          renderItem={({ item, index }) => (
+            <Pickable on={selecting ? picked.has(item.simklId) : null}>
+              {look === 'desktop' ? (
+                <TableRow item={item} odd={index % 2 === 1} onPress={() => tapItem(item)} />
+              ) : look === 'compact' ? (
+                <CompactRow item={item} onPress={() => tapItem(item)} />
+              ) : (
+                <Row item={item} sort={sort} detailed={look === 'detailed'} onPress={() => tapItem(item)} />
+              )}
+            </Pickable>
+          )}
         />
       )}
 
+      {selecting && (
+        <View style={[styles.bulkBar, { bottom: Math.max(insets.bottom, tabSpace) + 10 }]}>
+          <Text style={styles.bulkText}>{picked.size ? `${picked.size} selected` : 'Tap titles to select'}</Text>
+          {shown.length > 0 && (
+            <TouchableOpacity onPress={() => setPicked(picked.size === shown.length ? new Set() : new Set(shown.map((i) => i.simklId)))} hitSlop={8}>
+              <Text style={styles.bulkLink}>{picked.size === shown.length ? 'None' : 'All'}</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[styles.bulkBtn, (!picked.size || bulkBusy) && { opacity: 0.4 }]} disabled={!picked.size || bulkBusy} onPress={() => setBulkMenu(true)}>
+            <Text style={styles.bulkBtnText}>{bulkBusy ? 'Saving…' : 'Change status'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {bulkMenu && (
+        <OptionsSheet
+          title={`Move ${picked.size} ${picked.size === 1 ? 'title' : 'titles'} to`}
+          options={statusesFor(category).map((s) => ({ label: STATUS_LABELS[s], onPress: () => void bulkStatus(s) }))}
+          onClose={() => setBulkMenu(false)}
+        />
+      )}
+      {pausedMenu && (
+        <OptionsSheet
+          title={pausedMenu.title}
+          options={[
+            {
+              label: 'Forget this spot',
+              hint: `${Math.round(pausedMenu.progress)}% watched`,
+              danger: true,
+              onPress: () => {
+                const id = pausedMenu.playbackId;
+                setPaused((cur) => cur.filter((x) => x.playbackId !== id));
+                void actions.deletePlayback?.(id).catch(() => undefined);
+              },
+            },
+          ]}
+          onClose={() => setPausedMenu(null)}
+        />
+      )}
       {sortMenu && (
         <OptionsSheet
           title="Sort by"
@@ -607,6 +750,20 @@ export default function SimklScreen(props: SimklScreenProps) {
           onClose={() => setAccount(false)}
         />
       )}
+    </View>
+  );
+}
+
+/** A row or poster you can tick in Select mode (on = null: not selecting). */
+function Pickable({ on, children }: { on: boolean | null; children: React.ReactNode }) {
+  const styles = useStyles(makeStyles);
+  if (on === null) return <>{children}</>;
+  return (
+    <View>
+      <View style={on ? undefined : { opacity: 0.55 }}>{children}</View>
+      <View style={[styles.pickMark, on && styles.pickMarkOn]} pointerEvents="none">
+        {on && <Icon name="check" size={12} color="#fff" weight="bold" />}
+      </View>
     </View>
   );
 }
@@ -974,6 +1131,32 @@ const makeStyles = (p: Palette) =>
     upFill: { height: 4, backgroundColor: p.accent },
 
     shelf: { gap: 12, paddingHorizontal: SIDE },
+    pausedArt: { width: 150, height: 86, borderRadius: 10, overflow: 'hidden', backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
+    pausedTrack: { position: 'absolute', left: 8, right: 8, bottom: 8, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', overflow: 'hidden' },
+    pausedFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
+    pickMark: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+    pickMarkOn: { backgroundColor: p.accent, borderColor: p.accent },
+    bulkBar: {
+      position: 'absolute',
+      left: SIDE,
+      right: SIDE,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingLeft: 16,
+      paddingRight: 6,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: p.elevated,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    bulkText: { flex: 1, color: p.text, fontSize: 14, fontWeight: '700' },
+    bulkLink: { color: p.link, fontSize: 14, fontWeight: '700' },
+    bulkBtn: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 },
+    bulkBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
     shelfTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
     shelfSub: { color: p.textSecondary, fontSize: 12 },
 

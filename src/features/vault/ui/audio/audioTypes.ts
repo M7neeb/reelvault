@@ -4,7 +4,7 @@
  * screens run in the browser preview with fixtures.
  */
 
-import type { AudioItem, AudioPlay, AudioStatus } from '../../audio/audioLogic';
+import type { AudioItem, AudioPlay, AudioPrefs, AudioStatus } from '../../audio/audioLogic';
 import type { BookJson } from '../../audio/epub';
 import type { DuplicateAsk, ThumbSource } from '../types';
 
@@ -53,7 +53,17 @@ export type AudioActions = {
   setCoverFromPhoto: (id: string) => Promise<void>;
   /** What the Audio section takes on the phone (bytes). */
   storageBytes: () => Promise<number>;
+  /** More audio files for this item, added on the end as chapters. Resolves how many. */
+  addTracks?: (id: string) => Promise<number>;
+  /** Extras: a PDF, an ebook or pictures that come with a book. */
+  listExtras?: (id: string) => Promise<AudioExtraUi[]>;
+  addExtras?: (id: string) => Promise<number>;
+  openExtra?: (uri: string) => Promise<void>;
+  removeExtra?: (id: string, name: string) => Promise<void>;
+  setPrefs?: (p: AudioPrefs) => Promise<void>;
 };
+
+export type AudioExtraUi = { name: string; uri: string; size: number; kind: 'pdf' | 'image' | 'book' | 'other' };
 
 export type AudioData = {
   items: AudioUiItem[];
@@ -62,4 +72,5 @@ export type AudioData = {
   status: string;
   duplicateAsk: DuplicateAsk | null;
   actions: AudioActions;
+  prefs?: AudioPrefs;
 };

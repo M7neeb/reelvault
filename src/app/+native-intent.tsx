@@ -21,6 +21,8 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
     pushIncomingAudio(path);
     return '/';
   }
+  // A sign-in page sending you back (AniList, Dropbox, OneDrive): the sign-in itself catches it; open the app normally.
+  if (/^(?:reelvault:\/*|\/)auth\/(?:anilist|dropbox|onedrive)/i.test(path)) return '/';
   const quick = quickKind(path);
   if (quick) {
     pushQuick(quick);

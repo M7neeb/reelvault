@@ -9,6 +9,8 @@ import { franchiseQuery, parseFranchises, simklTypeOf, WIKIDATA_SPARQL, type Fra
 import {
   parseCatalog,
   parseEpisodes,
+  parsePlayback,
+  type PausedItem,
   parseRelated,
   trailerUrl,
   type CatalogEpisode,
@@ -379,7 +381,8 @@ export function loadDetail(type: SimklType, id: number): Promise<SimklDetail> {
 
 export function loadEpisodes(type: SimklType, id: number): Promise<CatalogEpisode[]> {
   if (type === 'movie') return Promise.resolve([]);
-  return cached(`episodes:${type}:${id}`, 12 * HOUR, async () =>
+  // "episodes2": the rows now carry finale markers and runtimes.
+  return cached(`episodes2:${type}:${id}`, 12 * HOUR, async () =>
     parseEpisodes(await simklRequest(`/${type === 'anime' ? 'anime' : 'tv'}/episodes/${id}`), type)
   );
 }
@@ -445,6 +448,18 @@ export async function prefetchArt(limit = 24): Promise<number> {
     .slice(0, limit);
   for (const i of want) await loadDetail(i.type, i.simklId).catch(() => undefined);
   return want.length;
+}
+
+/* ------------------------------------------------------- continue watching */
+
+/** Movies and episodes you stopped halfway (Simkl keeps one per title). */
+export async function loadPlayback(): Promise<PausedItem[]> {
+  return parsePlayback(await simklRequest('/sync/playback', { auth: true }));
+}
+
+/** Forget a paused spot. */
+export async function deletePlayback(id: number): Promise<void> {
+  await simklRequest(`/sync/playback/${id}`, { method: 'DELETE', auth: true });
 }
 
 /* ---------------------------------------------------------------- scrobble */

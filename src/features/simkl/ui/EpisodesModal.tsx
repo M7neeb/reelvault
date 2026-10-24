@@ -20,7 +20,7 @@ import IconButton from '@/features/vault/ui/IconButton';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { watchCounts } from '../insights';
-import { episodeCode, episodeImageUrl, groupBySeason, parseEpisodeCode, watchedKey } from '../logic';
+import { episodeCode, episodeImageUrl, finaleLabel, fmtMinutes, groupBySeason, minutesLeft, parseEpisodeCode, upToHere, watchedKey } from '../logic';
 import { fmtDay } from './time';
 import type { CatalogEpisode, Play, Session, SimklActions, SimklItem } from './types';
 
@@ -122,6 +122,17 @@ export default function EpisodesModal({
 
   const season = seasons.find((s) => s.season === shownSeason) ?? seasons[0];
   const totalEps = item.totalEpisodes || episodes?.length || 0;
+  // Time left to finish, with each episode's own length (or the show's usual one).
+  const left = useMemo(() => minutesLeft(episodes ?? [], watched, item.runtime), [episodes, watched, item.runtime]);
+
+  /** Hold an episode you have not watched: everything up to it (all seasons before too) is marked watched. */
+  function markUpTo(e: { season: number; episode: number }, code: string) {
+    const eps = upToHere(episodes ?? [], e).filter((x) => !watched.has(watchedKey(x.season, x.episode)));
+    if (!eps.length) return;
+    confirmAction(`Watched up to ${code}?`, `Marks ${eps.length} ${eps.length === 1 ? 'episode' : 'episodes'} watched on Simkl.`, () => toggle(eps, true), {
+      label: 'Mark watched',
+    });
+  }
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -133,7 +144,9 @@ export default function EpisodesModal({
               {rewatch ? `Rewatch #${session!.number}` : item.title}
             </Text>
             <Text style={styles.sub}>
-              {rewatch ? `${item.title} · ${inSession.size} of ${totalEps || '?'}` : `${watched.size} of ${totalEps || '?'} watched`}
+              {rewatch
+                ? `${item.title} · ${inSession.size} of ${totalEps || '?'}`
+                : `${watched.size} of ${totalEps || '?'} watched${left.episodes > 0 && left.minutes > 0 ? ` · ${left.guessed ? 'about ' : ''}${fmtMinutes(left.minutes)} left` : ''}`}
             </Text>
           </View>
           {rewatch && onFinishSession && (
@@ -203,7 +216,7 @@ export default function EpisodesModal({
                         </TouchableOpacity>
                       )}
                     </View>
-                    {!rewatch && <Text style={styles.tip}>Hold an episode you watched to log watching it again.</Text>}
+                    {!rewatch && <Text style={styles.tip}>Hold an episode you haven't watched to mark everything up to it; hold one you watched to log watching it again.</Text>}
                   </View>
 
                   {s.episodes.map((e) => {
@@ -222,7 +235,9 @@ export default function EpisodesModal({
                         disabled={!e.aired && !on}
                         onPress={() => toggle([e], !on)}
                         onLongPress={() => {
-                          if (!rewatch && seen) rewatchToggle([e], true, null);
+                          if (rewatch) return;
+                          if (seen) rewatchToggle([e], true, null);
+                          else if (e.aired && !e.special) markUpTo(e, code);
                         }}
                         accessibilityLabel={`${code} ${hidden ? '' : (e.title ?? '')}`}>
                         <View style={styles.still}>
@@ -249,13 +264,19 @@ export default function EpisodesModal({
                             {code}
                             {isNext ? <Text style={styles.nextTag}>{'  UP NEXT'}</Text> : null}
                           </Text>
+                          {!!finaleLabel(e.finale) && (
+                            <View style={[styles.finale, e.finale === 3 && styles.finaleSeries]}>
+                              <Text style={[styles.finaleText, e.finale === 3 && styles.finaleTextSeries]}>{finaleLabel(e.finale)!.toUpperCase()}</Text>
+                            </View>
+                          )}
                           <Text style={[styles.episodeTitle, !e.aired && styles.unaired]} numberOfLines={2}>
                             {hidden ? `Episode ${e.episode}` : (e.title ?? `Episode ${e.episode}`)}
                           </Text>
-                          {!!e.date && (
+                          {(!!e.date || !!e.runtime) && (
                             <Text style={styles.episodeDate}>
-                              {e.aired ? '' : 'Airs '}
-                              {fmtDay(e.date)}
+                              {e.date ? `${e.aired ? '' : 'Airs '}${fmtDay(e.date)}` : ''}
+                              {e.date && e.runtime ? ' · ' : ''}
+                              {e.runtime ? `${e.runtime} min` : ''}
                             </Text>
                           )}
                         </View>
@@ -314,6 +335,10 @@ const makeStyles = (p: Palette) =>
     episodeText: { flex: 1, gap: 1 },
     code: { color: p.link, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 0.3 },
     nextTag: { color: p.accent, fontSize: 11, fontWeight: '900' },
+    finale: { alignSelf: 'flex-start', backgroundColor: p.accentSoft, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, marginVertical: 1 },
+    finaleSeries: { backgroundColor: p.accent },
+    finaleText: { color: p.accent, fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+    finaleTextSeries: { color: '#fff' },
     episodeTitle: { color: p.text, fontSize: 15, fontWeight: '600' },
     unaired: { color: p.textMuted },
     episodeDate: { color: p.textSecondary, fontSize: 12 },

@@ -181,7 +181,21 @@ export function fixtureMangaData(): MangaData {
   // Some chapters online (not downloaded), to show both.
   for (const s of items) for (const c of s.chapters.slice(Math.ceil(s.chapters.length * 0.6))) Object.assign(c, { folder: null, pages: [], sourceKey: `k-${c.id}`, downloaded: false });
   for (const s of items.slice(0, 3)) Object.assign(s, { sourceId: 'mangadex', sourceKey: `md-${s.id}` });
-  return { items, deleted, busy: false, status: '', actions, browse: fixtureBrowse(), downloads };
+  const media = (id: number, title: string, chapters: number | null) => ({ id, title, altTitles: [], cover: null, chapters, volumes: null, year: 2021, format: 'MANGA', status: 'RELEASING', averageScore: 81, country: 'JP', url: `https://anilist.co/manga/${id}` });
+  const anilist = {
+    state: { configured: false, user: null, links: { lighthouse: 1001 } as Record<string, number>, syncing: false, error: null },
+    actions: {
+      search: async (q: string) => [media(1001, q, 120), media(1002, `${q}: Side Stories`, 12)],
+      get: async (id: number) => media(id, 'Lighthouse Keeper', 120),
+      link: async () => 0,
+      unlink: none,
+      fill: none,
+      signIn: none,
+      signOut: none,
+      syncNow: none,
+    },
+  };
+  return { items, deleted, busy: false, status: '', actions, browse: fixtureBrowse(), downloads, anilist };
 }
 
 /* ------------------------------------------------------------- Browse */
@@ -274,7 +288,12 @@ export function fixtureBrowse(): { prefs: BrowsePrefs; actions: BrowseActions } 
     smallerPages: true,
     checkOnOpen: true,
     autoDownload: false,
-    reader: { tapZones: true, tapInvert: false, page: 'black', spreads: true },
+    removeAfterRead: false,
+    wifiOnly: false,
+    patient: false,
+    parallel: 3,
+    autoUpdateExt: true,
+    reader: { tapZones: true, tapInvert: false, page: 'black', spreads: true, fit: 'screen', filter: 'none', autoSpeed: 2, longStrip: false, crop: false, autoBg: false },
   };
   const none = async () => undefined;
   return {

@@ -31,6 +31,8 @@ import { mergeOvExtra, OV_EXTRA_KEY, ovExtraForBackup, parseOvExtra } from './ov
 import { addToSeries, createSeries, listSeries, setEpisodeLabel, updateSeries } from './overviewStore';
 import type { OvStatus } from './overview';
 import { shareFile } from './share';
+import { toCsv } from './sheetExport';
+import { statusLabel, type UiStatus } from './ui/types';
 import { addTagToVideo, listTags } from './tags';
 
 /** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
@@ -219,6 +221,64 @@ export async function exportLibraryInfo(): Promise<number> {
   file.write(json);
   await shareFile(file.uri);
   return videos;
+}
+
+/** Your library as a spreadsheet (CSV), then the share sheet. Private videos are left out. */
+export async function exportSpreadsheet(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{
+    id: string;
+    title: string | null;
+    filename: string;
+    created_at: number | null;
+    imported_at: number | null;
+    duration_ms: number | null;
+    size: number | null;
+    rating: number;
+    flag: number | null;
+    status: string | null;
+    notes: string | null;
+  }>(
+    `SELECT id, title, filename, created_at, imported_at, duration_ms, size, rating, flag, status, notes
+       FROM videos WHERE deleted_at IS NULL AND is_private = 0 ORDER BY created_at DESC;`
+  );
+  const tagRows = await db.getAllAsync<{ video_id: string; name: string }>('SELECT vt.video_id, t.name FROM video_tags vt JOIN tags t ON t.id = vt.tag_id;');
+  const albumRows = await db.getAllAsync<{ video_id: string; name: string }>(
+    'SELECT av.video_id, a.name FROM album_videos av JOIN albums a ON a.id = av.album_id WHERE a.is_private = 0;'
+  );
+  const playRows = await db.getAllAsync<{ video_id: string; n: number; ms: number }>(
+    'SELECT video_id, COUNT(*) AS n, COALESCE(SUM(watched_ms), 0) AS ms FROM vault_plays GROUP BY video_id;'
+  );
+  const tagsBy = new Map<string, string[]>();
+  for (const t of tagRows) pushTo(tagsBy, t.video_id, t.name);
+  const albumsBy = new Map<string, string[]>();
+  for (const a of albumRows) pushTo(albumsBy, a.video_id, a.name);
+  const playsBy = new Map(playRows.map((r) => [r.video_id, r]));
+  const csv = toCsv(
+    rows.map((v) => ({
+      title: v.title,
+      filename: v.filename,
+      createdAt: v.created_at,
+      importedAt: v.imported_at,
+      durationMs: v.duration_ms,
+      sizeBytes: v.size,
+      rating: v.rating,
+      flag: v.flag ?? 0,
+      status: v.status ? statusLabel(v.status as UiStatus) : null,
+      keywords: tagsBy.get(v.id) ?? [],
+      albums: albumsBy.get(v.id) ?? [],
+      caption: v.notes,
+      plays: playsBy.get(v.id)?.n ?? 0,
+      watchedMs: playsBy.get(v.id)?.ms ?? 0,
+    }))
+  );
+  const day = new Date().toISOString().slice(0, 10);
+  const file = new File(Paths.cache, `ReelVault library ${day}.csv`);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(csv);
+  await shareFile(file.uri);
+  return rows.length;
 }
 
 /* -------------------------------------------------------- automatic backups */

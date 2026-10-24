@@ -101,7 +101,8 @@ const ints = (f: Raw[], n: number) => {
 /* ------------------------------------------------------------ the backup */
 
 export type TachiChapter = { url: string; name: string; scanlator: string | null; read: boolean; bookmark: boolean; lastPageRead: number; dateFetch: number; dateUpload: number; number: number; sourceOrder: number };
-export type TachiTracking = { syncId: number; title: string; lastChapterRead: number; score: number; status: number; started: number; finished: number };
+/** syncId 2 = AniList (mediaId is its id), 1 = MyAnimeList, 3 = Kitsu, 7 = MangaUpdates. */
+export type TachiTracking = { syncId: number; mediaId: number; title: string; lastChapterRead: number; score: number; status: number; started: number; finished: number };
 export type TachiManga = {
   source: string;
   url: string;
@@ -151,7 +152,7 @@ export function decodeTachiBackup(proto: Uint8Array): TachiBackup {
         sourceOrder: int(c, 10),
       })),
       categories: ints(m, 17),
-      tracking: msgs(m, 18).map((t) => ({ syncId: int(t, 1), title: text(t, 5), lastChapterRead: float(t, 6), score: float(t, 8), status: int(t, 9), started: int(t, 10), finished: int(t, 11) })),
+      tracking: msgs(m, 18).map((t) => ({ syncId: int(t, 1), mediaId: int(t, 100) || int(t, 3), title: text(t, 5), lastChapterRead: float(t, 6), score: float(t, 8), status: int(t, 9), started: int(t, 10), finished: int(t, 11) })),
       favorite: bool(m, 100, true),
       history: msgs(m, 104).map((h) => ({ url: text(h, 1), lastRead: int(h, 2), readDuration: int(h, 3) })),
       notes: orNull(text(m, 110)),
@@ -203,6 +204,8 @@ export type PlannedTitle = {
   sourceId: string;
   sourceKey: string;
   sourceName: string;
+  /** Its AniList id, when it was tracked there. */
+  anilistId: number | null;
   chapters: { key: string; name: string; number: number | null; scanlator: string | null; readAt: number | null; lastPage: number; uploadedAt: number | null }[];
 };
 
@@ -276,6 +279,7 @@ export function planTachiImport(b: TachiBackup, now: number): PlannedTitle[] {
       sourceId: mdKey ? 'mangadex' : `tachi:${m.source}:${name}`,
       sourceKey: mdKey ?? m.url,
       sourceName: name,
+      anilistId: m.tracking.find((t) => t.syncId === 2 && t.mediaId > 0)?.mediaId ?? null,
       chapters,
     });
   }
@@ -283,6 +287,35 @@ export function planTachiImport(b: TachiBackup, now: number): PlannedTitle[] {
 }
 
 /** Titles of the plan you don't have yet (same title, case and punctuation aside). */
+/**
+ * A backup of a title you already have: whichever progress is furthest wins,
+ * chapter by chapter (matched by number). Read in the backup and not here:
+ * marked read. Further into a chapter there: that page. Nothing you read is
+ * ever unmarked.
+ */
+export function progressToMerge(
+  local: { id: string; number: number | null; readAt: number | null; lastPage: number }[],
+  backup: { number: number | null; readAt: number | null; lastPage: number }[]
+): { read: { id: string; at: number }[]; pages: { id: string; page: number }[] } {
+  const byNumber = new Map<number, (typeof backup)[number]>();
+  for (const c of backup) {
+    if (c.number === null) continue;
+    const had = byNumber.get(c.number);
+    // Two copies of a chapter (scanlators): the one read, or the one further in.
+    if (!had || (!had.readAt && (c.readAt || c.lastPage > had.lastPage))) byNumber.set(c.number, c);
+  }
+  const read: { id: string; at: number }[] = [];
+  const pages: { id: string; page: number }[] = [];
+  for (const c of local) {
+    if (c.number === null || c.readAt) continue;
+    const b = byNumber.get(c.number);
+    if (!b) continue;
+    if (b.readAt) read.push({ id: c.id, at: b.readAt });
+    else if (b.lastPage > c.lastPage) pages.push({ id: c.id, page: b.lastPage });
+  }
+  return { read, pages };
+}
+
 export function newTitles(plan: PlannedTitle[], existing: string[]): PlannedTitle[] {
   const have = new Set(existing.map(normTitle));
   const seen = new Set<string>();

@@ -30,7 +30,9 @@ import {
   updateAlbum,
 } from '@/features/vault/albums';
 import { getDb } from '@/db';
-import { autoBackup, exportLibraryInfo, importLibraryInfo, listAutoBackups } from '@/features/vault/backup';
+import { CLOUD } from '@/features/vault/cloud/cloudLogic';
+import { cloudConfigured, cloudConnected, cloudDownload, cloudList, cloudSignIn, cloudSignOut } from '@/features/vault/cloud/cloud';
+import { autoBackup, exportLibraryInfo, exportSpreadsheet, importLibraryInfo, listAutoBackups } from '@/features/vault/backup';
 import { appStorage, recoverInbox, tidy } from '@/features/vault/housekeeping';
 import { incomingName, onIncoming } from '@/features/vault/incoming';
 import { contentKeyOf } from '@/features/vault/contentKey';
@@ -322,6 +324,13 @@ function parsePlayer(r: unknown): PlayerOptions {
   };
 }
 
+function parseSkipIntro(r: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!r || typeof r !== 'object') return out;
+  for (const [k, v] of Object.entries(r as Record<string, unknown>)) if (typeof v === 'number' && v > 0 && v < 3600) out[k] = Math.round(v);
+  return out;
+}
+
 function parsePrefs(json: string | null): VaultPrefs {
   try {
     const r = json ? JSON.parse(json) : {};
@@ -356,6 +365,8 @@ function parsePrefs(json: string | null): VaultPrefs {
         used: Array.isArray(r?.freezes?.used) ? r.freezes.used.filter((x: unknown) => typeof x === 'number').slice(-120) : [],
         lastEarnedWeek: typeof r?.freezes?.lastEarnedWeek === 'number' ? r.freezes.lastEarnedWeek : null,
       },
+      gridPreview: r?.gridPreview === true,
+      skipIntro: parseSkipIntro(r?.skipIntro),
     };
   } catch {
     return DEFAULT_VAULT_PREFS;
@@ -961,6 +972,46 @@ export function useVaultData(): VaultData {
       onExportBackup: async () => {
         const n = await exportLibraryInfo();
         setStatus(`Library info for ${n} videos exported`);
+      },
+      cloud: {
+        services: async () =>
+          Promise.all(
+            (['dropbox', 'onedrive'] as const).map(async (kind) => ({
+              kind,
+              name: CLOUD[kind].name,
+              configured: cloudConfigured(kind),
+              connected: cloudConfigured(kind) && (await cloudConnected(kind)),
+            }))
+          ),
+        signIn: cloudSignIn,
+        signOut: cloudSignOut,
+        list: cloudList,
+        importFiles: (kind, entries) => {
+          void (async () => {
+            setBusy(true);
+            const files: { uri: string; name: string; size?: number }[] = [];
+            const failed: string[] = [];
+            try {
+              for (const [i, e] of entries.entries()) {
+                setStatus(`Downloading from ${CLOUD[kind].name}… ${i + 1} of ${entries.length}`);
+                try {
+                  files.push(await cloudDownload(kind, e));
+                } catch (err) {
+                  console.log(`[CLOUD] ${e.name}: ${String(err)}`);
+                  failed.push(e.name);
+                }
+              }
+              if (files.length) await runImport(files, false);
+              if (failed.length) Alert.alert('Some did not download', failed.slice(0, 6).join('\n'));
+            } finally {
+              setBusy(false);
+            }
+          })();
+        },
+      },
+      onExportSpreadsheet: async () => {
+        const n = await exportSpreadsheet();
+        setStatus(`A spreadsheet of ${n} videos exported`);
       },
       onImportBackup: async () => {
         try {

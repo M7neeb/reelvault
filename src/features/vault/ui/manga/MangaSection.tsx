@@ -12,12 +12,13 @@ import { sheet, useStyles, type Palette } from '../theme';
 import BrowseScreen from './BrowseScreen';
 import DownloadsSheet from './DownloadsSheet';
 import MangaDashboard from './MangaDashboard';
+import MangaFeed, { type FeedTab } from './MangaFeed';
 import MangaDetail from './MangaDetail';
 import MangaReader from './MangaReader';
 import MangaScreen from './MangaScreen';
 import type { MangaData } from './mangaTypes';
 
-export type MangaDev = { dashboard?: boolean; downloadsOpen?: boolean; detail?: boolean; reader?: boolean; deleted?: boolean; browse?: 'sources' | 'extensions'; source?: string; openKey?: string; form?: 'server' | 'repo' | 'languages'; /** Which series the reader opens (default: the first). */ seriesId?: string };
+export type MangaDev = { feed?: FeedTab; dashboard?: boolean; downloadsOpen?: boolean; detail?: boolean; reader?: boolean; deleted?: boolean; browse?: 'sources' | 'extensions'; source?: string; openKey?: string; form?: 'server' | 'repo' | 'languages'; /** Which series the reader opens (default: the first). */ seriesId?: string };
 
 export default function MangaSection({
   data,
@@ -53,6 +54,7 @@ export default function MangaSection({
   const read = (seriesId: string, c: MangaChapter, fromStart = false) => setReading({ seriesId, chapterId: c.id, fromStart });
   const [browseOpen, setBrowseOpen] = useState(!!dev?.browse);
   const [dashOpen, setDashOpen] = useState(!!dev?.dashboard);
+  const [feed, setFeed] = useState<FeedTab | null>(dev?.feed ?? null);
   const [dlOpen, setDlOpen] = useState(!!dev?.downloadsOpen);
 
   useEffect(() => {
@@ -112,6 +114,7 @@ export default function MangaSection({
         onMode={onMode}
         onBrowse={() => setBrowseOpen(true)}
         onDashboard={() => setDashOpen(true)}
+        onFeed={setFeed}
         onDownloads={() => setDlOpen(true)}
         downloads={data.downloads}
         initialDeleted={dev?.deleted}
@@ -123,6 +126,7 @@ export default function MangaSection({
           actions={data.actions}
           downloads={data.downloads}
           browse={data.browse.actions}
+          anilist={data.anilist}
           onRead={(c, fromStart) => read(detail.id, c, fromStart)}
           onOpenUrl={data.browse.actions.openUrl}
           onClose={() => setDetailId(null)}>
@@ -130,6 +134,18 @@ export default function MangaSection({
         </MangaDetail>
       ) : (
         reader
+      )}
+      {feed && !detail && (
+        <MangaFeed
+          items={data.items.filter((s) => showPrivate || !s.isPrivate)}
+          initialTab={feed}
+          onRead={(seriesId, c) => {
+            setFeed(null);
+            setDetailId(seriesId);
+            read(seriesId, c);
+          }}
+          onClose={() => setFeed(null)}
+        />
       )}
       {dashOpen && !detail && (
         <MangaDashboard

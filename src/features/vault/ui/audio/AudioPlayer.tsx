@@ -12,7 +12,7 @@ import { ScrollView, Text, TouchableOpacity, View, type GestureResponderEvent } 
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { chapterIndexAt, chaptersOf, displayTitle, fmtClockMs, fmtLength, fmtRating, SLEEP_OPTIONS, SPEEDS } from '../../audio/audioLogic';
+import { chapterIndexAt, chaptersOf, DEFAULT_AUDIO_PREFS, displayTitle, fmtClockMs, fmtLength, fmtRating, REWIND_CHOICES, SLEEP_OPTIONS, SPEEDS, type AudioPrefs } from '../../audio/audioLogic';
 import { success, tick } from '../haptics';
 import Icon from '../Icon';
 import { OptionsSheet, PromptSheet } from '../prompts';
@@ -103,14 +103,24 @@ function Scrubber({ value, total, ticks, onSeek }: { value: number; total: numbe
   );
 }
 
-export function AudioPlayerScreen({ actions, onInfo, onClose }: { actions: AudioActions; onInfo: (item: AudioUiItem) => void; onClose: () => void }) {
+export function AudioPlayerScreen({
+  actions,
+  prefs = DEFAULT_AUDIO_PREFS,
+  onInfo,
+  onClose,
+}: {
+  actions: AudioActions;
+  prefs?: AudioPrefs;
+  onInfo: (item: AudioUiItem) => void;
+  onClose: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const pb = useAudioPlayback();
   const item = pb.item;
   const [view, setView] = useState<'cover' | 'read'>(item?.kind === 'book' ? 'read' : 'cover');
-  const [sheetOpen, setSheetOpen] = useState<null | 'chapters' | 'speed' | 'sleep' | 'marks' | 'rate' | 'mark-label'>(null);
+  const [sheetOpen, setSheetOpen] = useState<null | 'chapters' | 'speed' | 'sleep' | 'marks' | 'rate' | 'mark-label' | 'rewind'>(null);
   const [marks, setMarks] = useState<AudioBookmark[]>([]);
   const [now, setNow] = useState(() => Date.now());
 
@@ -255,6 +265,30 @@ export function AudioPlayerScreen({ actions, onInfo, onClose }: { actions: Audio
               <Text style={styles.toolLabel}>{marks.length ? `${marks.length} ${marks.length === 1 ? 'mark' : 'marks'}` : 'Marks'}</Text>
             </TouchableOpacity>
           </View>
+          {/* One-tap speeds (hold one to make it your current speed instead). */}
+          <View style={styles.favRow}>
+            {prefs.favSpeeds.map((s, n) => {
+              const on = Math.abs(s - pb.rate) < 0.001;
+              return (
+                <TouchableOpacity
+                  key={`${s}-${n}`}
+                  style={[styles.fav, on && styles.favOn]}
+                  onPress={() => {
+                    tick();
+                    pb.setRate(s);
+                  }}
+                  onLongPress={() => {
+                    if (on || !actions.setPrefs) return;
+                    success();
+                    const favSpeeds = prefs.favSpeeds.map((x, i) => (i === n ? pb.rate : x));
+                    void actions.setPrefs({ ...prefs, favSpeeds });
+                  }}
+                  accessibilityLabel={`Speed ${s}×${on ? ', now' : ''}. Hold to put ${pb.rate}× here`}>
+                  <Text style={[styles.favText, on && styles.favTextOn]}>{s}×</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <Text style={styles.leftLine}>{left > 60_000 ? `${fmtLength(left)} left${pb.rate !== 1 ? ` at ${pb.rate}×` : ''}` : ''}</Text>
         </View>
       </View>
@@ -284,7 +318,23 @@ export function AudioPlayerScreen({ actions, onInfo, onClose }: { actions: Audio
       {sheetOpen === 'speed' && (
         <OptionsSheet
           title="Speed"
-          options={SPEEDS.map((s) => ({ label: `${s}×`, hint: s === pb.rate ? '✓' : s === 1 ? 'normal' : undefined, onPress: () => pb.setRate(s) }))}
+          options={[
+            ...SPEEDS.map((s) => ({ label: `${s}×`, hint: s === pb.rate ? '✓ (this book remembers it)' : s === 1 ? 'normal' : undefined, onPress: () => pb.setRate(s) })),
+            ...(actions.setPrefs
+              ? [{ label: 'Smart rewind after a pause…', hint: REWIND_CHOICES.find((c) => c.value === prefs.rewind)?.label, onPress: () => setSheetOpen('rewind') }]
+              : []),
+          ]}
+          onClose={() => setSheetOpen((s) => (s === 'speed' ? null : s))}
+        />
+      )}
+      {sheetOpen === 'rewind' && (
+        <OptionsSheet
+          title="After a pause, go back a little so you don't lose the thread"
+          options={REWIND_CHOICES.map((c) => ({
+            label: c.label,
+            hint: c.value === prefs.rewind ? `✓ ${c.hint}` : c.hint,
+            onPress: () => void actions.setPrefs?.({ ...prefs, rewind: c.value }),
+          }))}
           onClose={() => setSheetOpen(null)}
         />
       )}
@@ -381,6 +431,11 @@ const makeStyles = (p: Palette) =>
     tool: { flex: 1, alignItems: 'center', gap: 4, backgroundColor: p.card, borderRadius: 14, paddingVertical: 9 },
     toolBig: { color: p.text, fontSize: 16, fontWeight: '800' },
     toolLabel: { color: p.textSecondary, fontSize: 11, fontWeight: '700' },
+    favRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 10 },
+    fav: { minWidth: 58, alignItems: 'center', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.card },
+    favOn: { backgroundColor: p.accent },
+    favText: { color: p.text, fontSize: 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    favTextOn: { color: '#fff' },
     leftLine: { color: p.textMuted, fontSize: 12, textAlign: 'center', minHeight: 16 },
     chRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: p.separator },
     chRowOn: { backgroundColor: p.accentSoft, borderRadius: 10, paddingHorizontal: 8 },

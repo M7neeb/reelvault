@@ -88,8 +88,10 @@ import {
 import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
 import ViewerModal from './ViewerModal';
+import CloudSheet from './CloudSheet';
 import { onQuick, pickFavourite, type QuickKind } from '../quickOpen';
 import { onJump, type JumpRequest } from '../jump';
+import { afterModals } from './screen';
 import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
 import OverviewScreen from './OverviewScreen';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -320,6 +322,7 @@ function VaultScreenBody({
     onSound: (on) => actions.setPrefs({ ...prefs, liveSound: on }).catch(() => undefined),
     paused: !!playing || !!slideshow || !!insights,
   });
+  const [cloudOpen, setCloudOpen] = useState(false);
   /** What swiping in the viewer moves through: a series' episodes, else the list on screen. */
   const [playList, setPlayList] = useState<VaultItem[] | null>(null);
 
@@ -742,6 +745,7 @@ function VaultScreenBody({
         { label: 'Record with Camera', onPress: () => actions.onImport('camera') },
         { label: 'Paste Link…', hint: 'Direct video link', onPress: pasteLink },
         { label: 'Whole Folder from Files…', hint: 'Copies', onPress: actions.onImportFolder },
+        ...(actions.cloud ? [{ label: 'From Dropbox or OneDrive…', hint: 'Sign in, pick videos', onPress: () => setCloudOpen(true) }] : []),
         { label: 'From Computer (Wi-Fi)…', hint: 'Drop videos in a browser', onPress: () => setWifiOpen(true) },
         { label: 'HashPhotos Info…', hint: 'Keywords, ratings', onPress: () => setMetaOpen(true) },
       ],
@@ -1346,6 +1350,7 @@ function VaultScreenBody({
           seriesOf={seriesOf}
           onPinchSize={look === 'simple' || look === 'compact' ? undefined : pinchSize}
           onScrollExtra={live.scrollProps.onScroll}
+          livePreview={prefs.gridPreview && enableVideo && !playing && !slideshow && !insights}
         />
       )}
 
@@ -1662,9 +1667,10 @@ function VaultScreenBody({
           onRemoveFake={() => actions.setFakePasscode(null).then(refreshSecurity).catch(fail('SECURITY'))}
           onImportFolder={() => {
             setSettingsOpen(false);
-            actions.onImportFolder();
+            afterModals(actions.onImportFolder);
           }}
           onExportBackup={() => actions.onExportBackup().catch(fail('BACKUP'))}
+          onExportSpreadsheet={() => actions.onExportSpreadsheet().catch(fail('CSV'))}
           onImportBackup={() => actions.onImportBackup().catch(fail('BACKUP'))}
           backups={{ list: actions.listAutoBackups, now: actions.backupNow, restore: actions.restoreAutoBackup }}
           canMakeSmaller={actions.canMakeSmaller()}
@@ -1792,6 +1798,7 @@ function VaultScreenBody({
         />
       )}
 
+      {cloudOpen && actions.cloud && <CloudSheet cloud={actions.cloud} onClose={() => setCloudOpen(false)} />}
       {playing && (
         <ViewerModal
           item={playing}

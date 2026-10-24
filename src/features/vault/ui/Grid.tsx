@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ScrollView as RNScrollView, Text, TouchableOpacity, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { plural } from './confirm';
 import { fmtThumbInfos } from './format';
@@ -63,6 +64,8 @@ type Props = {
   linked?: Set<string>;
   /** "Continue another time" points: a thin bar where you stopped. */
   resume?: Map<string, number>;
+  /** Play the tile in the middle of the screen, silently (a setting; off while something is open on top). */
+  livePreview?: boolean;
 };
 
 export default function Grid({
@@ -84,6 +87,7 @@ export default function Grid({
   seriesOf,
   onPinchSize,
   onScrollExtra,
+  livePreview = false,
 }: Props) {
   const styles = useStyles(makeStyles);
   const tabSpace = useTabBarSpace();
@@ -134,6 +138,25 @@ export default function Grid({
     () => visibleTiles(layout, windowTop, windowBottom),
     [layout, windowTop, windowBottom]
   );
+  // The silent preview: the tile nearest the middle of the screen, once scrolling settles.
+  const scrollY = useRef(0);
+  const [settledY, setSettledY] = useState(0);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (settle.current) clearTimeout(settle.current);
+  }, []);
+  const liveId = useMemo(() => {
+    if (!livePreview || selectMode || mode !== 'normal' || !viewport.h) return null;
+    const mid = settledY - headerH + viewport.h / 2;
+    let best: { id: string; d: number } | null = null;
+    for (const t of visible) {
+      const d = Math.abs(t.y + t.h / 2 - mid) + Math.abs(t.x + t.w / 2 - viewport.w / 2) * 0.3;
+      if (t.y + t.h < settledY - headerH || t.y > settledY - headerH + viewport.h) continue;
+      if (!best || d < best.d) best = { id: t.id, d };
+    }
+    return best?.id ?? null;
+  }, [livePreview, selectMode, mode, visible, settledY, headerH, viewport.h, viewport.w]);
+
   const visibleHeaders = layout.headers.filter((h) => h.y < windowBottom && h.y + GROUP_HEADER > windowTop);
 
   const pinch = Gesture.Pinch()
@@ -152,6 +175,11 @@ export default function Grid({
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     onScrollExtra?.(e);
+    scrollY.current = e.nativeEvent.contentOffset.y;
+    if (livePreview) {
+      if (settle.current) clearTimeout(settle.current);
+      settle.current = setTimeout(() => setSettledY(scrollY.current), 260);
+    }
     const next = Math.floor(e.nativeEvent.contentOffset.y / step);
     if (next !== stepRef.current) {
       stepRef.current = next;
@@ -213,6 +241,7 @@ export default function Grid({
                 albumNames={albumNames}
                 linked={linked?.has(item.id) ?? false}
                 resumeAt={resume?.get(item.id)}
+                live={liveId === item.id && !!item.uri && (item.durationMs ?? 1) > 0}
                 now={now}
                 styles={styles}
                 onPress={onPressTile}
@@ -227,6 +256,29 @@ export default function Grid({
   );
 }
 
+/** A tile's video, playing silently in a loop from a tenth of the way in; it fades in once it plays. */
+function TilePreview({ uri, durationMs }: { uri: string; durationMs: number | null }) {
+  const [ready, setReady] = useState(false);
+  const player = useVideoPlayer(uri, (pl) => {
+    pl.muted = true;
+    pl.loop = true;
+    pl.audioMixingMode = 'mixWithOthers';
+    if (durationMs && durationMs > 20_000) pl.currentTime = durationMs / 10000;
+    pl.play();
+  });
+  useEffect(() => {
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') setReady(true);
+    });
+    return () => sub.remove();
+  }, [player]);
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: ready ? 1 : 0 }} pointerEvents="none">
+      <VideoView player={player} style={{ width: '100%', height: '100%' }} contentFit="cover" nativeControls={false} allowsPictureInPicture={false} />
+    </View>
+  );
+}
+
 function TileView({
   tile,
   item,
@@ -238,6 +290,7 @@ function TileView({
   albumNames,
   linked,
   resumeAt,
+  live,
   now,
   styles,
   onPress,
@@ -253,6 +306,7 @@ function TileView({
   albumNames: Map<number, string>;
   linked: boolean;
   resumeAt?: number;
+  live?: boolean;
   now: number;
   styles: ReturnType<typeof makeStyles>;
   onPress: (item: VaultItem) => void;
@@ -283,6 +337,7 @@ function TileView({
         contentFit="cover"
         recyclingKey={item.id}
       />
+      {live && <TilePreview uri={item.uri} durationMs={item.durationMs} />}
       {item.inTray && <View style={styles.trayOutline} pointerEvents="none" />}
       {resumeAt !== undefined && !!item.durationMs && (
         <View style={styles.resumeTrack} pointerEvents="none">

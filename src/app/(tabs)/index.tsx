@@ -23,7 +23,7 @@ export default function VideosRoute() {
     <ThemeContext.Provider value={palette}>
     <SideSafe>
     <TabBarSpace.Provider value={insets.bottom + TAB_BAR_HEIGHT}>
-    <AudioPlaybackProvider items={audio.items} actions={audio.actions}>
+    <AudioPlaybackProvider items={audio.items} actions={audio.actions} rewind={audio.prefs?.rewind ?? 1}>
       <VaultScreen
         audio={audio}
         manga={manga}

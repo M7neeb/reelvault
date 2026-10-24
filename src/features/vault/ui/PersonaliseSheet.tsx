@@ -384,6 +384,7 @@ export default function PersonaliseSheet({
 
       <Section label="Watching">
         <ToggleRow label="Rows on the library's home (recently added, your best…)" value={prefs.homeRows} onChange={(v) => savePrefs({ homeRows: v })} />
+        <ToggleRow label="Play the video in the middle of the grid (no sound)" value={prefs.gridPreview} onChange={(v) => savePrefs({ gridPreview: v })} />
         <ToggleRow label="Continue another time (videos of 5 min or more)" value={prefs.resumeEnabled} onChange={(v) => savePrefs({ resumeEnabled: v })} />
         <Text style={styles.hint}>Tap the clock in the player and it picks up 2.5 minutes before where you stopped next time.</Text>
         <ToggleRow label="Hold the left or right edge for 2× speed" value={prefs.holdForSpeed} onChange={(v) => savePrefs({ holdForSpeed: v })} />

@@ -285,6 +285,10 @@ export type CatalogEpisode = {
   date: string | null;
   img: string | null;
   special: boolean;
+  /** 1 = mid-season finale, 2 = season finale, 3 = series finale (TV only). */
+  finale?: 1 | 2 | 3 | null;
+  /** Minutes, when Simkl knows it. */
+  runtime?: number | null;
 };
 
 /** `/tv/episodes/{id}` or `/anime/episodes/{id}` → rows, specials last. */
@@ -302,6 +306,8 @@ export function parseEpisodes(json: any, type: SimklType): CatalogEpisode[] {
       date: str(e?.date),
       img: str(e?.img),
       special,
+      finale: e?.finale_type === 1 || e?.finale_type === 2 || e?.finale_type === 3 ? e.finale_type : null,
+      runtime: num(e?.runtime) !== null && e.runtime > 0 ? Math.round(e.runtime) : null,
     });
   }
   return rows.sort((a, b) => Number(a.special) - Number(b.special) || a.season - b.season || a.episode - b.episode);
@@ -318,6 +324,82 @@ export function groupBySeason(episodes: CatalogEpisode[]): { season: number; lab
 }
 
 export const watchedKey = (season: number, episode: number) => `${season}:${episode}`;
+
+/** "Season finale" and friends; null for an ordinary episode. */
+export function finaleLabel(f: CatalogEpisode['finale']): string | null {
+  return f === 1 ? 'Mid-season finale' : f === 2 ? 'Season finale' : f === 3 ? 'Series finale' : null;
+}
+
+/**
+ * Minutes left to finish: every aired episode you have not watched (specials
+ * left out), at its own runtime, or the show's usual runtime when Simkl has none.
+ */
+export function minutesLeft(episodes: CatalogEpisode[], watched: Set<string>, fallback: number | null): { minutes: number; episodes: number; guessed: boolean } {
+  let minutes = 0;
+  let count = 0;
+  let guessed = false;
+  for (const e of episodes) {
+    if (e.special || !e.aired || watched.has(watchedKey(e.season, e.episode))) continue;
+    count += 1;
+    if (e.runtime) minutes += e.runtime;
+    else if (fallback) {
+      minutes += fallback;
+      guessed = true;
+    } else guessed = true;
+  }
+  return { minutes, episodes: count, guessed };
+}
+
+/** "6 h 10 min", "45 min". */
+export function fmtMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
+}
+
+/** "Watched up to here": every aired, ordinary episode up to and including this one. */
+export function upToHere(episodes: CatalogEpisode[], target: { season: number; episode: number }): { season: number; episode: number }[] {
+  return episodes
+    .filter((e) => !e.special && e.aired && (e.season < target.season || (e.season === target.season && e.episode <= target.episode)))
+    .map((e) => ({ season: e.season, episode: e.episode }));
+}
+
+/** A half-watched movie or episode Simkl kept (`/sync/playback`). */
+export type PausedItem = {
+  playbackId: number;
+  simklId: number;
+  type: SimklType;
+  title: string;
+  season: number | null;
+  episode: number | null;
+  /** 0..100 */
+  progress: number;
+  pausedAt: string | null;
+};
+
+/** `/sync/playback` → paused items, newest first. Anything without a Simkl id is skipped. */
+export function parsePlayback(json: unknown): PausedItem[] {
+  const out: PausedItem[] = [];
+  for (const r of Array.isArray(json) ? (json as any[]) : []) {
+    const media = r?.movie ?? r?.show ?? r?.anime;
+    const simklId = num(media?.ids?.simkl) ?? num(Number(media?.ids?.simkl_id));
+    const playbackId = num(r?.id);
+    if (!media || !simklId || playbackId === null) continue;
+    const type: SimklType = r?.movie ? 'movie' : r?.anime ? 'anime' : 'show';
+    const progress = num(r?.progress);
+    out.push({
+      playbackId,
+      simklId,
+      type,
+      title: str(media?.title) ?? 'Untitled',
+      season: type === 'movie' ? null : (num(r?.episode?.season) ?? (type === 'anime' ? 1 : null)),
+      episode: type === 'movie' ? null : num(r?.episode?.number ?? r?.episode?.episode),
+      progress: progress === null ? 0 : Math.max(0, Math.min(100, progress)),
+      pausedAt: str(r?.paused_at) ?? str(r?.watched_at),
+    });
+  }
+  return out.sort((a, b) => (b.pausedAt ?? '').localeCompare(a.pausedAt ?? ''));
+}
 
 /* ------------------------------------------------------------- lists, stats */
 

@@ -29,6 +29,7 @@ import {
 } from '../../manga/mangaLogic';
 import { useTabBarSpace } from '../chrome';
 import { tick } from '../haptics';
+import { confirmAction } from '../confirm';
 import Icon from '../Icon';
 import IconButton from '../IconButton';
 import { enterUp } from '../motion';
@@ -61,6 +62,7 @@ export default function MangaScreen({
   onMode,
   onBrowse,
   onDashboard,
+  onFeed,
   onDownloads,
   downloads,
   initialDeleted = false,
@@ -80,6 +82,8 @@ export default function MangaScreen({
   /** Sources, servers and extensions. */
   onBrowse: () => void;
   onDashboard: () => void;
+  /** Updates (new chapters) or History (what you read). */
+  onFeed: (tab: 'updates' | 'history') => void;
   onDownloads: () => void;
   downloads: DownloadState;
   initialDeleted?: boolean;
@@ -146,8 +150,10 @@ export default function MangaScreen({
   ];
   const moreOptions: OptionItem[] = [
     { label: 'Sort', hint: MANGA_SORTS.find((s) => s.key === sort)?.label, onPress: () => setTimeout(() => setMenu('sort'), 250) },
-    ...(items.some((s) => s.sourceId) ? [{ label: 'Check for new chapters', hint: 'Every title from a source', onPress: () => actions.refreshAll().catch(() => undefined) }] : []),
+    ...(items.some((s) => s.sourceId) ? [{ label: 'Check for new chapters', hint: 'Every title from a source', onPress: () => actions.refreshAll().catch(failed) }] : []),
     { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
+    ...(items.some((s) => s.sourceId) ? [{ label: 'Updates', hint: 'New chapters, newest first', onPress: () => onFeed('updates') }] : []),
+    ...(items.some((s) => s.chapters.some((c) => c.readAt)) ? [{ label: 'History', hint: 'What you read, by day', onPress: () => onFeed('history') }] : []),
     { label: 'Reading stats and Wrapped', onPress: onDashboard },
     { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
@@ -394,10 +400,17 @@ export default function MangaScreen({
           </TouchableOpacity>
           <TouchableOpacity
             disabled={!ids.length}
-            onPress={() => {
-              actions.trash(ids).catch(() => undefined);
-              setSelected(null);
-            }}
+            onPress={() =>
+              confirmAction(
+                `Delete ${ids.length} ${ids.length === 1 ? 'title' : 'titles'}?`,
+                'They go to Recently Deleted with their read marks; you can bring them back from there.',
+                () => {
+                  actions.trash(ids).catch(() => undefined);
+                  setSelected(null);
+                },
+                { label: 'Delete', destructive: true }
+              )
+            }
             style={styles.selectBtn}>
             <Icon name="trash" size={14} color={p.danger} />
           </TouchableOpacity>

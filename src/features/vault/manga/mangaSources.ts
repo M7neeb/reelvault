@@ -11,19 +11,20 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { loadAniListLinks, saveAniListLinks } from './anilist';
 
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { getSetting, setSetting } from '../library';
 import { ensureMangaRoot, fileIn, fileUri, seriesFolderFor } from './mangaFiles';
 import type { MangaChapter, MangaSeries } from './mangaLogic';
-import { newTitles, planTachiImport, readTachiBackup, tachiSourceOf, type PlannedTitle } from './mangaBackup';
+import { newTitles, progressToMerge, planTachiImport, readTachiBackup, tachiSourceOf, type PlannedTitle } from './mangaBackup';
 import { normTitle } from './mangaLogic';
-import { addMangaTag, getSeries, insertChapter, insertSeries, listManga, setChapterSource, setSeriesSource, updateSeries } from './mangaStore';
+import { addMangaTag, getSeries, insertChapter, insertSeries, listManga, saveProgress as saveMangaProgress, setChaptersRead, setChapterSource, setSeriesSource, updateSeries } from './mangaStore';
 import { loadExtension, parseRepo, type RepoExtension } from './sources/extensions';
 import { sourceHttp } from './sources/http';
 import { mangadexSource } from './sources/mangadex';
 import { opdsSource } from './sources/opds';
-import { DEFAULT_BROWSE, normaliseServerUrl, parseBrowsePrefs, type BrowsePrefs, type ServerConfig, type ServerKind } from './sources/prefs';
+import { DEFAULT_BROWSE, normaliseServerUrl, parseBrowsePrefs, updatesFor, type BrowsePrefs, type ServerConfig, type ServerKind } from './sources/prefs';
 import { suwayomiSource, suwayomiSources, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
 import { basicAuth, infoOf, type ImageRef, type MangaSource, type SourceChapter, type SourceDetails, type SourceInfo } from './sources/types';
 
@@ -225,6 +226,23 @@ export async function refreshRepos(prefs: BrowsePrefs): Promise<{ prefs: BrowseP
   return { prefs: next, failed };
 }
 
+/** Every installed extension that has a newer version in its repo, updated. Resolves the new settings and the names updated. */
+export async function updateExtensions(prefs: BrowsePrefs): Promise<{ prefs: BrowsePrefs; updated: string[] }> {
+  let next = (await refreshRepos(prefs)).prefs;
+  const updated: string[] = [];
+  for (const i of updatesFor(next)) {
+    const latest = next.repos.find((r) => r.url === i.repoUrl)?.extensions.find((e) => e.id === i.id);
+    if (!latest) continue;
+    try {
+      next = await installExtension(next, i.repoUrl, latest);
+      updated.push(latest.name);
+    } catch (e) {
+      console.log(`[MANGA] extension ${i.name} not updated: ${String(e)}`);
+    }
+  }
+  return { prefs: next, updated };
+}
+
 export async function removeRepo(prefs: BrowsePrefs, url: string): Promise<BrowsePrefs> {
   for (const i of prefs.installed.filter((x) => x.repoUrl === url)) deleteCode(i.id);
   const next = { ...prefs, repos: prefs.repos.filter((r) => r.url !== url), installed: prefs.installed.filter((x) => x.repoUrl !== url) };
@@ -279,6 +297,12 @@ async function saveCover(seriesId: string, folder: string, cover: ImageRef | nul
     console.log(`[MANGA] cover for ${seriesId} not saved: ${String(e)}`);
     return null;
   }
+}
+
+/** Saves a cover from an address (AniList) and makes it the title's cover. */
+export async function saveCoverFrom(seriesId: string, folder: string, url: string): Promise<void> {
+  const cover = await saveCover(seriesId, folder, { uri: url });
+  if (cover) await updateSeries([seriesId], { cover });
 }
 
 function chapterRow(seriesId: string, c: SourceChapter, position: number): MangaChapter {
@@ -481,12 +505,31 @@ export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, o
   ensureMangaRoot();
   const backup = await readTachiBackup(bytes);
   const plan = planTachiImport(backup, Date.now());
-  const existing = (await listManga()).filter((x) => !x.deletedAt).map((x) => x.title);
+  const have = (await listManga()).filter((x) => !x.deletedAt);
+  const existing = have.map((x) => x.title);
   const todo = newTitles(plan, existing);
+  // Titles you already have keep whichever progress is furthest.
+  let merged = 0;
+  for (const t of plan) {
+    const s = have.find((x) => normTitle(x.title) === normTitle(t.title));
+    if (!s) continue;
+    const { read, pages } = progressToMerge(s.chapters, t.chapters);
+    for (const r of read) await setChaptersRead([r.id], true, r.at);
+    for (const p of pages) await saveMangaProgress(s.id, p.id, p.page, false, Date.now());
+    merged += read.length + pages.length;
+  }
+  if (merged) onStep(`Brought ${merged} ${merged === 1 ? 'chapter' : 'chapters'} of titles you have up to date`);
   const ids: { id: string; t: PlannedTitle }[] = [];
   for (const [i, t] of todo.entries()) {
     onStep(`Adding your titles… ${i + 1} of ${todo.length}`);
     ids.push({ id: await insertPlanned(t), t });
+  }
+  // Titles you tracked on AniList stay linked to it.
+  const tracked = ids.filter((x) => x.t.anilistId);
+  if (tracked.length) {
+    const links = await loadAniListLinks();
+    for (const x of tracked) links[x.id] = x.t.anilistId!;
+    await saveAniListLinks(links);
   }
   // Covers (best effort: some sites only show them to their own app).
   for (const [i, { id, t }] of ids.entries()) {

@@ -11,6 +11,7 @@ import { File, Paths } from 'expo-file-system';
 import { AppState } from 'react-native';
 
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
+import { ReelVaultWifi } from '../../../../modules/reelvault-wifi';
 import { chapterFolderFor, dirOf, fileIn, removeDir } from './mangaFiles';
 import { pageFileName } from './mangaLogic';
 import { pagesOf } from './mangaSources';
@@ -51,6 +52,25 @@ export function subscribeDownloads(l: Listener): () => void {
 export const downloadProgress = () => current;
 export const downloadsPaused = () => paused;
 
+/** "Wi-Fi only" is on and the phone is not on Wi-Fi: the queue waits. (Before build 17 the phone cannot tell, so it never waits.) */
+export function waitingForWifi(): boolean {
+  let prefs: BrowsePrefs;
+  try {
+    prefs = getPrefs();
+  } catch {
+    return false;
+  }
+  if (!prefs.wifiOnly || typeof ReelVaultWifi?.onWifi !== 'function') return false;
+  try {
+    return !ReelVaultWifi.onWifi();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether this app build can tell Wi-Fi from mobile data. */
+export const canTellWifi = typeof ReelVaultWifi?.onWifi === 'function';
+
 /** Starts the runner (once, at app start). */
 export function startDownloads(prefs: () => BrowsePrefs, chapterDone: (seriesId: string) => void): void {
   getPrefs = prefs;
@@ -80,14 +100,16 @@ const extOf = (uri: string) => {
   return m ? `p.${m[1].toLowerCase()}` : 'p.jpg';
 };
 
-async function withRetry<T>(job: () => Promise<T>, times = 3): Promise<T> {
+async function withRetry<T>(job: () => Promise<T>, times = 3, wait = 800): Promise<T> {
   let last: unknown;
   for (let i = 0; i < times; i++) {
     try {
       return await job();
     } catch (e) {
       last = e;
-      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+      // Paused or cancelled: no point trying again.
+      if (/^(Error: )?(Paused|Cancelled)$/.test(String(e))) throw e;
+      await new Promise((r) => setTimeout(r, wait * (i + 1)));
     }
   }
   throw last;
@@ -106,7 +128,9 @@ async function downloadOne(row: DownloadRow): Promise<void> {
     return;
   }
   const prefs = getPrefs();
-  const pages = await withRetry(() => pagesOf(series, chapter, prefs));
+  const tries = prefs.patient ? 6 : 3;
+  const wait = prefs.patient ? 2500 : 800;
+  const pages = await withRetry(() => pagesOf(series, chapter, prefs), tries, wait);
   if (!pages.length) throw new Error('The source gave no pages for this chapter');
   let free = Infinity;
   try {
@@ -146,7 +170,7 @@ async function downloadOne(row: DownloadRow): Promise<void> {
           check();
           if (dest.exists) dest.delete();
           await File.downloadFileAsync(p.uri, dest, { headers: p.headers ?? {} });
-        });
+        }, tries, wait);
         check();
         if (prefs.smallerPages && ReelVaultMedia) await ReelVaultMedia.shrinkImage(dest.uri, 1800, 0.82).catch(() => -1);
         size += dest.size ?? 0;
@@ -156,7 +180,7 @@ async function downloadOne(row: DownloadRow): Promise<void> {
         emit();
       }
     };
-    const results = await Promise.allSettled([worker(), worker(), worker()]);
+    const results = await Promise.allSettled(Array.from({ length: prefs.parallel ?? 3 }, () => worker()));
     const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (stop || failed) {
       removeDir(folder);
@@ -181,6 +205,10 @@ export function kickDownloads(): void {
     try {
       for (;;) {
         if (paused) break;
+        if (waitingForWifi()) {
+          emit(true);
+          break;
+        }
         const next = (await listDownloads()).find((r) => r.state === 'queued');
         if (!next) break;
         try {
