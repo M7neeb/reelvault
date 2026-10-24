@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/media/banner.png" alt="ReelVault — your videos, audiobooks and shows, kept and loved on your iPhone" width="100%">
+  <img src=".github/media/banner.png" alt="ReelVault: your videos, audiobooks and manga in one app on your iPhone. Nothing is uploaded." width="100%">
 </p>
 
 <p align="center">
@@ -12,9 +12,10 @@
 </p>
 
 <p align="center">
-  <b>A local-first video and audio vault for iPhone.</b><br>
-  Import your videos, audio and audiobooks, keep them in one place, and organise them with keywords,<br>
-  ratings and search. Everything stays on the device: no account, no server, no telemetry.
+  <b>A local-first vault for your videos, audiobooks and manga on iPhone.</b><br>
+  Keep your videos, audio, audiobooks and manga in one place, organise them with keywords, ratings<br>
+  and one search for everything, and track your shows with Simkl. Everything stays on the device:<br>
+  no account, no server, no telemetry.
 </p>
 
 <p align="center">
@@ -37,7 +38,7 @@
     </td>
     <td width="33%" valign="top">
       <h3>🎬 A player that feels right</h3>
-      Opens with its controls, goes full screen when you ask, and brings every control back over the video with a tap. Scrub previews, speed, loop, Up Next, AirPlay and picture in picture.
+      A film-strip scrubber with bookmarks, one tidy player menu, Add To album, nearby videos, and a tap that shows only the video. Speed, loop, Up Next, AirPlay and picture in picture.
     </td>
     <td width="33%" valign="top">
       <h3>📊 Your watching, told well</h3>
@@ -56,6 +57,20 @@
     <td width="33%" valign="top">
       <h3>🗂️ Organised your way</h3>
       Keywords that nest, smart albums that fill themselves, forgiving search, duplicate clean-up and HashPhotos info brought across.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>📚 Manga and comics</h3>
+      Import CBZ files and folders or browse sources, download chapters, and read in paged, vertical or webtoon mode. Tachimanga backups come across.
+    </td>
+    <td width="33%" valign="top">
+      <h3>🔎 One search for everything</h3>
+      Videos, audio, books, manga and your Simkl titles found as you type, with Jump back in to carry on where you stopped.
+    </td>
+    <td width="33%" valign="top">
+      <h3>🎁 Wrapped for everything</h3>
+      A Wrapped for videos, audio, reading and Simkl, any week, month or year, shared as a picture. Plus a Videos + Manga mix.
     </td>
   </tr>
 </table>
@@ -98,6 +113,8 @@
 - **Library home rows** that play (recently added, your best, today's picks), **pinch the grid** to resize tiles, and grouping by day, week, month, year, rating, keyword, series or length with jump chips
 - **Pinned shelf** at the top of the library (pin from the player's menu, hold to unpin)
 - **Haven't watched in a year** shelf and a **Random** button that favours what you rarely see
+- **Silent grid preview** (optional) — tiles play a few seconds without sound as you scroll
+- **Spreadsheet export** of your library: titles, ratings, keywords, plays and more
 
 </details>
 
@@ -120,8 +137,10 @@
 <details>
 <summary><b>▶️ Player</b></summary>
 
-- **Player** — opens with the controls (or the video alone, or zoomed to fill: Open Videos in the player's menu) and never turns on its own; full screen sideways (turn the phone or tap the button) with every control over the video on a tap, hiding again by itself; a full-width playback bar, a soft glow of the video's colours around it, big play and 10-second buttons that fade while it plays, a frame preview while you scrub, pinch to fill, playback speed, loop, Up Next with a countdown, a screen lock, picture in picture and sound that keeps playing in the background
-- **Viewer gestures** — swipe between videos, drag down to close, double-tap to jump 10 s, drag the bar to scrub
+- **Player** — a clean header (back, date and time, info, edit), an **Add To** album button, and one capsule bar: play, a **film strip that is the scrubber** (slide up for fine scrubbing, bookmarks marked on it), mute and a single **player menu** (speed, loop, autoplay, bookmarks, fill, glow, picture in picture, AirPlay, lock and full screen)
+- **Nearby videos** in a strip under the player, a tap to jump; tap the video to see only the video, tap again for the controls; sideways shows a slim bar that hides by itself
+- **Skip the Start** for an album (jump past intros), a soft glow of the video's colours, pinch to fill, Up Next with a countdown, a screen lock, picture in picture and sound that keeps playing in the background
+- **Viewer gestures** — swipe between videos, drag down to close, double-tap the sides to jump 10 s
 - **AirPlay** — play on an Apple TV or AirPlay TV from the viewer
 - **Slideshow** — order, clip length, fade / zoom / slide transitions, titles, sound and repeat, with story bars and taps to move on
 
@@ -132,7 +151,8 @@
 
 - **Audio section** (Audio mode of the Videos tab) — your own audio files and audiobooks (MP3, M4A, M4B, AAC, WAV, AIFF, CAF, FLAC, Opus) and **EPUB 3 books with read-along**: the sentence being read lights up as the narration plays, tap any sentence to play from there, adjustable text size
 - Several files of one album become one book with a chapter per file; M4B and MP3 chapter marks are read
-- A player with chapters, back 15 / forward 30, speed up to 3×, a sleep timer (minutes or the end of the chapter), bookmarks with notes, smart rewind after a pause, background play and the lock screen
+- Extras next to a book: a PDF, an ebook or pictures; add more files to a book later
+- A player with chapters, back 15 / forward 30, speed up to 3× with favourite speeds, a sleep timer (minutes or the end of the chapter), bookmarks with notes, smart rewind after a pause, background play and the lock screen
 - Ratings with decimals, status, keywords, notes, search, filters, sorting, Continue listening, select-to-edit, Private, Recently Deleted, listening stats, a year heat map and an Audio Wrapped
 - **Light on storage**: a book is unpacked once, a piece at a time, straight into its folder (no second copy, nothing cached, nothing grows while you listen), covers are kept small, and the Storage page shows what it takes
 
@@ -146,9 +166,32 @@
 - **Year heat map** — a whole year of days as twelve little calendars, coloured by watch time
 - **Memories** — your videos made into little films: on this day, a year ago this month, your first videos, milestones (your 100th video), after dark, trips away from home, big days, the best of each month and season, themes from your tags, favourites, forgotten gems and whole years, played as clips with sound in a Gentle, Upbeat or Epic mood; make your own from a keyword, album, dates and rating, or shuffle; quick mixes, trailers that play on the cards, and a clip grid and Up Next at the end; **then and now** plays a keyword or a place filmed years apart, old and new side by side
 - **Wrapped** — your year, months, weeks or any range as a story that plays your own videos with sound: a guess-your-#1 quiz, a top-5 countdown and list, your #1 of every month, your video era, comfort video, biggest day, throwback, hidden gem, taste, habits, your video age, the rewatch meter, your watching club, this year against last year, your reviews and a persona; a Wrapped for one keyword, album or series
-- **Badges** — a trophy room of 90+ badges: levels and XP, a full-screen reveal for each new badge, medals you can tilt, a showcase, weekly and monthly challenges, personal records, your journey, the badge road, and badges for memories, Wrapped, trips and secret dates
+- **Badges** — a trophy room of 90+ badges, with Reading and Listening badges too: levels and XP, a full-screen reveal for each new badge, medals you can tilt, a showcase, weekly and monthly challenges, personal records, your journey, the badge road, and badges for memories, Wrapped, trips and secret dates
 - **Live cards** — Dashboard, Memories, Wrapped and History cards play their video with sound while on screen (one at a time, with a mute button), showing the whole picture over a blurred copy of itself instead of a cropped zoom
 - **Notifications** — a Sunday summary (your week, your #1 and your streak), On this day, the monthly Wrapped (the 1st), the yearly Wrapped (1 December), the weekly Wrapped, and new episodes from the Simkl calendar (a bell per title)
+
+</details>
+
+<details>
+<summary><b>📚 Manga and comics</b></summary>
+
+- **Manga mode** in the Videos tab — manga, manhwa and comics from CBZ or ZIP files, folders or pictures; chapters join their series in order and ComicInfo.xml is read
+- **A cover library** with Continue reading, status, rating, keywords, unread counts, filters, sorting, select, Private and Recently Deleted; covers can take their colours from the art
+- **Sources** — browse MangaDex, your own Komga, Kavita or Suwayomi server, or extensions from repos you add (see [`extensions/`](./extensions)); read online or download
+- **Downloads** — a queue you can pause and retry, smaller pages to save space, Download everything, Wi-Fi only, and saving a chapter as a .cbz with ComicInfo.xml
+- **New chapters** checked in the background, with a notification and optional automatic download, and an updates feed
+- **The reader** — right to left, left to right, vertical and webtoon (long strip), pinch zoom, a page slider, auto-scroll, page fit, filters, crop borders, two pages side by side when sideways, tap zones, the chapter list, and a page menu to set the cover, share, save or reload a page; pages and the next chapter load ahead and the screen stays on
+- **Reading insights** — a dashboard, History, Memories, Wrapped for any week, month or year (shared as a picture), Badges and Storage, just like Videos
+- **Tachimanga and Tachiyomi backups** import, link to a source, and merge into titles you already have
+
+</details>
+
+<details>
+<summary><b>🔎 Search</b></summary>
+
+- **One search tab for everything** — your videos, audio, books, manga and the Simkl titles you follow, found as you type and forgiving of typos
+- **Jump back in** — the video, book, chapter or episode you were in the middle of, one tap away
+- Scopes for All, Mine, Shows, Movies and Anime, recent searches and a This week card
 
 </details>
 
@@ -157,9 +200,10 @@
 
 - **Overview mode** — rate and track your videos like shows (everything starts as To Watch; only you mark a video Watched, however much of it you have played), with a spotlight that plays and moves through your titles, rate-from-the-card, recently watched, Surprise Me, a status bar and your ratings 1–10; series with per-episode ratings, and the info of removed videos kept; a title page that plays the video, a chart of every episode's rating, episode progress, your review, rewatches with dates, Plan to Watch in the order you drag it into, and your stats (ratings month by month, finished fastest, most rewatched, where you changed your mind)
 - **Simkl** — Up Next as a big card with a one-tap watched, this week's calendar and what is new this week on the home screen; stats with genres month by month, hours per show and how many shows you finish
-- **Your own lists** of movies, shows and anime on every Simkl tab: **Add many** pastes a whole list of names (one per line) and finds each on Simkl; every title has a **Google** button, and the list keeps which ones you have searched (Not searched / Searched)
+- **Continue watching** with the time left, **Watched up to here** on any episode, finale badges, and a status change for several titles at once
+- **Your own lists** of movies, shows and anime on every Simkl tab: **Pick from mine** ticks titles from your library, **Add to list** works on several selected titles, and **Add many** pastes a whole list of names (one per line) and finds each on Simkl; every title has a **Google** button, and the list keeps which ones you have searched
 - **Simkl dashboard** — this week by day against last week, today / this month / this year, your streak, what is waiting in Up Next and how long it would take to finish, your year in days, the next milestones, your library by status, your top title this month and the last days you watched something
-- **Simkl Wrapped** — a story of a year (or a month) of movies, shows and anime: your hours, the split between them, a guess-your-#1 quiz, your top five, your genres, your biggest binge, your busiest month, your longest streak, what you discovered and finished, your best rated, the kind of watcher you are, and a summary to share
+- **Simkl Wrapped** — a story of a year (or a month) of movies, shows and anime, also shared as a picture: your hours, the split between them, a guess-your-#1 quiz, your top five, your genres, your biggest binge, your busiest month, your longest streak, what you discovered and finished, your best rated, the kind of watcher you are, and a summary to share
 
 </details>
 
@@ -169,7 +213,7 @@
 - **Storage** — how full the phone is, a tidiness grade, big videos you rarely watch to shrink, how long the free space lasts, a map of your biggest videos, ways to free space, how the library grew, and size by quality, keyword, format and year
 - **Make Smaller** — shrink videos to HEVC, including ones Apple's exporter rejects (such as game captures with broken frame timing)
 - **Small on the phone** — covers and filmstrip frames saved small, a clean-up after every start (leftover temporary files, old frames), how much each part of the app takes with Clean up now, a space planner, Recently Deleted kept 1 to 30 days, and shrinking new imports
-- **Backup of all your info** — ratings, keywords, albums, smart filters, series, watch history, bookmarks, where to continue, Simkl links and settings in one file; restoring adds to what is there and matches renamed videos
+- **Backup of all your info** — ratings, keywords, albums, smart filters, series, watch history, bookmarks, where to continue, your manga library and reading progress, Simkl links and settings in one file; restoring adds to what is there and matches renamed videos
 - **Automatic backups** of all your info every week (the last four kept), restorable in Settings and copied to a computer with the Apple Devices app
 - **Quick with big libraries** — tested with 5,000 videos and 40,000 plays
 
@@ -234,10 +278,11 @@ src/app/                  screens (expo-router file-based routes)
 src/db/
   schema.ts               append-only migrations
   index.ts                open + migrate, single shared handle
-src/features/vault/       videos, audio, player, stats, memories, wrapped, badges
+src/features/vault/       videos, audio, manga, player, stats, memories, wrapped, badges
 src/features/simkl/       Simkl sign-in, lists, calendar, dashboard, Wrapped
-src/features/home/        home screen
+src/features/home/        home screen and the search for everything
 modules/                  native Swift modules
+extensions/               how to make a manga source extension
 tests/                    unit tests (node --test)
 ```
 
