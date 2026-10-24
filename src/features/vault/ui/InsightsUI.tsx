@@ -47,6 +47,9 @@ import { toOvVideo } from './overviewParts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
 import { previous, WrappedPicker, WrappedStory, type StoryInput, type WrappedGroup } from './WrappedUI';
+import { MixWrappedCard, type MixVideos } from './manga/MangaWrapped';
+import type { MangaUiSeries } from './manga/mangaTypes';
+import type { MangaRead } from '../manga/mangaLogic';
 import { clubFor, yearBefore } from '../wrappedExtras';
 import { EMPTY_OV_EXTRA, type OvExtra } from '../ovExtra';
 import { playable } from '../overview';
@@ -138,7 +141,10 @@ export default function VideoInsightsModal({
   onClose,
   reading,
   listening,
+  mix,
 }: {
+  /** Manga and your videos, for the Videos + Manga Wrapped. */
+  mix?: { manga: { items: MangaUiSeries[]; loadReads: () => Promise<MangaRead[]> }; videos: MixVideos };
   /** The Manga section, for the Reading badges. */
   reading?: { items: ReadingSeries[]; loadReads: () => Promise<{ startedAt: number; readMs: number; pages: number }[]> };
   /** The Audio section, for the Listening badges. */
@@ -520,6 +526,11 @@ export default function VideoInsightsModal({
                   }}
                   onDeleteCustom={(id) => savePrefs((cur) => ({ customMemories: cur.customMemories.filter((c) => c.id !== id) }))}
                 />
+              )}
+              {tab === 'wrapped' && mix && mix.manga.items.length > 0 && (
+                <View style={{ marginBottom: 14 }}>
+                  <MixWrappedCard manga={mix.manga} videos={mix.videos} />
+                </View>
               )}
               {tab === 'wrapped' && <WrappedPicker items={items} plays={plays} simkl={sk} thumbs={thumbs} groups={wrappedGroups} onOpen={(r, scope) => openStory(r, scope)} onOpenGroup={openGroup} />}
               {tab === 'badges' && (

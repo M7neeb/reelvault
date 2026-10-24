@@ -106,6 +106,7 @@ import { friendlyName } from '../names';
 import { DuplicatePrompt } from './dupPrompt';
 import AudioSection from './audio/AudioSection';
 import MangaSection from './manga/MangaSection';
+import type { MixVideos } from './manga/MangaWrapped';
 import { useAudioPlaybackOptional } from './audio/playback';
 
 const EMPTY_RESUME = new Map<string, number>();
@@ -434,6 +435,18 @@ function VaultScreenBody({
   }, [jump, publicItems]); // eslint-disable-line react-hooks/exhaustive-deps
   const privateOpen = privateUnlocked && !decoy;
   const privateItems = useMemo(() => (privateOpen ? items.filter((v) => v.isPrivate) : []), [items, privateOpen]);
+  // Your videos for the Videos + Manga Wrapped (private ones only when unlocked).
+  const mixVideos = useMemo<MixVideos>(() => {
+    const byId = new Map(items.filter((v) => privateOpen || !v.isPrivate).map((v) => [v.id, v]));
+    return {
+      plays: allPlays.filter((x) => byId.has(x.videoId)),
+      nameOf: (id) => {
+        const v = byId.get(id);
+        return v ? friendlyName(v) : null;
+      },
+      thumbOf: (id) => byId.get(id)?.thumbSource ?? null,
+    };
+  }, [items, allPlays, privateOpen]);
   const publicIds = useMemo(() => new Set(publicItems.map((v) => v.id)), [publicItems]);
   const publicAlbums = useMemo(() => albums.filter((a) => !a.isPrivate), [albums]);
   const privateAlbums = useMemo(() => (privateOpen ? albums.filter((a) => a.isPrivate) : []), [albums, privateOpen]);
@@ -1691,6 +1704,7 @@ function VaultScreenBody({
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
           <MangaSection
             data={manga}
+            videos={mixVideos}
             onMode={switchMode}
             showPrivate={privateOpen}
             onUnlockPrivate={() => void requestUnlock(() => undefined)}
@@ -1781,6 +1795,7 @@ function VaultScreenBody({
           actions={actions}
           simkl={simkl}
           reading={manga ? { items: manga.items, loadReads: manga.actions.loadReads } : undefined}
+          mix={manga ? { manga: { items: manga.items, loadReads: manga.actions.loadReads }, videos: mixVideos } : undefined}
           listening={audio ? { items: audio.items, loadPlays: audio.actions.loadPlays } : undefined}
           ratingLabels={prefs.ratingLabels}
           onOpenVideo={(id) => {

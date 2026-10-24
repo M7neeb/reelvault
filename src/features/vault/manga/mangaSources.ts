@@ -7,6 +7,7 @@
  * pages (from the phone when they are on it, else from its source).
  */
 
+import * as SQLite from 'expo-sqlite';
 import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
@@ -17,7 +18,7 @@ import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { getSetting, setSetting } from '../library';
 import { ensureMangaRoot, fileIn, fileUri, seriesFolderFor } from './mangaFiles';
 import type { MangaChapter, MangaSeries } from './mangaLogic';
-import { newTitles, progressToMerge, planTachiImport, readTachiBackup, tachiSourceOf, type PlannedTitle } from './mangaBackup';
+import { newTitles, progressToMerge, planTachiImport, readTachiBackup, tachiSourceOf, TMB_QUERIES, type PlannedTitle, type TmbRows } from './mangaBackup';
 import { normTitle } from './mangaLogic';
 import { addMangaTag, getSeries, insertChapter, insertSeries, listManga, saveProgress as saveMangaProgress, setChaptersRead, setChapterSource, setSeriesSource, updateSeries } from './mangaStore';
 import { loadExtension, parseRepo, type RepoExtension } from './sources/extensions';
@@ -501,9 +502,29 @@ async function insertPlanned(t: PlannedTitle): Promise<string> {
  * sources are linked through your Suwayomi servers when they have the same
  * extension. `onStep` reports progress.
  */
+/** Opens Tachimanga's database (from a .tmb) in memory and reads the tables the import needs. */
+async function openTmb(db: Uint8Array): Promise<TmbRows> {
+  const conn = await SQLite.deserializeDatabaseAsync(db);
+  try {
+    const out = {} as TmbRows;
+    for (const [k, sql] of Object.entries(TMB_QUERIES) as [keyof TmbRows, string][]) {
+      try {
+        out[k] = await conn.getAllAsync<Record<string, unknown>>(sql);
+      } catch {
+        // Older or newer Tachimanga versions may lack a table (TrackRecord, Source).
+        out[k] = [];
+      }
+    }
+    return out;
+  } finally {
+    await conn.closeAsync().catch(() => undefined);
+  }
+}
+
 export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, onStep: (t: string) => void): Promise<BackupSummary> {
   ensureMangaRoot();
-  const backup = await readTachiBackup(bytes);
+  onStep('Reading the backup…');
+  const backup = await readTachiBackup(bytes, openTmb);
   const plan = planTachiImport(backup, Date.now());
   const have = (await listManga()).filter((x) => !x.deletedAt);
   const existing = have.map((x) => x.title);
