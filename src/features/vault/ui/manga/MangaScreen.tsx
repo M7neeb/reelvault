@@ -145,7 +145,7 @@ export default function MangaScreen({
   const addOptions: OptionItem[] = [
     { label: 'From Files', hint: 'CBZ, ZIP, PDF or pictures', onPress: () => actions.importFiles().catch(failed) },
     { label: 'A whole folder', hint: 'A series, or many: one chapter per sub-folder', onPress: () => actions.importFolder().catch(failed) },
-    { label: 'A Tachimanga backup', hint: 'Your library, chapters read and categories (.tachibk)', onPress: () => actions.importBackup().catch(failed) },
+    { label: 'A Tachimanga backup', hint: 'Your library, chapters read and categories (.tmb or .tachibk)', onPress: () => actions.importBackup().catch(failed) },
     { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
   ];
   const moreOptions: OptionItem[] = [

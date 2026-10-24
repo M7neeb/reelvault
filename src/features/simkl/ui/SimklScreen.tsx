@@ -135,6 +135,7 @@ export default function SimklScreen(props: SimklScreenProps) {
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [bulkMenu, setBulkMenu] = useState(false);
+  const [bulkList, setBulkList] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   function togglePick(id: number) {
     tick();
@@ -144,6 +145,20 @@ export default function SimklScreen(props: SimklScreenProps) {
       else n.add(id);
       return n;
     });
+  }
+  async function bulkAddToList(listId: number) {
+    const chosen = items.filter((i) => picked.has(i.simklId)).map(asTitle);
+    setBulkBusy(true);
+    try {
+      await actions.addManyToList(listId, chosen);
+      success();
+      setPicked(new Set());
+      setSelecting(false);
+    } catch {
+      // The status line says what went wrong.
+    } finally {
+      setBulkBusy(false);
+    }
   }
   async function bulkStatus(to: SimklStatus) {
     const chosen = items.filter((i) => picked.has(i.simklId));
@@ -612,14 +627,17 @@ export default function SimklScreen(props: SimklScreenProps) {
 
       {selecting && (
         <View style={[styles.bulkBar, { bottom: Math.max(insets.bottom, tabSpace) + 10 }]}>
-          <Text style={styles.bulkText}>{picked.size ? `${picked.size} selected` : 'Tap titles to select'}</Text>
+          <Text style={styles.bulkText}>{picked.size ? `${picked.size} picked` : 'Tap titles'}</Text>
           {shown.length > 0 && (
             <TouchableOpacity onPress={() => setPicked(picked.size === shown.length ? new Set() : new Set(shown.map((i) => i.simklId)))} hitSlop={8}>
               <Text style={styles.bulkLink}>{picked.size === shown.length ? 'None' : 'All'}</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={[styles.bulkBtn, styles.bulkBtnGhost, (!picked.size || bulkBusy) && { opacity: 0.4 }]} disabled={!picked.size || bulkBusy} onPress={() => setBulkList(true)}>
+            <Text style={[styles.bulkBtnText, styles.bulkBtnGhostText]}>Add to list</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.bulkBtn, (!picked.size || bulkBusy) && { opacity: 0.4 }]} disabled={!picked.size || bulkBusy} onPress={() => setBulkMenu(true)}>
-            <Text style={styles.bulkBtnText}>{bulkBusy ? 'Saving…' : 'Change status'}</Text>
+            <Text style={styles.bulkBtnText}>{bulkBusy ? 'Saving…' : 'Status'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -628,6 +646,16 @@ export default function SimklScreen(props: SimklScreenProps) {
           title={`Move ${picked.size} ${picked.size === 1 ? 'title' : 'titles'} to`}
           options={statusesFor(category).map((s) => ({ label: STATUS_LABELS[s], onPress: () => void bulkStatus(s) }))}
           onClose={() => setBulkMenu(false)}
+        />
+      )}
+      {bulkList && (
+        <OptionsSheet
+          title={`Add ${picked.size} ${picked.size === 1 ? 'title' : 'titles'} to`}
+          options={[
+            ...lists.map((l) => ({ label: `${l.icon ?? '🍿'}  ${l.name}`, hint: `${l.count}`, onPress: () => void bulkAddToList(l.id) })),
+            { label: 'New list…', hint: 'Then add them from the list', onPress: () => setNewList(true) },
+          ]}
+          onClose={() => setBulkList(false)}
         />
       )}
       {pausedMenu && (
@@ -712,7 +740,7 @@ export default function SimklScreen(props: SimklScreenProps) {
       {importing && <ImportSheet actions={actions} onClose={() => setImporting(false)} />}
       {liveList && (
         // A title opened from the list shows over the list, inside it.
-        <ListModal list={liveList} type={category} actions={actions} initialAdding={dev?.addManyOpen} onOpenTitle={setOpen} onClose={() => setOpenList(null)}>
+        <ListModal list={liveList} type={category} actions={actions} library={items} initialAdding={dev?.addManyOpen} onOpenTitle={setOpen} onClose={() => setOpenList(null)}>
           {open && (
             <DetailModal
               item={openItem}
@@ -1142,7 +1170,7 @@ const makeStyles = (p: Palette) =>
       right: SIDE,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14,
+      gap: 10,
       paddingLeft: 16,
       paddingRight: 6,
       paddingVertical: 6,
@@ -1155,7 +1183,9 @@ const makeStyles = (p: Palette) =>
     },
     bulkText: { flex: 1, color: p.text, fontSize: 14, fontWeight: '700' },
     bulkLink: { color: p.link, fontSize: 14, fontWeight: '700' },
-    bulkBtn: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 },
+    bulkBtn: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
+    bulkBtnGhost: { backgroundColor: p.accentSoft },
+    bulkBtnGhostText: { color: p.accent },
     bulkBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
     shelfTitle: { color: p.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
     shelfSub: { color: p.textSecondary, fontSize: 12 },

@@ -2,8 +2,8 @@
  * Your own lists ("Comfort shows", "Watch with Sam"): the shelf on each Simkl
  * tab, the list itself, the "Add to my lists" sheet and the editor. Lists
  * live in ReelVault (Simkl's custom lists are PRO-only and read-only through
- * the API) and can mix movies, shows and anime. "Add many" pastes a whole list
- * of names at once; each title can be looked up on Google, and the list keeps
+ * the API) and can mix movies, shows and anime. "Add many" ticks titles from
+ * your library (or pastes a whole list of names) at once; each title can be looked up on Google, and the list keeps
  * which ones you have searched.
  * Presentational only (see simkl/ui/types.ts).
  */
@@ -22,7 +22,7 @@ import { SheetFrame } from '@/features/vault/ui/sheets';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { googleUrl, parseTitleLines, pickMatch } from '../bulkAdd';
-import { SIMKL_TYPES } from '../logic';
+import { SIMKL_TYPES, STATUS_LABELS, statusesFor, type SimklItem, type SimklStatus } from '../logic';
 import Poster from './Poster';
 import type { CatalogTitle, ListEntry, SimklActions, SimklList, SimklType } from './types';
 
@@ -237,6 +237,113 @@ export function AddToListSheet({
 
 type AddManyResult = { added: number; already: number; notFound: string[] };
 
+const asTitle = (i: SimklItem): CatalogTitle => ({ simklId: i.simklId, type: i.type, title: i.title, year: i.year, poster: i.poster, slug: i.slug, imdbRating: i.imdbRating, simklRating: i.simklRating, rank: i.rank });
+
+/** Tick titles from your library: no typing. */
+function PickFromMine({
+  library,
+  type,
+  inList,
+  picked,
+  onPicked,
+}: {
+  library: SimklItem[];
+  type: SimklType;
+  inList: Set<number>;
+  picked: Set<number>;
+  onPicked: (next: Set<number>) => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const { width } = useWindowDimensions();
+  const [status, setStatus] = useState<SimklStatus | 'all'>('all');
+  const [query, setQuery] = useState('');
+  const ofType = library.filter((i) => i.type === type);
+  const statuses = statusesFor(type).filter((s) => ofType.some((i) => i.status === s));
+  const q = query.trim().toLowerCase();
+  const shown = ofType
+    .filter((i) => (status === 'all' || i.status === status) && (!q || i.title.toLowerCase().includes(q)))
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true }));
+  const free = shown.filter((i) => !inList.has(i.simklId));
+  const allOn = free.length > 0 && free.every((i) => picked.has(i.simklId));
+  const cols = 4;
+  const w = Math.floor((Math.min(width, 700) - 32 - 8 * (cols - 1)) / cols);
+  const h = Math.round(w * 1.48);
+
+  function toggle(id: number) {
+    tick();
+    const n = new Set(picked);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    onPicked(n);
+  }
+
+  if (!ofType.length) return <Text style={styles.sheetHint}>No {SIMKL_TYPES.find((t) => t.key === type)?.plural.toLowerCase()} in your library yet. Use Type names instead.</Text>;
+
+  return (
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersLeft}>
+        {(['all', ...statuses] as const).map((s) => (
+          <TouchableOpacity key={s} style={[styles.filter, status === s && styles.filterOn]} onPress={() => setStatus(s)}>
+            <Text style={[styles.filterText, status === s && styles.filterTextOn]}>
+              {s === 'all' ? `All · ${ofType.length}` : `${STATUS_LABELS[s]} · ${ofType.filter((i) => i.status === s).length}`}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+      <View style={styles.pickTools}>
+        <TextInput
+          style={styles.pickSearch}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Filter (optional)"
+          placeholderTextColor={p.textMuted}
+          keyboardAppearance={p.scheme}
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+        />
+        {free.length > 0 && (
+          <TouchableOpacity
+            onPress={() => {
+              tick();
+              const n = new Set(picked);
+              for (const i of free) {
+                if (allOn) n.delete(i.simklId);
+                else n.add(i.simklId);
+              }
+              onPicked(n);
+            }}
+            hitSlop={8}>
+            <Text style={styles.link}>{allOn ? 'None' : `All ${free.length}`}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <View style={styles.pickGrid}>
+        {shown.map((i) => {
+          const already = inList.has(i.simklId);
+          const on = picked.has(i.simklId);
+          return (
+            <TouchableOpacity key={i.simklId} style={{ width: w }} disabled={already} onPress={() => toggle(i.simklId)} accessibilityLabel={`${i.title}${already ? ', already in the list' : on ? ', selected' : ''}`}>
+              <View style={already ? { opacity: 0.35 } : !on && picked.size ? { opacity: 0.7 } : undefined}>
+                <Poster path={i.poster} title={i.title} width={w} height={h} radius={8} />
+              </View>
+              {!already && (
+                <View style={[styles.pickMark, on && styles.pickMarkOn]} pointerEvents="none">
+                  {on && <Icon name="check" size={11} color="#fff" weight="bold" />}
+                </View>
+              )}
+              <Text style={styles.pickTitle} numberOfLines={1}>
+                {already ? 'In the list' : i.title}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {!shown.length && <Text style={styles.sheetHint}>Nothing matches.</Text>}
+    </>
+  );
+}
+
 /**
  * Paste a list of names (one per line): each one is searched on Simkl and the
  * best match added to the list. Names with no clear match are listed after.
@@ -245,16 +352,22 @@ export function AddManySheet({
   list,
   initialType,
   actions,
+  library = [],
   onClose,
 }: {
   list: SimklList;
   initialType: SimklType;
   actions: SimklActions;
+  /** Your titles, to tick instead of typing names. */
+  library?: SimklItem[];
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const [type, setType] = useState<SimklType>(initialType);
+  const [mode, setMode] = useState<'pick' | 'type'>(library.length ? 'pick' : 'type');
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const inList = new Set(list.ids);
   const [text, setText] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number; name: string } | null>(null);
   const [result, setResult] = useState<AddManyResult | null>(null);
@@ -291,11 +404,28 @@ export function AddManySheet({
     setResult({ added, already: found.length - added, notFound });
   }
 
+  async function addPicked() {
+    if (!picked.size || progress) return;
+    const titles = library.filter((i) => picked.has(i.simklId)).map(asTitle);
+    setProgress({ done: 0, total: titles.length, name: '' });
+    const added = await actions.addManyToList(list.id, titles).catch(() => 0);
+    if (!alive.current) return;
+    success();
+    setProgress(null);
+    setResult({ added, already: titles.length - added, notFound: [] });
+  }
+
   return (
     <SheetFrame
       title="Add many"
       onClose={onClose}
-      action={result ? { label: 'Done', onPress: onClose } : { label: progress ? 'Adding…' : 'Add', onPress: () => void run(), disabled: !wanted.length || !!progress }}>
+      action={
+        result
+          ? { label: 'Done', onPress: onClose }
+          : mode === 'pick'
+            ? { label: progress ? 'Adding…' : picked.size ? `Add ${picked.size}` : 'Add', onPress: () => void addPicked(), disabled: !picked.size || !!progress }
+            : { label: progress ? 'Adding…' : 'Add', onPress: () => void run(), disabled: !wanted.length || !!progress }
+      }>
       {result ? (
         <>
           <View style={styles.resultBig}>
@@ -334,7 +464,20 @@ export function AddManySheet({
         </>
       ) : (
         <>
-          <Text style={styles.sheetHint}>Paste or type names, one per line (numbers, bullets and years like "(2019)" are fine). Each one is looked up on Simkl and added.</Text>
+          {library.length > 0 && (
+            <View style={styles.modeRow}>
+              {(
+                [
+                  ['pick', 'Pick from mine'],
+                  ['type', 'Type names'],
+                ] as const
+              ).map(([k, label]) => (
+                <TouchableOpacity key={k} style={[styles.modeBtn, mode === k && styles.modeBtnOn]} onPress={() => setMode(k)} disabled={!!progress}>
+                  <Text style={[styles.modeText, mode === k && styles.modeTextOn]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           <View style={styles.filtersLeft}>
             {SIMKL_TYPES.map((t) => (
               <TouchableOpacity key={t.key} style={[styles.filter, type === t.key && styles.filterOn]} onPress={() => setType(t.key)} disabled={!!progress}>
@@ -342,6 +485,14 @@ export function AddManySheet({
               </TouchableOpacity>
             ))}
           </View>
+          {mode === 'pick' ? (
+            <>
+              <Text style={styles.sheetHint}>Tap the titles to add. {picked.size ? `${picked.size} selected.` : 'You can pick from all three kinds before adding.'}</Text>
+              <PickFromMine library={library} type={type} inList={inList} picked={picked} onPicked={setPicked} />
+            </>
+          ) : (
+            <>
+          <Text style={styles.sheetHint}>Paste or type names, one per line (numbers, bullets and years like "(2019)" are fine). Each one is looked up on Simkl and added.</Text>
           <TextInput
             style={styles.bigInput}
             value={text}
@@ -363,6 +514,8 @@ export function AddManySheet({
           ) : (
             <Text style={styles.sheetHint}>{wanted.length ? `${wanted.length} ${wanted.length === 1 ? 'title' : 'titles'}` : ' '}</Text>
           )}
+            </>
+          )}
         </>
       )}
     </SheetFrame>
@@ -380,9 +533,12 @@ export function ListModal({
   onOpenTitle,
   onClose,
   initialAdding = false,
+  library,
   children,
 }: {
   list: SimklList;
+  /** Your titles, for ticking in "Add many". */
+  library?: SimklItem[];
   /** Open "Add many" straight away (the browser preview). */
   initialAdding?: boolean;
   /** The tab it was opened from (the kind "Add many" starts with). */
@@ -488,7 +644,7 @@ export function ListModal({
               <Text style={styles.empty}>{searched === 'todo' ? 'You have searched every one of these.' : 'Nothing here.'}</Text>
             ) : (
               <View style={{ alignItems: 'center', gap: 14 }}>
-                <Text style={styles.empty}>Nothing here yet. Open any title and tap My lists, or add a whole list of names at once.</Text>
+                <Text style={styles.empty}>Nothing here yet. Tap Add many to tick titles from your library, or open any title and tap My lists.</Text>
                 <TouchableOpacity style={styles.addMany} onPress={() => setAdding(true)}>
                   <Icon name="plus" size={16} color="#fff" weight="bold" />
                   <Text style={styles.addManyText}>Add many</Text>
@@ -552,7 +708,7 @@ export function ListModal({
         />
       )}
       {editing && <ListEditor list={list} actions={actions} onClose={() => setEditing(false)} />}
-      {adding && <AddManySheet list={list} initialType={type} actions={actions} onClose={() => setAdding(false)} />}
+      {adding && <AddManySheet list={list} initialType={type} actions={actions} library={library} onClose={() => setAdding(false)} />}
       {children}
     </Modal>
   );
@@ -625,4 +781,15 @@ const makeStyles = (p: Palette) =>
     notFound: { color: p.text, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
     rowActions: { flexDirection: 'row', gap: 20 },
     link: { color: p.link, fontWeight: '700', fontSize: 15 },
+    modeRow: { flexDirection: 'row', backgroundColor: p.card, borderRadius: 12, padding: 3 },
+    modeBtn: { flex: 1, borderRadius: 10, paddingVertical: 9, alignItems: 'center' },
+    modeBtnOn: { backgroundColor: p.elevated },
+    modeText: { color: p.textSecondary, fontWeight: '700', fontSize: 14 },
+    modeTextOn: { color: p.text },
+    pickTools: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+    pickSearch: { flex: 1, backgroundColor: p.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, color: p.text, fontSize: 15 },
+    pickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    pickTitle: { color: p.textSoft, fontSize: 11, fontWeight: '600', marginTop: 4 },
+    pickMark: { position: 'absolute', top: 5, right: 5, width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+    pickMarkOn: { backgroundColor: p.accent, borderColor: p.accent },
   });

@@ -1,6 +1,10 @@
 /**
- * Tachimanga / Tachiyomi / Mihon backups (.tachibk, .proto.gz): read and
- * turned into a plan for your library. Pure (tested in tests/manga-backup.test.mjs).
+ * Tachimanga / Tachiyomi / Mihon backups (.tmb, .tachibk, .proto.gz): read
+ * and turned into a plan for your library. Pure (tested in tests/manga-backup.test.mjs).
+ *
+ * Tachimanga's own .tmb is a ZIP holding meta.json and contents.zip, and
+ * contents.zip holds its database (tachimanga.db, SQLite). The caller opens
+ * the database and hands its rows to `tachiFromTachimanga`.
  *
  * The file is a gzipped protocol-buffers message (the layout of Mihon's
  * backup models). Kept: every title in the library with its people, summary,
@@ -163,13 +167,140 @@ export function decodeTachiBackup(proto: Uint8Array): TachiBackup {
   return { mangas, categories, sources };
 }
 
-/** The backup file as picked: gzip, plain, or a ZIP with the backup inside. */
-export async function readTachiBackup(bytes: Uint8Array): Promise<TachiBackup> {
+/* ------------------------------------------------- Tachimanga (.tmb) */
+
+type Row = Record<string, unknown>;
+/** The tables of tachimanga.db that matter, as rows. */
+export type TmbRows = { manga: Row[]; chapters: Row[]; categories: Row[]; categoryManga: Row[]; history: Row[]; sources: Row[]; tracks: Row[] };
+
+/** The SQL that fills TmbRows (source ids as text: they are bigger than JavaScript numbers hold). */
+export const TMB_QUERIES: Record<keyof TmbRows, string> = {
+  manga: 'SELECT id, url, real_url, title, artist, author, description, genre, status, thumbnail_url, in_library, in_library_at, CAST("source" AS TEXT) AS source FROM Manga',
+  chapters: 'SELECT * FROM Chapter',
+  categories: 'SELECT id, "name", "order" FROM Category ORDER BY "order", id',
+  categoryManga: 'SELECT category, manga FROM CategoryManga',
+  history: 'SELECT manga_id, last_chapter_id, last_read_at FROM History',
+  sources: 'SELECT CAST(id AS TEXT) AS id, "name" FROM "Source"',
+  tracks: 'SELECT * FROM TrackRecord',
+};
+
+const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+const n = (v: unknown) => {
+  const x = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(x) ? x : 0;
+};
+/** Tachimanga keeps some times in seconds and some in milliseconds: always milliseconds. */
+const ms = (v: unknown) => {
+  const x = n(v);
+  return x > 0 && x < 100_000_000_000 ? x * 1000 : x;
+};
+
+/** The inner database of a Tachimanga .tmb, or null when the ZIP is something else. */
+export async function tachimangaDb(bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return null;
+  const src = { size: bytes.length, read: (o: number, len: number) => bytes.subarray(o, o + len) };
+  const outer = readZipIndex(src);
+  const contents = outer.find((e) => /(^|\/)contents\.zip$/i.test(e.name));
+  const direct = outer.find((e) => /tachimanga\.db$/i.test(e.name));
+  if (direct) return readEntry(src, direct);
+  if (!contents) return null;
+  const innerBytes = await readEntry(src, contents);
+  const inner = { size: innerBytes.length, read: (o: number, len: number) => innerBytes.subarray(o, o + len) };
+  const db = readZipIndex(inner).find((e) => /\.db$/i.test(e.name));
+  if (!db) throw new Error('This Tachimanga backup has no library inside (tachimanga.db is missing)');
+  return readEntry(inner, db);
+}
+
+/** Tachimanga's database rows, in the same shape as a Tachiyomi backup. */
+export function tachiFromTachimanga(r: TmbRows): TachiBackup {
+  // Titles point at a category by its id here; the plan matches by order, so each gets its place (and no id).
+  const categories = r.categories.map((c, i) => ({ name: s(c.name), order: i, id: 0 }));
+  const orderOf = new Map(r.categories.map((c, i) => [n(c.id), i]));
+  const byManga = <T>(rows: Row[], key: string, map: (row: Row) => T) => {
+    const m = new Map<number, T[]>();
+    for (const row of rows) {
+      const id = n(row[key]);
+      m.set(id, [...(m.get(id) ?? []), map(row)]);
+    }
+    return m;
+  };
+  const chapterUrl = new Map<number, string>();
+  for (const c of r.chapters) chapterUrl.set(n(c.id), s(c.real_url) || s(c.url));
+  const lastRead = new Map<number, number>();
+  for (const h of r.history) lastRead.set(n(h.last_chapter_id), ms(h.last_read_at));
+  const chapters = byManga(r.chapters, 'manga', (c): TachiChapter => {
+    const num = c.chapter_number == null ? -1 : n(c.chapter_number);
+    return {
+      url: s(c.real_url) || s(c.url),
+      name: s(c.name),
+      scanlator: c.scanlator == null || s(c.scanlator) === '' ? null : s(c.scanlator),
+      read: n(c.read) !== 0,
+      bookmark: n(c.bookmark) !== 0,
+      lastPageRead: n(c.last_page_read),
+      dateFetch: ms(c.last_read_at) || lastRead.get(n(c.id)) || ms(c.fetched_at),
+      dateUpload: ms(c.date_upload),
+      number: num,
+      sourceOrder: n(c.source_order),
+    };
+  });
+  const cats = byManga(r.categoryManga, 'manga', (x) => orderOf.get(n(x.category)) ?? -1);
+  const history = byManga(r.history, 'manga_id', (h) => ({ url: chapterUrl.get(n(h.last_chapter_id)) ?? '', lastRead: ms(h.last_read_at), readDuration: 0 }));
+  const tracks = byManga(r.tracks, 'manga_id', (t): TachiTracking => ({
+    syncId: n(t.sync_id),
+    mediaId: n(t.remote_id),
+    title: s(t.title),
+    lastChapterRead: n(t.last_chapter_read),
+    score: n(t.score),
+    status: n(t.status),
+    started: ms(t.start_date),
+    finished: ms(t.finish_date),
+  }));
+  // Read chapters carry when they were last opened (Tachimanga keeps it on the chapter).
+  const mangas = r.manga.map((m): TachiManga => {
+    const id = n(m.id);
+    const chs = chapters.get(id) ?? [];
+    return {
+      source: s(m.source) || '0',
+      url: s(m.real_url) || s(m.url),
+      title: s(m.title),
+      artist: orNull(s(m.artist)),
+      author: orNull(s(m.author)),
+      description: orNull(s(m.description)),
+      genres: s(m.genre)
+        .split(',')
+        .map((g) => g.trim())
+        .filter(Boolean),
+      status: n(m.status),
+      thumbnailUrl: orNull(s(m.thumbnail_url)),
+      dateAdded: ms(m.in_library_at),
+      chapters: chs,
+      categories: cats.get(id) ?? [],
+      tracking: tracks.get(id) ?? [],
+      favorite: n(m.in_library) !== 0,
+      history: [...(history.get(id) ?? []), ...chs.filter((c) => c.read && c.dateFetch).map((c) => ({ url: c.url, lastRead: c.dateFetch, readDuration: 0 }))],
+      notes: null,
+    };
+  });
+  return { mangas, categories, sources: r.sources.map((x) => ({ name: s(x.name), id: s(x.id) })) };
+}
+
+/**
+ * The backup file as picked: Tachimanga's .tmb (its database is opened by
+ * `openTmb`), gzip, plain, or a ZIP with a Tachiyomi backup inside.
+ */
+export async function readTachiBackup(bytes: Uint8Array, openTmb?: (db: Uint8Array) => Promise<TmbRows>): Promise<TachiBackup> {
   let data = bytes;
+  const tmb = await tachimangaDb(bytes);
+  if (tmb) {
+    if (!openTmb) throw new Error('Tachimanga backups open in the app, not here');
+    const backup = tachiFromTachimanga(await openTmb(tmb));
+    if (!backup.mangas.some((m) => m.favorite)) throw new Error('This Tachimanga backup has no titles in your library');
+    return backup;
+  }
   if (data[0] === 0x50 && data[1] === 0x4b) {
-    const src = { size: data.length, read: (o: number, n: number) => data.subarray(o, o + n) };
+    const src = { size: data.length, read: (o: number, len: number) => data.subarray(o, o + len) };
     const entry = readZipIndex(src).find((e) => /\.(tachibk|proto\.gz|proto)$/i.test(e.name) || /backup/i.test(e.name));
-    if (!entry) throw new Error('This ZIP has no Tachiyomi backup inside');
+    if (!entry) throw new Error('This ZIP is not a Tachimanga or Tachiyomi backup');
     data = await readEntry(src, entry);
   }
   if (data[0] === 0x1f && data[1] === 0x8b) data = gunzipSync(data);
