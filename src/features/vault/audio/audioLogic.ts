@@ -160,11 +160,33 @@ export function chapterIndexAt(chapters: ChapterView[], overall: number): number
  * sentence again: nothing for under a minute, then 5 s, 15 s (10 min+),
  * 30 s (an hour+).
  */
-export function smartRewindMs(pausedForMs: number): number {
-  if (pausedForMs < 60_000) return 0;
-  if (pausedForMs < 10 * 60_000) return 5_000;
-  if (pausedForMs < 60 * 60_000) return 15_000;
-  return 30_000;
+export function smartRewindMs(pausedForMs: number, scale = 1): number {
+  if (scale <= 0 || pausedForMs < 60_000) return 0;
+  const base = pausedForMs < 10 * 60_000 ? 5_000 : pausedForMs < 60 * 60_000 ? 15_000 : 30_000;
+  return Math.round(base * scale);
+}
+
+/** Your audio settings: how far smart rewind goes back, and your one-tap speeds. */
+export type AudioPrefs = { rewind: 0 | 0.5 | 1 | 2; favSpeeds: number[] };
+export const DEFAULT_AUDIO_PREFS: AudioPrefs = { rewind: 1, favSpeeds: [1, 1.2, 1.5] };
+export const REWIND_CHOICES: { value: AudioPrefs['rewind']; label: string; hint: string }[] = [
+  { value: 0, label: 'Off', hint: 'Carries on exactly where it stopped' },
+  { value: 0.5, label: 'A little', hint: '2-15 s back' },
+  { value: 1, label: 'Normal', hint: '5-30 s back' },
+  { value: 2, label: 'More', hint: '10-60 s back' },
+];
+
+export function parseAudioPrefs(json: string | null): AudioPrefs {
+  try {
+    const r = json ? JSON.parse(json) : {};
+    const rewind = [0, 0.5, 1, 2].includes(r?.rewind) ? (r.rewind as AudioPrefs['rewind']) : DEFAULT_AUDIO_PREFS.rewind;
+    const favs = Array.isArray(r?.favSpeeds)
+      ? [...new Set<number>(r.favSpeeds.filter((x: unknown) => typeof x === 'number' && (SPEEDS as readonly number[]).includes(x)))].slice(0, 4)
+      : [];
+    return { rewind, favSpeeds: favs.length ? favs : DEFAULT_AUDIO_PREFS.favSpeeds };
+  } catch {
+    return DEFAULT_AUDIO_PREFS;
+  }
 }
 
 /** The next speed in the list (wraps), for the speed button. */

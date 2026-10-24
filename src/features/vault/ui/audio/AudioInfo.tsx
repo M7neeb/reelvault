@@ -7,19 +7,20 @@
  * delete it (to Recently Deleted). Presentational only.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { AUDIO_STATUSES, displayTitle, fmtLength, fmtRating, progressOf, totalMs } from '../../audio/audioLogic';
 import { fmtDateTime, fmtSize } from '../format';
 import { success, tick } from '../haptics';
 import Icon from '../Icon';
-import { PromptSheet } from '../prompts';
+import { OptionsSheet, PromptSheet } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import AudioCover from './AudioCover';
-import type { AudioActions, AudioEdit, AudioUiItem } from './audioTypes';
+import type { AudioActions, AudioEdit, AudioExtraUi, AudioUiItem } from './audioTypes';
+import { showFailure } from '../oops';
 
 type Field = { key: keyof AudioEdit; label: string; placeholder: string; numeric?: boolean; multiline?: boolean };
 const FIELDS: Field[] = [
@@ -35,6 +36,15 @@ const FIELDS: Field[] = [
 export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: { item: AudioUiItem; actions: AudioActions; onPlayFromStart: () => void; onClose: () => void }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const [extras, setExtras] = useState<AudioExtraUi[]>([]);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const loadExtras = () => {
+    actions
+      .listExtras?.(item.id)
+      .then(setExtras)
+      .catch(() => undefined);
+  };
+  useEffect(loadExtras, [item.id, item.size]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(FIELDS.map((f) => [f.key, item[f.key] == null ? '' : String(item[f.key])])));
   const [rating, setRating] = useState(false);
   const [tag, setTag] = useState(false);
@@ -58,7 +68,7 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
   return (
     <SheetFrame title={displayTitle(item)} onClose={onClose}>
       <View style={styles.head}>
-        <TouchableOpacity onPress={() => actions.setCoverFromPhoto(item.id).catch(() => undefined)} accessibilityLabel="Change the cover">
+        <TouchableOpacity onPress={() => actions.setCoverFromPhoto(item.id).catch(showFailure)} accessibilityLabel="Change the cover">
           <AudioCover item={item} size={96} radius={16} />
           <Text style={styles.coverHint}>Change cover</Text>
         </TouchableOpacity>
@@ -96,7 +106,7 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
       <Text style={styles.section}>Keywords</Text>
       <View style={styles.chips}>
         {item.tags.map((t) => (
-          <TouchableOpacity key={t} style={styles.tag} onPress={() => actions.removeTag(item.id, t).catch(() => undefined)} accessibilityLabel={`Remove keyword ${t}`}>
+          <TouchableOpacity key={t} style={styles.tag} onPress={() => actions.removeTag(item.id, t).catch(showFailure)} accessibilityLabel={`Remove keyword ${t}`}>
             <Text style={styles.tagText}># {t}</Text>
             <Icon name="close" size={10} color={p.textSecondary} />
           </TouchableOpacity>
@@ -105,6 +115,46 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
           <Text style={styles.chipText}>+ Keyword</Text>
         </TouchableOpacity>
       </View>
+
+      {(actions.listExtras || actions.addTracks) && (
+        <>
+          <Text style={styles.section}>Extras</Text>
+          {extras.map((x) => (
+            <TouchableOpacity
+              key={x.name}
+              style={styles.extra}
+              onPress={() => actions.openExtra?.(x.uri).catch(showFailure)}
+              onLongPress={() => setRemoving(x.name)}
+              accessibilityLabel={`${x.name}. Hold to remove`}>
+              <Icon name={x.kind === 'pdf' || x.kind === 'book' ? 'book' : x.kind === 'image' ? 'photo' : 'open'} size={16} color={p.accent} />
+              <Text style={styles.extraName} numberOfLines={1}>
+                {x.name}
+              </Text>
+              <Text style={styles.facts}>{fmtSize(x.size)}</Text>
+            </TouchableOpacity>
+          ))}
+          <View style={styles.chips}>
+            {actions.addExtras && (
+              <TouchableOpacity
+                style={styles.chip}
+                onPress={() =>
+                  actions
+                    .addExtras!(item.id)
+                    .then(loadExtras)
+                    .catch(showFailure)
+                }>
+                <Text style={styles.chipText}>+ PDF, ebook or pictures</Text>
+              </TouchableOpacity>
+            )}
+            {actions.addTracks && item.kind === 'audio' && (
+              <TouchableOpacity style={styles.chip} onPress={() => actions.addTracks!(item.id).catch(showFailure)}>
+                <Text style={styles.chipText}>+ More audio files</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {!extras.length && <Text style={styles.facts}>Keep a book's PDF, ebook or pictures with it. More audio files go on the end as new chapters.</Text>}
+        </>
+      )}
 
       <Text style={styles.section}>Details</Text>
       {FIELDS.map((f) => (
@@ -140,7 +190,7 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
           <Text style={styles.actionText}>Play from the start</Text>
         </TouchableOpacity>
         {item.status === 'finished' ? (
-          <TouchableOpacity style={styles.action} onPress={() => actions.reset(item.id, null).catch(() => undefined)}>
+          <TouchableOpacity style={styles.action} onPress={() => actions.reset(item.id, null).catch(showFailure)}>
             <Icon name="repeat" size={15} color={p.text} />
             <Text style={styles.actionText}>Mark as not started</Text>
           </TouchableOpacity>
@@ -155,11 +205,11 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
             <Text style={styles.actionText}>Mark as finished</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity style={styles.action} onPress={() => actions.share(item.id).catch(() => undefined)}>
+        <TouchableOpacity style={styles.action} onPress={() => actions.share(item.id).catch(showFailure)}>
           <Icon name="share" size={15} color={p.text} />
           <Text style={styles.actionText}>{item.kind === 'book' ? 'Share as .epub' : 'Share or save to Files'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.action} onPress={() => actions.update([item.id], { isPrivate: !item.isPrivate }).catch(() => undefined)}>
+        <TouchableOpacity style={styles.action} onPress={() => actions.update([item.id], { isPrivate: !item.isPrivate }).catch(showFailure)}>
           <Icon name="lock" size={15} color={p.text} />
           <Text style={styles.actionText}>{item.isPrivate ? 'Remove from Private' : 'Move to Private'}</Text>
         </TouchableOpacity>
@@ -182,6 +232,23 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
         )}
       </View>
 
+      {removing && (
+        <OptionsSheet
+          title={removing}
+          options={[
+            {
+              label: 'Remove this extra',
+              danger: true,
+              onPress: () =>
+                void actions
+                  .removeExtra?.(item.id, removing)
+                  .then(loadExtras)
+                  .catch(showFailure),
+            },
+          ]}
+          onClose={() => setRemoving(null)}
+        />
+      )}
       {rating && <RatingPicker title="Your rating" value={item.rating || null} onPick={(r) => actions.update([item.id], { rating: r ?? 0 }).catch(() => undefined)} onClose={() => setRating(false)} />}
       {tag && <PromptSheet title="Add a keyword" placeholder="e.g. sleep, series, favourite" onSubmit={(t) => t.trim() && actions.addTag([item.id], t.trim()).catch(() => undefined)} onClose={() => setTag(false)} />}
     </SheetFrame>
@@ -195,6 +262,8 @@ const makeStyles = (p: Palette) =>
     facts: { color: p.textSecondary, fontSize: 13 },
     rate: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, marginTop: 4 },
     rateText: { color: p.text, fontSize: 14, fontWeight: '700' },
+    extra: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 },
+    extraName: { flex: 1, color: p.text, fontSize: 14, fontWeight: '600' },
     section: { color: p.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14 },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     chip: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },

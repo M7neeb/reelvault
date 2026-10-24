@@ -10,8 +10,8 @@
  * Upright, nothing changes.
  */
 
-import type { ReactNode } from 'react';
-import { Modal as RNModal, useWindowDimensions as useRNWindow, View, type ModalProps, type StyleProp, type ViewStyle } from 'react-native';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Modal as RNModal, Platform, useWindowDimensions as useRNWindow, View, type ModalProps, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePalette } from './theme';
@@ -43,9 +43,58 @@ export function SideSafe({ children, style }: { children: ReactNode; style?: Sty
  * themselves out.
  */
 export function Modal({ children, fullBleed, ...props }: ModalProps & { fullBleed?: boolean }) {
-  return (
-    <RNModal supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']} {...props}>
-      {props.transparent || fullBleed ? children : <SideSafe>{children}</SideSafe>}
-    </RNModal>
+  return <GatedModal {...props}>{props.transparent || fullBleed ? children : <SideSafe>{children}</SideSafe>}</GatedModal>;
+}
+
+/*
+ * iOS shows one page or sheet at a time and silently refuses a new one while
+ * the last is still going away (closing a menu and opening Browse in the same
+ * tap did nothing). So a page that opens while another is closing waits until
+ * that one has gone. Every page and sheet goes through here.
+ */
+const CLOSE_MS = Platform.OS === 'ios' ? 480 : 0;
+let closingUntil = 0;
+
+/** Runs `job` once every page or sheet that is closing has gone (for pickers and share sheets opened after one). */
+export function afterModals(job: () => void): void {
+  // Let the close reach the screen first, then wait for it to finish.
+  setTimeout(() => {
+    const wait = closingUntil - Date.now();
+    if (wait > 0) setTimeout(job, wait);
+    else job();
+  }, 60);
+}
+
+/** React Native's Modal, turning with the phone, that waits its turn (see above). */
+export function GatedModal({ visible = true, ...props }: ModalProps) {
+  const [shown, setShown] = useState(false);
+  const wasShown = useRef(false);
+  useLayoutEffect(() => {
+    if (!visible) {
+      setShown(false);
+      return;
+    }
+    const wait = closingUntil - Date.now();
+    if (wait <= 0) {
+      setShown(true);
+      return;
+    }
+    const t = setTimeout(() => setShown(true), wait);
+    return () => clearTimeout(t);
+  }, [visible]);
+  useLayoutEffect(() => {
+    if (shown) wasShown.current = true;
+    else if (wasShown.current) {
+      wasShown.current = false;
+      closingUntil = Math.max(closingUntil, Date.now() + CLOSE_MS);
+    }
+  }, [shown]);
+  // Closed by going away altogether (the usual way here).
+  useLayoutEffect(
+    () => () => {
+      if (wasShown.current) closingUntil = Math.max(closingUntil, Date.now() + CLOSE_MS);
+    },
+    []
   );
+  return <RNModal supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']} {...props} visible={shown} />;
 }

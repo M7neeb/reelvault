@@ -6,8 +6,9 @@
  * delete), and its details and your notes. Presentational only.
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { GatedModal as Modal } from '../screen';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -29,13 +30,18 @@ import { success, tick } from '../haptics';
 import Icon from '../Icon';
 import { OptionsSheet, PromptSheet } from '../prompts';
 import RatingPicker from '../RatingPicker';
-import { sheet, usePalette, useStyles, type Palette } from '../theme';
+import { sheet, usePalette, useStyles, withAccent, type Palette } from '../theme';
 import { tachiSourceOf } from '../../manga/mangaBackup';
 import LinkSheet from './LinkSheet';
+import AniListSheet from './AniListSheet';
+import type { AniListActions, AniListState } from '../../manga/anilistData';
 import MangaCover from './MangaCover';
 import type { BrowseActions, DownloadState, MangaActions, MangaEdit, MangaUiSeries } from './mangaTypes';
+import { showFailure } from '../oops';
 
 type Field = { key: 'title' | 'altTitle' | 'author' | 'artist' | 'notes' | 'description'; label: string; placeholder: string; multiline?: boolean };
+const PUB_LABEL: Record<string, string> = { ongoing: 'Ongoing', completed: 'Completed', hiatus: 'On hiatus', cancelled: 'Cancelled' };
+
 const FIELDS: Field[] = [
   { key: 'title', label: 'Title', placeholder: 'Title' },
   { key: 'altTitle', label: 'Other title', placeholder: 'e.g. the Japanese or English title' },
@@ -54,12 +60,15 @@ export default function MangaDetail({
   children,
   downloads,
   browse,
+  anilist,
 }: {
   series: MangaUiSeries;
   actions: MangaActions;
   downloads?: DownloadState;
   /** For "Find on a source". */
   browse?: BrowseActions;
+  /** AniList: link, details, your list. */
+  anilist?: { state: AniListState; actions: AniListActions };
   /** Opens the reader on this chapter (at the page you left, or the start). */
   onRead: (chapter: MangaChapter, fromStart?: boolean) => void;
   onOpenUrl?: (url: string) => void;
@@ -67,8 +76,21 @@ export default function MangaDetail({
   /** The reader, shown inside this window (one full-screen window at a time on the iPhone). */
   children?: ReactNode;
 }) {
-  const styles = useStyles(makeStyles);
-  const p = usePalette();
+  // The title's own colour (from its cover) for its buttons and bars.
+  const base = usePalette();
+  const [tint, setTint] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    actions
+      .coverColor?.(series.id)
+      .then((c) => live && setTint(c))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [series.id, series.cover]); // eslint-disable-line react-hooks/exhaustive-deps
+  const p = useMemo(() => withAccent(base, tint), [base, tint]);
+  const styles = useMemo(() => makeStyles(p), [p]);
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(FIELDS.map((f) => [f.key, series[f.key] ?? ''])));
   const [rating, setRating] = useState(false);
@@ -76,8 +98,11 @@ export default function MangaDetail({
   const [menu, setMenu] = useState<null | 'mode' | 'kind' | 'more' | 'delete'>(null);
   const [chapterMenu, setChapterMenu] = useState<MangaChapter | null>(null);
   const [newestFirst, setNewestFirst] = useState(false);
+  /** Which chapters the list shows. */
+  const [show, setShow] = useState<'all' | 'unread' | 'phone'>('all');
   const [checking, setChecking] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
+  const [aniOpen, setAniOpen] = useState(false);
   const tachi = tachiSourceOf(series.sourceId);
   const fromSource = !!series.sourceId && !tachi;
   const queue = new Map((downloads?.queue ?? []).filter((q) => q.seriesId === series.id).map((q) => [q.chapterId, q]));
@@ -100,7 +125,10 @@ export default function MangaDetail({
   const pr = progressOf(series);
   const size = series.chapters.reduce((a, c) => a + c.size, 0);
   const pages = series.chapters.reduce((a, c) => a + c.pageCount, 0);
-  const chapters = useMemo(() => (newestFirst ? [...series.chapters].reverse() : series.chapters), [series.chapters, newestFirst]);
+  const chapters = useMemo(() => {
+    const list = show === 'unread' ? series.chapters.filter((c) => !c.readAt) : show === 'phone' ? series.chapters.filter((c) => c.folder && c.pages.length) : series.chapters;
+    return newestFirst ? [...list].reverse() : list;
+  }, [series.chapters, newestFirst, show]);
   const mode = modeOf(series);
 
   const save = (f: Field) => {
@@ -137,7 +165,7 @@ export default function MangaDetail({
               </TouchableOpacity>
             </View>
             <View style={styles.heroRow}>
-              <TouchableOpacity onPress={() => actions.setCoverFromPhoto(series.id).catch(() => undefined)} accessibilityLabel="Change the cover">
+              <TouchableOpacity onPress={() => actions.setCoverFromPhoto(series.id).catch(showFailure)} accessibilityLabel="Change the cover">
                 <MangaCover series={series} width={118} radius={12} />
               </TouchableOpacity>
               <View style={styles.heroText}>
@@ -257,7 +285,7 @@ export default function MangaDetail({
             <Text style={styles.section}>Keywords</Text>
             <View style={styles.chips}>
               {series.tags.map((t) => (
-                <TouchableOpacity key={t} style={styles.tag} onPress={() => actions.removeTag(series.id, t).catch(() => undefined)} accessibilityLabel={`Remove keyword ${t}`}>
+                <TouchableOpacity key={t} style={styles.tag} onPress={() => actions.removeTag(series.id, t).catch(showFailure)} accessibilityLabel={`Remove keyword ${t}`}>
                   <Text style={styles.tagText}># {t}</Text>
                   <Icon name="close" size={10} color={p.textSecondary} />
                 </TouchableOpacity>
@@ -276,6 +304,15 @@ export default function MangaDetail({
 
             <View style={styles.chHead}>
               <Text style={[styles.section, { marginTop: 0, flex: 1 }]}>Chapters</Text>
+              {series.chapters.length > 1 && (
+                <TouchableOpacity
+                  onPress={() => setShow((x) => (x === 'all' ? 'unread' : x === 'unread' && onPhone.length && online.length ? 'phone' : 'all'))}
+                  style={styles.chSort}
+                  accessibilityLabel="Which chapters to show">
+                  <Icon name="options" size={12} color={show === 'all' ? p.textSecondary : p.accent} />
+                  <Text style={[styles.chSortText, show !== 'all' && { color: p.accent }]}>{show === 'all' ? 'All' : show === 'unread' ? 'Unread' : 'On the phone'}</Text>
+                </TouchableOpacity>
+              )}
               {series.chapters.length > 1 && (
                 <TouchableOpacity onPress={() => setNewestFirst((x) => !x)} style={styles.chSort}>
                   <Icon name="sort" size={12} color={p.textSecondary} />
@@ -364,7 +401,7 @@ export default function MangaDetail({
           options={READING_MODES.map((m) => ({
             label: m.label,
             hint: `${m.hint}${m.key === mode ? '  ✓' : ''}`,
-            onPress: () => actions.update([series.id], { readingMode: m.key }).catch(() => undefined),
+            onPress: () => actions.update([series.id], { readingMode: m.key }).catch(showFailure),
           }))}
           onClose={() => setMenu(null)}
         />
@@ -375,7 +412,7 @@ export default function MangaDetail({
           options={MANGA_KINDS.map((k) => ({
             label: k.label,
             hint: (series.kind ?? 'manga') === k.key ? '✓' : undefined,
-            onPress: () => actions.update([series.id], { kind: k.key }).catch(() => undefined),
+            onPress: () => actions.update([series.id], { kind: k.key }).catch(showFailure),
           }))}
           onClose={() => setMenu(null)}
         />
@@ -385,14 +422,24 @@ export default function MangaDetail({
           title={series.title}
           options={[
             ...(fromSource ? [{ label: 'Check for new chapters', onPress: checkNew }] : []),
-            ...(onPhone.some((c) => c.sourceKey) ? [{ label: 'Remove downloads', hint: 'The chapters stay, readable online', onPress: () => actions.removeDownloads(series.id, 'all').catch(() => undefined) }] : []),
+            ...(onPhone.some((c) => c.sourceKey) ? [{ label: 'Remove downloads', hint: 'The chapters stay, readable online', onPress: () => actions.removeDownloads(series.id, 'all').catch(showFailure) }] : []),
             ...(onPhone.length ? [{ label: 'Save all as .cbz', hint: 'Files › On My iPhone › ReelVault › Exports', onPress: () => say(actions.exportCbz(series.id, 'all'), (m: string) => m) }] : []),
             ...(browse ? [{ label: fromSource ? 'Link to another source' : 'Find on a source', onPress: () => setTimeout(() => setLinking(true), 250) }] : []),
             ...(series.sourceUrl && onOpenUrl ? [{ label: 'Open on the website', onPress: () => onOpenUrl(series.sourceUrl!) }] : []),
+            ...(anilist ? [{ label: 'AniList', hint: anilist.state.links[series.id] ? (anilist.state.user ? 'Linked · updates as you read' : 'Linked') : 'Track it, fill in details', onPress: () => setAniOpen(true) }] : []),
             { label: 'Mark all as read', onPress: () => actions.setRead(series.chapters.map((c) => c.id), true).catch(() => undefined) },
             { label: 'Mark all as unread', onPress: () => actions.setRead(series.chapters.map((c) => c.id), false).catch(() => undefined) },
-            { label: 'Change the cover', hint: 'A picture from Files', onPress: () => actions.setCoverFromPhoto(series.id).catch(() => undefined) },
-            { label: series.isPrivate ? 'Remove from Private' : 'Move to Private', onPress: () => actions.update([series.id], { isPrivate: !series.isPrivate }).catch(() => undefined) },
+            { label: 'Change the cover', hint: 'A picture from Photos, or hold a page in the reader', onPress: () => actions.setCoverFromPhoto(series.id).catch(showFailure) },
+            {
+              label: `Publication · ${PUB_LABEL[series.pubStatus?.toLowerCase() ?? ''] ?? (series.pubStatus || 'Not set')}`,
+              hint: 'Tap to change: ongoing, completed, on hiatus, cancelled',
+              onPress: () => {
+                const order = ['ongoing', 'completed', 'hiatus', 'cancelled'];
+                const i = order.indexOf(series.pubStatus?.toLowerCase() ?? '');
+                actions.update([series.id], { pubStatus: i >= order.length - 1 ? null : order[i + 1] }).catch(showFailure);
+              },
+            },
+            { label: series.isPrivate ? 'Remove from Private' : 'Move to Private', onPress: () => actions.update([series.id], { isPrivate: !series.isPrivate }).catch(showFailure) },
             { label: 'Delete', danger: true, hint: 'To Recently Deleted', onPress: () => setTimeout(() => setMenu('delete'), 250) },
           ]}
           onClose={() => setMenu((m) => (m === 'more' ? null : m))}
@@ -420,20 +467,21 @@ export default function MangaDetail({
           title={chapterLabel(chapterMenu)}
           options={[
             isRead(chapterMenu)
-              ? { label: 'Mark as unread', onPress: () => actions.setRead([chapterMenu.id], false).catch(() => undefined) }
-              : { label: 'Mark as read', onPress: () => actions.setRead([chapterMenu.id], true).catch(() => undefined) },
-            ...(!chapterMenu.folder && chapterMenu.sourceKey && !chapterMenu.sourceUrl && !queue.has(chapterMenu.id) ? [{ label: 'Download', onPress: () => actions.download(series.id, [chapterMenu.id]).catch(() => undefined) }] : []),
-            ...(queue.has(chapterMenu.id) ? [{ label: 'Cancel download', onPress: () => actions.cancelDownloads([chapterMenu.id]).catch(() => undefined) }] : []),
-            ...(chapterMenu.folder && chapterMenu.sourceKey ? [{ label: 'Remove download', hint: 'Stays readable online', onPress: () => actions.removeDownloads(series.id, [chapterMenu.id]).catch(() => undefined) }] : []),
-            ...(chapterMenu.folder ? [{ label: 'Share as .cbz', onPress: () => actions.shareCbz(series.id, chapterMenu.id).catch(() => undefined) }] : []),
-            { label: 'Mark everything before as read', onPress: () => actions.markPreviousRead(series.id, chapterMenu.id).catch(() => undefined) },
+              ? { label: 'Mark as unread', onPress: () => actions.setRead([chapterMenu.id], false).catch(showFailure) }
+              : { label: 'Mark as read', onPress: () => actions.setRead([chapterMenu.id], true).catch(showFailure) },
+            ...(!chapterMenu.folder && chapterMenu.sourceKey && !chapterMenu.sourceUrl && !queue.has(chapterMenu.id) ? [{ label: 'Download', onPress: () => actions.download(series.id, [chapterMenu.id]).catch(showFailure) }] : []),
+            ...(queue.has(chapterMenu.id) ? [{ label: 'Cancel download', onPress: () => actions.cancelDownloads([chapterMenu.id]).catch(showFailure) }] : []),
+            ...(chapterMenu.folder && chapterMenu.sourceKey ? [{ label: 'Remove download', hint: 'Stays readable online', onPress: () => actions.removeDownloads(series.id, [chapterMenu.id]).catch(showFailure) }] : []),
+            ...(chapterMenu.folder ? [{ label: 'Share as .cbz', onPress: () => actions.shareCbz(series.id, chapterMenu.id).catch(showFailure) }] : []),
+            { label: 'Mark everything before as read', onPress: () => actions.markPreviousRead(series.id, chapterMenu.id).catch(showFailure) },
             { label: 'Read from the first page', onPress: () => onRead(chapterMenu, true) },
-            ...(chapterMenu.folder ? [{ label: 'Use its first page as the cover', onPress: () => actions.setCoverFromPage(series.id, chapterMenu, 0).catch(() => undefined) }] : []),
-            { label: 'Delete this chapter', danger: true, hint: 'Removes its pages', onPress: () => actions.deleteChapters(series.id, [chapterMenu.id]).catch(() => undefined) },
+            ...(chapterMenu.folder ? [{ label: 'Use its first page as the cover', onPress: () => actions.setCoverFromPage(series.id, chapterMenu, 0).catch(showFailure) }] : []),
+            { label: 'Delete this chapter', danger: true, hint: 'Removes its pages', onPress: () => actions.deleteChapters(series.id, [chapterMenu.id]).catch(showFailure) },
           ]}
           onClose={() => setChapterMenu(null)}
         />
       )}
+      {aniOpen && anilist && <AniListSheet series={series} state={anilist.state} actions={anilist.actions} onOpenUrl={onOpenUrl} onClose={() => setAniOpen(false)} />}
       {linking && browse && <LinkSheet series={series} browse={browse} actions={actions} hint={tachi?.name ?? null} onClose={() => setLinking(false)} />}
       {children}
     </Modal>

@@ -12,10 +12,12 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { stickyAsker } from '../dupMatch';
-import { getSetting } from '../library';
+import { getSetting, setSetting } from '../library';
 import type { AudioStatus } from './audioLogic';
-import { displayTitle } from './audioLogic';
-import { importAudio, type AudioDuplicateInfo, type AudioImportSummary, type PickedAudioFile } from './audioImport';
+import { DEFAULT_AUDIO_PREFS, displayTitle, parseAudioPrefs, type AudioPrefs } from './audioLogic';
+
+const AUDIO_PREFS_KEY = 'audio.prefs';
+import { addExtras, addTracks, importAudio, listExtras, removeExtra, type AudioDuplicateInfo, type AudioImportSummary, type PickedAudioFile } from './audioImport';
 import {
   addAudioTag,
   addBookmark,
@@ -99,6 +101,12 @@ export function useAudioData(): AudioData {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [duplicateAsk, setDuplicateAsk] = useState<DuplicateAsk | null>(null);
+  const [prefs, setPrefsState] = useState<AudioPrefs>(DEFAULT_AUDIO_PREFS);
+  useEffect(() => {
+    getSetting(AUDIO_PREFS_KEY)
+      .then((j) => setPrefsState(parseAudioPrefs(j)))
+      .catch(() => undefined);
+  }, []);
   const allRef = useRef<AudioItem[]>([]);
   allRef.current = all;
 
@@ -385,11 +393,46 @@ export function useAudioData(): AudioData {
         if (ReelVaultMedia && audioRoot?.exists) return ReelVaultMedia.dirSize(audioRoot.uri).catch(() => 0);
         return allRef.current.reduce((a, i) => a + folderBytes(i.folder), 0);
       },
+      addTracks: async (id) => {
+        const picked = await DocumentPicker.getDocumentAsync({ type: ['audio/*'], multiple: true, copyToCacheDirectory: true });
+        if (picked.canceled) return 0;
+        setBusy(true);
+        try {
+          const n = await addTracks(id, (picked.assets ?? []).map((a) => ({ uri: a.uri, name: a.name, size: a.size ?? undefined })));
+          setStatus(n ? `Added ${n} ${n === 1 ? 'file' : 'files'}` : 'Those were not audio files');
+          await refresh();
+          return n;
+        } finally {
+          setBusy(false);
+        }
+      },
+      listExtras: async (id) => {
+        const it = byId(id);
+        return it ? listExtras(it.folder) : [];
+      },
+      addExtras: async (id) => {
+        const picked = await DocumentPicker.getDocumentAsync({ type: ['*/*'], multiple: true, copyToCacheDirectory: true });
+        if (picked.canceled) return 0;
+        const n = await addExtras(id, (picked.assets ?? []).map((a) => ({ uri: a.uri, name: a.name, size: a.size ?? undefined })));
+        await refresh();
+        return n;
+      },
+      openExtra: async (uri) => {
+        await Share.share({ url: uri });
+      },
+      removeExtra: async (id, name) => {
+        await removeExtra(id, name);
+        await refresh();
+      },
+      setPrefs: async (next) => {
+        setPrefsState(next);
+        await setSetting(AUDIO_PREFS_KEY, JSON.stringify(next));
+      },
     }),
     [refresh, run]
   );
 
   const items = useMemo(() => all.filter((i) => !i.deletedAt).map(asUi), [all]);
   const deleted = useMemo(() => all.filter((i) => i.deletedAt).map(asUi), [all]);
-  return { items, deleted, busy, status, duplicateAsk, actions };
+  return { items, deleted, busy, status, duplicateAsk, actions, prefs };
 }

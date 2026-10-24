@@ -12,6 +12,7 @@ import Icon from '../Icon';
 import { SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
+import { showFailure } from '../oops';
 
 export default function DownloadsSheet({ downloads, items, actions, onClose }: { downloads: DownloadState; items: MangaUiSeries[]; actions: MangaActions; onClose: () => void }) {
   const styles = useStyles(makeStyles);
@@ -39,12 +40,12 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
               <Text style={styles.btnText}>{downloads.paused ? 'Carry on' : 'Pause'}</Text>
             </TouchableOpacity>
             {failed.length > 0 && (
-              <TouchableOpacity style={styles.btn} onPress={() => actions.retryDownloads().catch(() => undefined)}>
+              <TouchableOpacity style={styles.btn} onPress={() => actions.retryDownloads().catch(showFailure)}>
                 <Icon name="repeat" size={14} color={p.text} />
                 <Text style={styles.btnText}>Retry {failed.length}</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.btn} onPress={() => actions.cancelDownloads(null).catch(() => undefined)}>
+            <TouchableOpacity style={styles.btn} onPress={() => actions.cancelDownloads(null).catch(showFailure)}>
               <Icon name="close" size={13} color={p.danger} />
               <Text style={[styles.btnText, { color: p.danger }]}>Cancel all</Text>
             </TouchableOpacity>
@@ -66,6 +67,7 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
             </View>
           )}
           {downloads.paused && <Text style={styles.paused}>Paused</Text>}
+          {!downloads.paused && downloads.waitingWifi && <Text style={styles.paused}>Waiting for Wi-Fi (Browse › Download on Wi-Fi only)</Text>}
 
           {queued.length > 0 && (
             <>
@@ -82,7 +84,7 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
                         <Text style={styles.meta}>{l.chapter}</Text>
                       </View>
                       {cur?.chapterId !== q.chapterId && (
-                        <TouchableOpacity hitSlop={10} onPress={() => actions.cancelDownloads([q.chapterId]).catch(() => undefined)} accessibilityLabel={`Cancel ${l.title} ${l.chapter}`}>
+                        <TouchableOpacity hitSlop={10} onPress={() => actions.cancelDownloads([q.chapterId]).catch(showFailure)} accessibilityLabel={`Cancel ${l.title} ${l.chapter}`}>
                           <Icon name="close" size={13} color={p.textSecondary} />
                         </TouchableOpacity>
                       )}

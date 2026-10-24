@@ -14,6 +14,8 @@ type NativeMedia = {
   clearOld(path: string, olderThanSec: number, keep: string[]): Promise<number>;
   /** A picture's most vivid colour and its average, as "#rrggbb" (empty strings when it can't be read). */
   colors(path: string): Promise<{ dominant: string; average: string }>;
+  /** A page's plain borders (fractions of its size) and its edge colour; missing before app build 17. */
+  pageMargins?(path: string): Promise<{ top: number; left: number; bottom: number; right: number; edge: string }>;
   /** Every page of a PDF as 0001.jpg, 0002.jpg... in `outDir`; the page count. Missing before app 1.11. */
   pdfPages?(input: string, outDir: string, maxSide: number, quality: number): Promise<number>;
 };

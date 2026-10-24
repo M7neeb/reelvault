@@ -32,6 +32,19 @@ public class ReelVaultWifiModule: Module {
       self.queue.async { self.stopListener() }
     }
 
+    /// True when the phone is on Wi-Fi (en0 has an address), for "download on Wi-Fi only".
+    Function("onWifi") { () -> Bool in
+      var ifaddr: UnsafeMutablePointer<ifaddrs>?
+      guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return false }
+      defer { freeifaddrs(ifaddr) }
+      for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+        let iface = ptr.pointee
+        guard let sa = iface.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+        if String(cString: iface.ifa_name) == "en0" && (iface.ifa_flags & UInt32(IFF_UP)) != 0 { return true }
+      }
+      return false
+    }
+
     OnDestroy {
       self.queue.async { self.stopListener() }
     }

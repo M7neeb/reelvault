@@ -30,7 +30,7 @@ export const READING_MODES: { key: ReadingMode; label: string; hint: string }[] 
   { key: 'rtl', label: 'Right to left', hint: 'Manga' },
   { key: 'ltr', label: 'Left to right', hint: 'Comics' },
   { key: 'vertical', label: 'Vertical pages', hint: 'One page at a time, top to bottom' },
-  { key: 'webtoon', label: 'Webtoon', hint: 'One long strip' },
+  { key: 'webtoon', label: 'Long strip', hint: 'Scroll down; the pages are joined into one (webtoons)' },
 ];
 
 export type MangaChapter = {

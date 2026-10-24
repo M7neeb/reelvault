@@ -218,6 +218,90 @@ public class ReelVaultMediaModule: Module {
       }
     }
 
+    /// A manga page's plain margins (white or black borders around the drawing), as fractions of
+    /// its width and height, and the colour of its outer edge as "#rrggbb", for "Crop borders" and
+    /// a background that matches the page. All zeros and "" when it can't be read.
+    AsyncFunction("pageMargins") { (path: String, promise: Promise) in
+      let none: [String: Any] = ["top": 0, "left": 0, "bottom": 0, "right": 0, "edge": ""]
+      guard let url = Self.url(path) else {
+        promise.resolve(none)
+        return
+      }
+      self.work.async {
+        guard let image = UIImage(contentsOfFile: url.path), let cg = image.cgImage, cg.width > 0, cg.height > 0 else {
+          promise.resolve(none)
+          return
+        }
+        let w = 160
+        let h = max(16, min(480, Int((Double(cg.height) / Double(cg.width) * Double(w)).rounded())))
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn: Bool = px.withUnsafeMutableBytes { raw -> Bool in
+          guard let ctx = CGContext(
+            data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+          ) else { return false }
+          ctx.interpolationQuality = .medium
+          ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+          return true
+        }
+        if !drawn {
+          promise.resolve(none)
+          return
+        }
+        // Row 0 of the buffer is the top of the picture.
+        func at(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+          let i = (y * w + x) * 4
+          return (Int(px[i]), Int(px[i + 1]), Int(px[i + 2]))
+        }
+        // The edge colour: the average of the outermost ring.
+        var sr = 0, sg = 0, sb = 0, n = 0
+        for x in 0..<w {
+          for y in [0, h - 1] {
+            let c = at(x, y)
+            sr += c.0; sg += c.1; sb += c.2; n += 1
+          }
+        }
+        for y in 0..<h {
+          for x in [0, w - 1] {
+            let c = at(x, y)
+            sr += c.0; sg += c.1; sb += c.2; n += 1
+          }
+        }
+        let edge = (sr / n, sg / n, sb / n)
+        func plain(_ c: (Int, Int, Int)) -> Bool {
+          abs(c.0 - edge.0) + abs(c.1 - edge.1) + abs(c.2 - edge.2) < 54
+        }
+        // A row or column is margin when (nearly) every pixel in it is the edge colour.
+        func rowPlain(_ y: Int) -> Bool {
+          var off = 0
+          for x in 0..<w where !plain(at(x, y)) { off += 1 }
+          return off <= w / 80
+        }
+        func colPlain(_ x: Int) -> Bool {
+          var off = 0
+          for y in 0..<h where !plain(at(x, y)) { off += 1 }
+          return off <= h / 80
+        }
+        var top = 0
+        while top < h / 3 && rowPlain(top) { top += 1 }
+        var bottom = 0
+        while bottom < h / 3 && rowPlain(h - 1 - bottom) { bottom += 1 }
+        var left = 0
+        while left < w / 3 && colPlain(left) { left += 1 }
+        var right = 0
+        while right < w / 3 && colPlain(w - 1 - right) { right += 1 }
+        // A page that is almost all margin (a blank page) is left alone.
+        if top + bottom > h * 6 / 10 || left + right > w * 6 / 10 {
+          top = 0; bottom = 0; left = 0; right = 0
+        }
+        // Keep a hair of margin so lines at the very edge aren't cut.
+        let fy = { (v: Int) -> Double in v > 1 ? Double(v - 1) / Double(h) : 0 }
+        let fx = { (v: Int) -> Double in v > 1 ? Double(v - 1) / Double(w) : 0 }
+        let hex = String(format: "#%02x%02x%02x", edge.0, edge.1, edge.2)
+        promise.resolve(["top": fy(top), "left": fx(left), "bottom": fy(bottom), "right": fx(right), "edge": hex])
+      }
+    }
+
     /// Bytes a folder takes on disk, everything inside it counted.
     AsyncFunction("dirSize") { (path: String, promise: Promise) in
       guard let url = Self.url(path) else {

@@ -59,7 +59,22 @@ export function useAudioPlayback(): Playback {
 /** Saved this often while playing. */
 const SAVE_EVERY = 10_000;
 
-export function AudioPlaybackProvider({ items, actions, enabled = true, children }: { items: AudioUiItem[]; actions: AudioActions; enabled?: boolean; children: ReactNode }) {
+export function AudioPlaybackProvider({
+  items,
+  actions,
+  enabled = true,
+  rewind = 1,
+  children,
+}: {
+  items: AudioUiItem[];
+  actions: AudioActions;
+  enabled?: boolean;
+  /** Smart rewind: 0 = off, 0.5 = a little, 1 = normal, 2 = more. */
+  rewind?: number;
+  children: ReactNode;
+}) {
+  const rewindRef = useRef(rewind);
+  rewindRef.current = rewind;
   const playerRef = useRef<VideoPlayer | null>(null);
   const [itemId, setItemId] = useState<string | null>(null);
   const [track, setTrack] = useState(0);
@@ -267,7 +282,7 @@ export function AudioPlaybackProvider({ items, actions, enabled = true, children
         ms = 0;
       }
       // Coming back after a while: a few seconds back, to catch the thread again.
-      if (opts.ms === undefined && it.lastPlayedAt) ms = Math.max(0, ms - smartRewindMs(Date.now() - it.lastPlayedAt));
+      if (opts.ms === undefined && it.lastPlayedAt) ms = Math.max(0, ms - smartRewindMs(Date.now() - it.lastPlayedAt, rewindRef.current));
       t = Math.min(Math.max(0, t), Math.max(0, it.trackUris.length - 1));
       load(it, t, ms, opts.autoplay ?? true);
     },
@@ -283,7 +298,7 @@ export function AudioPlaybackProvider({ items, actions, enabled = true, children
       if (!p) return setPlaying(true);
       const pausedAt = session.current.pausedAt;
       if (pausedAt) {
-        const back = smartRewindMs(Date.now() - pausedAt);
+        const back = smartRewindMs(Date.now() - pausedAt, rewindRef.current);
         if (back) p.currentTime = Math.max(0, p.currentTime - back / 1000);
       }
       p.play();

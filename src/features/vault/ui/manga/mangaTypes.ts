@@ -20,6 +20,8 @@ export type MangaEdit = Partial<{
   description: string | null;
   notes: string | null;
   kind: MangaKind | null;
+  /** Publication: ongoing, completed, hiatus, cancelled. */
+  pubStatus: string | null;
   status: MangaStatus | null;
   rating: number;
   isPrivate: boolean;
@@ -56,6 +58,15 @@ export type MangaActions = {
   setCoverFromPhoto: (seriesId: string) => Promise<void>;
   /** A page of a chapter as the series' cover. */
   setCoverFromPage: (seriesId: string, chapter: MangaChapter, page: number) => Promise<void>;
+  /** Any page you are looking at (on the phone or online) as the cover. */
+  setCoverFromImage?: (seriesId: string, img: ImageRef) => Promise<void>;
+  /** A page through the share sheet, or saved to Photos (false = no permission). */
+  sharePage?: (img: ImageRef) => Promise<void>;
+  /** The cover's main colour, when it reads well as the title page's colour. */
+  coverColor?: (seriesId: string) => Promise<string | null>;
+  savePage?: (img: ImageRef) => Promise<boolean>;
+  /** A page's plain margins and edge colour (app build 17 on; missing before). */
+  pageMargins?: (img: ImageRef) => Promise<{ top: number; left: number; bottom: number; right: number; edge: string } | null>;
   /** What the Manga section takes on the phone (bytes). */
   storageBytes: () => Promise<number>;
   /** Adds chapters to the download queue (all, the unread ones, or these); how many were added. */
@@ -81,13 +92,23 @@ export type MangaActions = {
 };
 
 export type DownloadItem = { chapterId: string; seriesId: string; state: 'queued' | 'failed'; error: string | null };
-export type DownloadState = { queue: DownloadItem[]; current: { chapterId: string; seriesId: string; done: number; total: number } | null; paused: boolean };
+export type DownloadState = {
+  queue: DownloadItem[];
+  current: { chapterId: string; seriesId: string; done: number; total: number } | null;
+  paused: boolean;
+  /** "Wi-Fi only" is on and the phone is on mobile data. */
+  waitingWifi?: boolean;
+  /** This app build can tell Wi-Fi from mobile data (build 17 on). */
+  canTellWifi?: boolean;
+};
 
 export type SourceGroup = { title: string; serverId?: string; items: SourceInfo[]; error?: string };
 
 export type ServerInput = { kind: ServerKind; name: string; url: string; user: string; password: string };
 
 /** Browse: sources, your servers, repos and extensions. */
+import type { AniListActions, AniListState } from '../../manga/anilistData';
+
 export type BrowseActions = {
   groups: (refresh?: boolean) => Promise<SourceGroup[]>;
   /** A source Browse listed (null until groups() has run). */
@@ -95,7 +116,9 @@ export type BrowseActions = {
   setLanguages: (codes: string[]) => Promise<void>;
   setAdult: (on: boolean) => Promise<void>;
   /** Download and update options (smaller pages, check when the app opens, download new chapters). */
-  setOption: (key: 'smallerPages' | 'checkOnOpen' | 'autoDownload', on: boolean) => Promise<void>;
+  setOption: (key: 'smallerPages' | 'checkOnOpen' | 'autoDownload' | 'removeAfterRead' | 'wifiOnly' | 'patient' | 'autoUpdateExt', on: boolean) => Promise<void>;
+  /** Pages downloaded at the same time. */
+  setParallel?: (n: 1 | 3 | 5) => Promise<void>;
   /** The reader's own settings (tap zones, page colour, two pages side by side). */
   setReader: (patch: Partial<ReaderPrefs>) => Promise<void>;
   addServer: (input: ServerInput) => Promise<void>;
@@ -110,7 +133,7 @@ export type BrowseActions = {
   openUrl: (url: string) => void;
 };
 
-export type BrowseData = { prefs: BrowsePrefs; actions: BrowseActions };
+export type BrowseData = { prefs: BrowsePrefs; actions: BrowseActions; /** The app build can tell Wi-Fi from mobile data (17 on). */ canTellWifi?: boolean };
 
 export type MangaData = {
   items: MangaUiSeries[];
@@ -120,4 +143,6 @@ export type MangaData = {
   actions: MangaActions;
   browse: BrowseData;
   downloads: DownloadState;
+  /** AniList: links, account and syncing (optional: the preview may leave it out). */
+  anilist?: { state: AniListState; actions: AniListActions };
 };

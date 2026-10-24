@@ -9,7 +9,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { GatedModal as Modal } from '../screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { RepoExtension } from '../../manga/sources/extensions';
@@ -178,6 +179,49 @@ export default function BrowseScreen({
             <Text style={styles.rowMeta}>By themselves, for titles you are reading or plan to read</Text>
           </View>
           <Switch value={prefs.autoDownload} onValueChange={(v) => actions.setOption('autoDownload', v).catch(() => undefined)} />
+        </View>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Remove downloads after reading</Text>
+            <Text style={styles.rowMeta}>Read chapters give their space back (they stay readable online)</Text>
+          </View>
+          <Switch value={prefs.removeAfterRead} onValueChange={(v) => actions.setOption('removeAfterRead', v).catch(() => undefined)} />
+        </View>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Download on Wi-Fi only</Text>
+            <Text style={styles.rowMeta}>{browse.canTellWifi ? 'Waits while the phone is on mobile data' : 'Works from the next app build (17)'}</Text>
+          </View>
+          <Switch value={prefs.wifiOnly} onValueChange={(v) => actions.setOption('wifiOnly', v).catch(() => undefined)} />
+        </View>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Be patient with busy sites</Text>
+            <Text style={styles.rowMeta}>Each page is tried 6 times instead of 3, with longer waits</Text>
+          </View>
+          <Switch value={prefs.patient} onValueChange={(v) => actions.setOption('patient', v).catch(() => undefined)} />
+        </View>
+        {actions.setParallel && (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => {
+              tick();
+              void actions.setParallel!(prefs.parallel === 1 ? 3 : prefs.parallel === 3 ? 5 : 1);
+            }}
+            accessibilityLabel={`Pages at once: ${prefs.parallel}. Tap to change`}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>Pages at once</Text>
+              <Text style={styles.rowMeta}>Fewer is kinder to a slow site; more is faster</Text>
+            </View>
+            <Text style={styles.rowTitle}>{prefs.parallel}</Text>
+          </TouchableOpacity>
+        )}
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Update extensions by themselves</Text>
+            <Text style={styles.rowMeta}>Once a day, when the app opens</Text>
+          </View>
+          <Switch value={prefs.autoUpdateExt} onValueChange={(v) => actions.setOption('autoUpdateExt', v).catch(() => undefined)} />
         </View>
       </View>
     </>

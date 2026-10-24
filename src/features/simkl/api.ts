@@ -42,7 +42,7 @@ function withParams(url: string, query?: Record<string, string | number | undefi
 }
 
 type Options = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | undefined>;
   /** Send the user token (sync endpoints). Catalog endpoints must leave it off. */

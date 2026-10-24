@@ -442,6 +442,85 @@ async function swapInto(existing: AudioItem, fresh: AudioItem): Promise<void> {
   if (existing.folder !== fresh.folder) removeFolder(existing.folder);
 }
 
+/**
+ * More files for a book you have: they go on the end, in the order picked
+ * (sorted by name), each a new chapter. Your place, rating and notes stay.
+ */
+export async function addTracks(itemId: string, picked: PickedAudioFile[]): Promise<number> {
+  const item = await getAudio(itemId);
+  if (!item || item.kind !== 'audio') throw new Error('Files can only be added to an audio item (not an EPUB).');
+  const files = sortTracks(picked.filter((f) => audioKindOf(f.name) === 'audio'));
+  if (!files.length) return 0;
+  const dir = itemDir(item.folder);
+  if (!dir.exists) dir.create({ intermediates: true });
+  const taken = new Set(item.tracks.map((t) => t.file));
+  const tracks = [...item.tracks];
+  const chapters = [...item.chapters];
+  for (const f of files) {
+    let name = safeName(f.name, tracks.length);
+    while (taken.has(name)) name = safeName(f.name, tracks.length + taken.size);
+    taken.add(name);
+    const dest = fileIn(item.folder, name);
+    await bringIn(new File(f.uri), dest, false);
+    const tags = tagsOf(dest.uri);
+    const ms = (await probeDurationMs(dest.uri)) ?? tags.durationMs ?? null;
+    tracks.push({ file: name, title: tags.title ?? titleFromName(f.name), durationMs: ms });
+  }
+  const total = tracks.reduce((a, t) => a + (t.durationMs ?? 0), 0) || null;
+  await updateAudio([item.id], {
+    tracks,
+    chapters,
+    durationMs: total,
+    size: folderBytes(item.folder),
+    filename: `${/ \(\d+ files\)$/.test(item.filename) ? item.filename.replace(/ \(\d+ files\)$/, '') : (item.title ?? titleFromName(item.filename))} (${tracks.length} files)`,
+  });
+  return files.length;
+}
+
+/* ------------------------------------------------------------------ extras */
+
+/** Things that come with a book: a PDF, an ebook, pictures (kept in the item's "extras" folder). */
+export type AudioExtra = { name: string; uri: string; size: number; kind: 'pdf' | 'image' | 'book' | 'other' };
+
+const EXTRAS = 'extras';
+
+export function extraKindOf(name: string): AudioExtra['kind'] {
+  const e = extOf(name);
+  return e === 'pdf' ? 'pdf' : ['jpg', 'jpeg', 'png', 'heic', 'webp', 'gif'].includes(e) ? 'image' : ['epub', 'mobi', 'azw3', 'txt', 'cbz'].includes(e) ? 'book' : 'other';
+}
+
+export function listExtras(folder: string): AudioExtra[] {
+  const dir = itemDir(`${folder}/${EXTRAS}`);
+  if (!dir.exists) return [];
+  return dir
+    .list()
+    .filter((f): f is File => f instanceof File)
+    .map((f) => ({ name: f.name, uri: f.uri, size: f.size ?? 0, kind: extraKindOf(f.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
+export async function addExtras(itemId: string, picked: PickedAudioFile[]): Promise<number> {
+  const item = await getAudio(itemId);
+  if (!item) throw new Error('That item is gone.');
+  const folder = `${item.folder}/${EXTRAS}`;
+  const dir = itemDir(folder);
+  if (!dir.exists) dir.create({ intermediates: true });
+  for (const f of picked) {
+    let name = safeName(f.name, null);
+    if (fileIn(folder, name).exists) name = `${Date.now() % 100000} ${name}`;
+    await bringIn(new File(f.uri), fileIn(folder, name), false);
+  }
+  await updateAudio([item.id], { size: folderBytes(item.folder) });
+  return picked.length;
+}
+
+export async function removeExtra(itemId: string, name: string): Promise<void> {
+  const item = await getAudio(itemId);
+  if (!item) return;
+  removeQuietly(fileIn(`${item.folder}/${EXTRAS}`, name));
+  await updateAudio([item.id], { size: folderBytes(item.folder) });
+}
+
 /** For Share / Save to Files: the item's main file (an EPUB is shared as its extracted folder's audio). */
 export function mainFileUri(item: AudioItem): string | null {
   const t = item.tracks[0];

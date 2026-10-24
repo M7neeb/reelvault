@@ -6,7 +6,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { GatedModal as Modal } from '../screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { MangaSource, SourceSeries } from '../../manga/sources/types';

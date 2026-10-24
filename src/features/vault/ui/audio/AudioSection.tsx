@@ -88,7 +88,7 @@ export default function AudioSection({
         initialDeleted={dev?.deleted}
       />
       {pb.item && !full && <MiniPlayer bottom={tabSpace + 8} onExpand={() => setFull(true)} />}
-      {full && pb.item && <AudioPlayerScreen actions={data.actions} onInfo={(i) => setInfoId(i.id)} onClose={() => setFull(false)} />}
+      {full && pb.item && <AudioPlayerScreen actions={data.actions} prefs={data.prefs} onInfo={(i) => setInfoId(i.id)} onClose={() => setFull(false)} />}
       {info && (
         <AudioInfo
           item={info}

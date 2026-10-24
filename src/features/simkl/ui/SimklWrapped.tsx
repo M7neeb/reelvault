@@ -8,8 +8,8 @@
  * Presentational only (see simkl/ui/types.ts).
  */
 
-import { useMemo, useState } from 'react';
-import { Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { ZoomIn } from 'react-native-reanimated';
 
@@ -21,6 +21,7 @@ import { sheet, useStyles } from '@/features/vault/ui/theme';
 import { fmtRating } from '../insights';
 import { posterUrl } from '../logic';
 import { fmtInt, fmtMinutesLong, topQuiz, WATCHER, type SimklWrap } from '../simklWrapped';
+import { canSnap, shareSnap } from '@/features/vault/snap';
 
 const TYPE_LABEL = { show: 'Shows', anime: 'Anime', movie: 'Movies' } as const;
 const poster = (path: string | null) => ({ uri: posterUrl(path, '_m') });
@@ -60,6 +61,7 @@ function Quiz({ wrap, onDone }: { wrap: SimklWrap; onDone: () => void }) {
 }
 
 export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClose: () => void }) {
+  const snapRef = useRef<View>(null);
   const styles = useStyles(makeStyles);
   const s = useStoryText();
   const [quizDone, setQuizDone] = useState(false);
@@ -376,6 +378,7 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
       interactive: true,
       body: (
         <>
+          <View ref={snapRef} collapsable={false} style={styles.snapCard}>
           {s.kicker(`SIMKL WRAPPED ${w.range.label.toUpperCase()}`, 0)}
           <Animated.View entering={s.enter(1)} style={styles.sumGrid}>
             {[
@@ -393,9 +396,10 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
             ))}
           </Animated.View>
           {w.top[0] && s.line(`#1 ${w.top[0].title}${w.topGenres[0] ? ` · ${w.topGenres[0].genre}` : ''} · ${who.name}`, 2)}
+          </View>
           <Animated.View entering={s.enter(3)}>
-            <TouchableOpacity style={styles.share} onPress={() => Share.share({ message: summary }).catch(() => undefined)}>
-              <Text style={styles.shareText}>Share</Text>
+            <TouchableOpacity style={styles.share} onPress={() => void shareSnap(snapRef.current, summary).catch(() => undefined)}>
+              <Text style={styles.shareText}>{canSnap ? 'Share as a picture' : 'Share'}</Text>
             </TouchableOpacity>
           </Animated.View>
         </>
@@ -434,6 +438,7 @@ const makeStyles = () =>
     sumCell: { width: '30%', flexGrow: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 12, gap: 2, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)' },
     sumNum: { color: '#fff', fontSize: 26, fontWeight: '900' },
     sumLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700' },
+    snapCard: { backgroundColor: '#1C1C1E', borderRadius: 22, padding: 18, gap: 10 },
     share: { alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 999, paddingHorizontal: 22, paddingVertical: 11, marginTop: 10 },
     shareText: { color: '#000', fontSize: 16, fontWeight: '900' },
   });

@@ -6,6 +6,8 @@ type NativeWifi = {
   /** Starts the server; `url` is empty when the phone has no Wi-Fi address. */
   start(code: string): Promise<{ url: string }>;
   stop(): void;
+  /** On Wi-Fi right now (from app build 17; missing before). */
+  onWifi?(): boolean;
   addListener(event: 'onFileStart' | 'onFileProgress' | 'onFileDone' | 'onFileError', listener: (e: WifiFileEvent) => void): { remove(): void };
 };
 
