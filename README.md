@@ -80,16 +80,21 @@
 <table>
   <tr>
     <td align="center" width="33%"><img src=".github/media/dashboard.png" width="240" alt="Dashboard"><br><sub><b>Dashboard</b></sub></td>
-    <td align="center" width="33%"><img src=".github/media/ov.png" width="240" alt="Overview"><br><sub><b>Overview</b></sub></td>
+    <td align="center" width="33%"><img src=".github/media/manga.png" width="240" alt="Manga library"><br><sub><b>Manga library</b></sub></td>
+    <td align="center" width="33%"><img src=".github/media/search.png" width="240" alt="Search everything"><br><sub><b>Search everything</b></sub></td>
+  </tr>
+  <tr>
     <td align="center" width="33%"><img src=".github/media/wrapped.png" width="240" alt="Wrapped"><br><sub><b>Wrapped</b></sub></td>
-  </tr>
-  <tr>
+    <td align="center" width="33%"><img src=".github/media/manga-detail.png" width="240" alt="Manga series"><br><sub><b>Manga series</b></sub></td>
     <td align="center" width="33%"><img src=".github/media/memories.png" width="240" alt="Memories"><br><sub><b>Memories</b></sub></td>
-    <td align="center" width="33%"><img src=".github/media/badges.png" width="240" alt="Badges"><br><sub><b>Badges</b></sub></td>
-    <td align="center" width="33%"><img src=".github/media/simkl.png" width="240" alt="Simkl"><br><sub><b>Simkl</b></sub></td>
   </tr>
   <tr>
-    <td align="center" width="33%"><img src=".github/media/history-stats.png" width="240" alt="History stats"><br><sub><b>History stats</b></sub></td>
+    <td align="center" width="33%"><img src=".github/media/badges.png" width="240" alt="Badges"><br><sub><b>Badges</b></sub></td>
+    <td align="center" width="33%"><img src=".github/media/manga-stats.png" width="240" alt="Reading insights"><br><sub><b>Reading insights</b></sub></td>
+    <td align="center" width="33%"><img src=".github/media/simkl.png" width="240" alt="Simkl shows"><br><sub><b>Simkl shows</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src=".github/media/ov.png" width="240" alt="Overview"><br><sub><b>Overview</b></sub></td>
     <td align="center" width="33%"><img src=".github/media/audio-player.png" width="240" alt="Audio"><br><sub><b>Audio</b></sub></td>
     <td align="center" width="33%"><img src=".github/media/storage.png" width="240" alt="Storage"><br><sub><b>Storage</b></sub></td>
   </tr>
