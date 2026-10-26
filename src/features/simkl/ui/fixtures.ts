@@ -269,6 +269,15 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
       id === 101
         ? [...Array.from({ length: 10 }, (_, i) => ({ season: 1, episode: i + 1, watchedAt: null })), { season: 2, episode: 1, watchedAt: null }, { season: 2, episode: 2, watchedAt: null }, { season: 2, episode: 3, watchedAt: null }]
         : Array.from({ length: 7 }, (_, i) => ({ season: 1, episode: i + 1, watchedAt: null })),
+    // Made-up ratings: IMDb for most, TVmaze for a few (the preview has no key).
+    loadEpisodeRatings: async (_type, _id, eps) =>
+      Object.fromEntries(
+        eps
+          .filter((e) => e.aired && !e.special)
+          .map((e) => [`${e.season}:${e.episode}`, { rating: Math.round((7.4 + ((e.season * 7 + e.episode * 3) % 22) / 10) * 10) / 10, source: e.episode % 5 === 0 ? 'tvmaze' : 'imdb' }] as const)
+      ),
+    hasOmdbKey: async () => false,
+    saveOmdbKey: async () => null,
     search: async (type) => catalog(type),
     trending: async (type) => catalog(type),
     calendar: async (type) => calendar(type),

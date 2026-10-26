@@ -1,6 +1,6 @@
 /**
  * "Mark specific episodes": season pills, then that season's episodes with
- * their stills, checkmarks, "Mark all aired" and "Unmark". With spoilers
+ * their stills (with the episode's IMDb or TVmaze rating), checkmarks, "Mark all aired" and "Unmark". With spoilers
  * hidden, episodes you have not seen show no title or picture. Two modes:
  * - history: your Simkl watch history; hold an episode to log watching it again;
  * - rewatch: one rewatch session ("Rewatch #2"), with its own checkmarks.
@@ -19,6 +19,7 @@ import Icon from '@/features/vault/ui/Icon';
 import IconButton from '@/features/vault/ui/IconButton';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
+import { fmtEpisodeRating, type EpisodeRatings } from '../episodeRatings';
 import { watchCounts } from '../insights';
 import { episodeCode, episodeImageUrl, finaleLabel, fmtMinutes, groupBySeason, minutesLeft, parseEpisodeCode, upToHere, watchedKey } from '../logic';
 import { fmtDay } from './time';
@@ -49,6 +50,7 @@ export default function EpisodesModal({
   const [openSeason, setOpenSeason] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [plays, setPlays] = useState<Play[]>([]);
+  const [ratings, setRatings] = useState<EpisodeRatings>({});
   const rewatch = session !== null;
 
   useEffect(() => {
@@ -68,6 +70,19 @@ export default function EpisodesModal({
       .then(setPlays)
       .catch(() => undefined);
   }, [actions, item.simklId, item.type]);
+
+  // Ratings arrive after the list; without them the pictures just have no badge.
+  useEffect(() => {
+    if (!episodes?.length) return;
+    let live = true;
+    actions
+      .loadEpisodeRatings(item.type, item.simklId, episodes)
+      .then((r) => live && setRatings(r))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [actions, episodes, item.simklId, item.type]);
 
   const counts = useMemo(() => watchCounts(watched, plays), [watched, plays]);
   const inSession = useMemo(
@@ -227,6 +242,7 @@ export default function EpisodesModal({
                     const times = counts.get(key) ?? 0;
                     const hidden = hideSpoilers && !seen && e.aired;
                     const still = episodeImageUrl(e.img);
+                    const rated = hidden ? undefined : ratings[key];
                     const code = e.special ? `SP${e.episode}` : episodeCode(item.type, e.season, e.episode);
                     return (
                       <TouchableOpacity
@@ -251,6 +267,18 @@ export default function EpisodesModal({
                           {hidden && (
                             <View style={styles.stillCover}>
                               <Icon name="spoiler" size={16} color="#fff" />
+                            </View>
+                          )}
+                          {rated && (
+                            <View
+                              style={styles.rated}
+                              accessibilityLabel={`${rated.source === 'imdb' ? 'IMDb' : 'TVmaze'} rating ${fmtEpisodeRating(rated.rating)}`}>
+                              {rated.source === 'imdb' ? (
+                                <Text style={styles.imdbTag}>IMDb</Text>
+                              ) : (
+                                <Icon name="star" size={10} color={p.rating} />
+                              )}
+                              <Text style={styles.ratedText}>{fmtEpisodeRating(rated.rating)}</Text>
                             </View>
                           )}
                           {times > 1 && (
@@ -332,6 +360,21 @@ const makeStyles = (p: Palette) =>
     stillCover: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' },
     times: { position: 'absolute', right: 4, bottom: 4, backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
     timesText: { color: p.rating, fontSize: 11, fontWeight: '800' },
+    rated: {
+      position: 'absolute',
+      left: 4,
+      top: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: 'rgba(0,0,0,0.72)',
+      borderRadius: 6,
+      paddingLeft: 3,
+      paddingRight: 5,
+      paddingVertical: 2,
+    },
+    imdbTag: { backgroundColor: '#F5C518', color: '#000', fontSize: 9, fontWeight: '900', borderRadius: 3, overflow: 'hidden', paddingHorizontal: 3, paddingVertical: 0.5 },
+    ratedText: { color: '#fff', fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] },
     episodeText: { flex: 1, gap: 1 },
     code: { color: p.link, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 0.3 },
     nextTag: { color: p.accent, fontSize: 11, fontWeight: '900' },
