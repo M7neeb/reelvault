@@ -1,15 +1,15 @@
 /**
  * Simkl settings: sync, Stats and Review, import from IMDb / Letterboxd,
- * spoilers, notifications, rewatches on Simkl, CSV and calendar export, sign
+ * spoilers, episode ratings (OMDb key), notifications, rewatches on Simkl, CSV and calendar export, sign
  * out. Presentational only.
  */
 
 import { useEffect, useState } from 'react';
-import { Text } from 'react-native';
+import { Linking, Text, TextInput } from 'react-native';
 
 import { confirmAction } from '@/features/vault/ui/confirm';
 import { Chip, Section, SheetFrame, ToggleRow, Wrap } from '@/features/vault/ui/sheets';
-import { sheet, useStyles, type Palette } from '@/features/vault/ui/theme';
+import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { DELAYS } from '../reminders';
 import { fmtAgo } from './time';
@@ -41,10 +41,15 @@ export function AccountSheet({
   const [reminders, setReminders] = useState<ReminderSettings | null>(null);
   const [rewatch, setRewatch] = useState<{ on: boolean; plan: SimklPlan } | null>(null);
   const [spoilers, setSpoilers] = useState(prefs.hideSpoilers);
+  const p = usePalette();
+  const [hasKey, setHasKey] = useState<boolean | null>(null);
+  const [keyText, setKeyText] = useState('');
+  const [keyBusy, setKeyBusy] = useState(false);
 
   useEffect(() => {
     actions.getReminders().then(setReminders).catch(() => undefined);
     actions.getRewatchSync().then(setRewatch).catch(() => undefined);
+    actions.hasOmdbKey().then(setHasKey).catch(() => setHasKey(false));
   }, [actions]);
 
   function saveReminders(next: ReminderSettings) {
@@ -58,6 +63,20 @@ export function AccountSheet({
         } else setNote(next.enabled ? 'Reminders scheduled' : 'Reminders off');
       })
       .catch((e) => setNote(`Not saved: ${String(e?.message ?? e)}`));
+  }
+
+  function saveKey(text: string) {
+    setKeyBusy(true);
+    actions
+      .saveOmdbKey(text)
+      .then((problem) => {
+        if (problem) return setNote(problem);
+        setHasKey(text.trim() !== '');
+        setKeyText('');
+        setNote(text.trim() ? 'IMDb ratings on: open the episodes of a show to see them' : 'OMDb key removed: episodes show TVmaze ratings');
+      })
+      .catch((e) => setNote(`Not saved: ${String(e?.message ?? e)}`))
+      .finally(() => setKeyBusy(false));
   }
 
   return (
@@ -93,6 +112,42 @@ export function AccountSheet({
           }}
         />
         <Text style={styles.hint}>Episode lists and Up Next show only "Episode 5" and a blurred still until you have seen it.</Text>
+      </Section>
+
+      <Section label="Episode ratings">
+        <Text style={styles.body}>
+          {hasKey === null ? ' ' : hasKey ? 'IMDb ratings are on (your OMDb key is saved on this phone).' : 'Episodes show TVmaze ratings. Add a free OMDb key for IMDb ratings.'}
+        </Text>
+        {hasKey === false && (
+          <>
+            <TextInput
+              style={styles.input}
+              value={keyText}
+              onChangeText={setKeyText}
+              placeholder="OMDb key, for example 1a2b3c4d"
+              placeholderTextColor={p.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardAppearance={p.scheme}
+              returnKeyType="done"
+              onSubmitEditing={() => keyText.trim() && saveKey(keyText)}
+            />
+            <Wrap>
+              <Chip label={keyBusy ? 'Checking…' : 'Save key'} on={!!keyText.trim() && !keyBusy} onPress={() => keyText.trim() && !keyBusy && saveKey(keyText)} />
+              <Chip label="Get a free key…" onPress={() => void Linking.openURL('https://www.omdbapi.com/apikey.aspx')} />
+            </Wrap>
+            <Text style={styles.hint}>
+              On the OMDb page choose FREE, enter your email and open the link in the email they send. The key is in that email.
+            </Text>
+          </>
+        )}
+        {hasKey && (
+          <Chip
+            label="Remove OMDb key"
+            danger
+            onPress={() => confirmAction('Remove the OMDb key?', 'Episodes then show TVmaze ratings instead of IMDb.', () => saveKey(''), { label: 'Remove', destructive: true })}
+          />
+        )}
       </Section>
 
       <Section label="Notifications">
@@ -205,4 +260,5 @@ const makeStyles = (p: Palette) =>
     body: { color: p.textSoft, fontSize: 14 },
     hint: { color: p.textSecondary, fontSize: 12 },
     note: { color: p.link, fontSize: 13, fontWeight: '600' },
+    input: { backgroundColor: p.card, color: p.text, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   });

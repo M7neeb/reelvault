@@ -6,6 +6,7 @@
 
 import type { ScrobbleTarget, SimklPlan, Timeframe } from '../actions';
 import type { ListEntry, SimklList, VideoLink } from '../collections';
+import type { EpisodeRatings } from '../episodeRatings';
 import type { ImportResult } from '../imports';
 import type { Meta, Play, Session, WatchEvent } from '../insights';
 import type { ReminderSettings } from '../reminders';
@@ -113,6 +114,11 @@ export type SimklActions = {
   loadDetail: (type: SimklType, id: number) => Promise<SimklDetailInfo>;
   loadEpisodes: (type: SimklType, id: number) => Promise<CatalogEpisode[]>;
   loadWatched: (id: number) => Promise<WatchedEpisode[]>;
+  /** IMDb (with an OMDb key) or TVmaze ratings for single episodes. */
+  loadEpisodeRatings: (type: SimklType, id: number, episodes: CatalogEpisode[]) => Promise<EpisodeRatings>;
+  /** Whether an OMDb key is saved, and saving one ('' removes it; returns the problem or null). */
+  hasOmdbKey: () => Promise<boolean>;
+  saveOmdbKey: (key: string) => Promise<string | null>;
   search: (type: SimklType, q: string) => Promise<CatalogTitle[]>;
   trending: (type: SimklType, timeframe: Timeframe) => Promise<CatalogTitle[]>;
   calendar: (type: SimklType) => Promise<CatalogTitle[]>;

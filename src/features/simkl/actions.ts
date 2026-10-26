@@ -4,7 +4,10 @@
  * Catalog reads (details, episodes, search, trending, calendar) are cached.
  */
 
+import * as SecureStore from 'expo-secure-store';
+
 import { simklRequest } from './api';
+import { combineRatings, OMDB, omdbKeyProblem, omdbSeasons, parseOmdbSeason, parseTvmazeEpisodes, TVMAZE, type EpisodeRatings, type SourceEpisode } from './episodeRatings';
 import { franchiseQuery, parseFranchises, simklTypeOf, WIKIDATA_SPARQL, type Franchise, type FranchiseEntry, type FranchiseItem } from './franchise';
 import {
   parseCatalog,
@@ -533,4 +536,87 @@ export async function matchFranchise(entries: FranchiseEntry[]): Promise<Franchi
     }
   }
   return out;
+}
+
+/* ---------------------------------------------------------- episode ratings */
+
+const OMDB_KEY = 'omdb_api_key';
+const SECURE_OPTS: SecureStore.SecureStoreOptions = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
+
+async function omdbKey(): Promise<string | null> {
+  return (await SecureStore.getItemAsync(OMDB_KEY, SECURE_OPTS).catch(() => null)) || null;
+}
+
+/** Whether an OMDb key is saved (the key itself never leaves this file). */
+export async function hasOmdbKey(): Promise<boolean> {
+  return (await omdbKey()) !== null;
+}
+
+/** Checks the key with OMDb, then saves it. '' removes it. Returns the problem, or null when saved. */
+export async function saveOmdbKey(raw: string): Promise<string | null> {
+  const key = raw.trim();
+  if (!key) {
+    await SecureStore.deleteItemAsync(OMDB_KEY, SECURE_OPTS).catch(() => undefined);
+    return null;
+  }
+  if (!/^[A-Za-z0-9]{6,16}$/.test(key)) return 'That does not look like an OMDb key (8 letters and numbers, from the email OMDb sent).';
+  const res = await fetch(`${OMDB}?apikey=${encodeURIComponent(key)}&i=tt0903747`).catch(() => null);
+  if (!res) return 'Could not reach OMDb. Check the connection and try again.';
+  const json = await res.json().catch(() => null);
+  const problem = omdbKeyProblem(json);
+  if (problem) return /activated/i.test(problem) ? 'This key is not activated yet: open the link in the email from OMDb first.' : `OMDb says: ${problem}`;
+  if (json?.Response !== 'True') return 'OMDb did not accept the key. Try again in a minute.';
+  await SecureStore.setItemAsync(OMDB_KEY, key, SECURE_OPTS);
+  return null;
+}
+
+async function getJson(url: string): Promise<any> {
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Every season from OMDb, four at a time. */
+async function omdbEpisodes(imdb: string, key: string): Promise<SourceEpisode[]> {
+  const base = `${OMDB}?apikey=${encodeURIComponent(key)}&i=${imdb}`;
+  const head = await getJson(base);
+  const problem = omdbKeyProblem(head);
+  if (problem) throw new Error(problem);
+  // "Request limit reached!" (1,000 a day on the free key): try again later, keep nothing.
+  if (head?.Response !== 'True' && /limit/i.test(String(head?.Error ?? ''))) throw new Error(String(head.Error));
+  const seasons = Math.min(omdbSeasons(head), 60);
+  const out: SourceEpisode[] = [];
+  for (let s = 1; s <= seasons; s += 4) {
+    const batch = Array.from({ length: Math.min(4, seasons - s + 1) }, (_, i) => s + i);
+    const got = await Promise.all(batch.map(async (n) => parseOmdbSeason(await getJson(`${base}&Season=${n}`), n)));
+    out.push(...got.flat());
+  }
+  return out;
+}
+
+async function tvmazeEpisodes(imdb: string): Promise<SourceEpisode[]> {
+  const show = await getJson(`${TVMAZE}/lookup/shows?imdb=${imdb}`);
+  if (typeof show?.id !== 'number') return [];
+  return parseTvmazeEpisodes(await getJson(`${TVMAZE}/shows/${show.id}/episodes`));
+}
+
+/**
+ * Ratings for a show's episodes: IMDb (with your OMDb key), TVmaze for the
+ * rest. Kept for three days; a failed lookup is not kept, so it is tried again.
+ */
+export async function loadEpisodeRatings(type: SimklType, id: number, episodes: CatalogEpisode[]): Promise<EpisodeRatings> {
+  if (type === 'movie' || !episodes.length) return {};
+  const imdb = (await loadDetail(type, id)).imdb;
+  if (!imdb || !/^tt\d+$/.test(imdb)) return {};
+  const key = await omdbKey();
+  const found = await cached(`epratings1:${type}:${id}:${key ? 'imdb' : 'tvmaze'}`, 72 * HOUR, async () => {
+    const [fromImdb, fromTvmaze] = await Promise.allSettled([key ? omdbEpisodes(imdb, key) : Promise.resolve([]), tvmazeEpisodes(imdb)]);
+    if (fromImdb.status === 'rejected' && fromTvmaze.status === 'rejected') throw fromImdb.reason;
+    return {
+      imdb: fromImdb.status === 'fulfilled' ? fromImdb.value : [],
+      tvmaze: fromTvmaze.status === 'fulfilled' ? fromTvmaze.value : [],
+    };
+  });
+  return combineRatings(episodes, type, found.imdb, found.tvmaze);
 }
