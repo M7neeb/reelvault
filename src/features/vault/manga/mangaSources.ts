@@ -12,7 +12,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { loadAniListLinks, saveAniListLinks } from './anilist';
+import { aniListCoverSearch, loadAniListLinks, saveAniListLinks } from './anilist';
 
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { getSetting, setSetting } from '../library';
@@ -354,34 +354,67 @@ async function saveCover(seriesId: string, folder: string, cover: ImageRef | nul
   }
 }
 
+/** A title's name for matching covers: "[Official]" and other bracketed notes left out. */
+const coverName = (t: string) => normTitle(t.replace(/\[[^\]]*\]|\([^)]*\)/g, ' '));
+
+/** Titles already looked up without luck, by id, with when (so a launch does not ask again for days). */
+const MISSES_KEY = 'manga.coverMisses';
+const RETRY_AFTER = 3 * 86_400_000;
+
 /**
- * Titles from a source that still have no cover (a backup's cover the site
- * would not hand out): fetched again, from your Suwayomi server first (it
- * keeps covers itself), else from the source. Quiet; how many were found.
+ * Titles that still have no cover (the backup's cover the site would not
+ * hand out): fetched from your Suwayomi server (it keeps covers itself),
+ * else from the title's source, else looked up by name on AniList, then
+ * MangaDex. Quiet; how many were found.
  */
-export async function fillMissingCovers(series: MangaSeries[], prefs: BrowsePrefs): Promise<number> {
+export async function fillMissingCovers(series: MangaSeries[], prefs: BrowsePrefs, onFound?: (seriesId: string) => void): Promise<number> {
   let found = 0;
+  let misses: Record<string, number> = {};
+  try {
+    misses = JSON.parse((await getSetting(MISSES_KEY)) ?? '{}') ?? {};
+  } catch {
+    misses = {};
+  }
+  const now = Date.now();
+  const md = mangadexSource(sourceHttp, { languages: prefs.languages, adult: true });
   for (const s of series) {
-    if (s.cover || s.deletedAt || !s.sourceId || !s.sourceKey || tachiSourceOf(s.sourceId)) continue;
+    if (s.cover || s.deletedAt || (misses[s.id] && now - misses[s.id] < RETRY_AFTER)) continue;
     try {
-      let ref: ImageRef | null = null;
-      const m = s.sourceId.match(/^server:([^:]+):library$/);
+      let cover: string | null = null;
+      const linked = !!s.sourceId && !!s.sourceKey && !tachiSourceOf(s.sourceId);
+      // 1. Your server's own copy of the cover.
+      const m = s.sourceId?.match(/^server:([^:]+):library$/);
       const server = m ? prefs.servers.find((x) => x.id === m[1] && x.kind === 'suwayomi') : undefined;
-      if (server && SERVER_KEY.test(s.sourceKey)) ref = { uri: `${suwayomiBase(server.url)}/api/v1/manga/${s.sourceKey}/thumbnail`, headers: await authFor(server) };
-      let cover = await saveCover(s.id, s.folder, ref);
-      if (!cover) {
-        const src = await sourceFor(s.sourceId, prefs);
-        const d = src ? await src.details(s.sourceKey).catch(() => null) : null;
+      if (server && s.sourceKey && SERVER_KEY.test(s.sourceKey)) cover = await saveCover(s.id, s.folder, { uri: `${suwayomiBase(server.url)}/api/v1/manga/${s.sourceKey}/thumbnail`, headers: await authFor(server) });
+      // 2. The title's source (not a server title: the server already tried that site).
+      if (!cover && linked && !server) {
+        const src = await sourceFor(s.sourceId!, prefs);
+        const d = src ? await src.details(s.sourceKey!).catch(() => null) : null;
         cover = await saveCover(s.id, s.folder, d?.cover ?? null);
+      }
+      // 3. By name: AniList, then MangaDex (only when a name matches exactly).
+      const want = [s.title, s.altTitle].filter((t): t is string => !!t).map(coverName).filter(Boolean);
+      if (!cover && want.length) {
+        const hits = await aniListCoverSearch(s.title).catch(() => []);
+        const hit = hits.find((h) => h.titles.some((t) => want.includes(coverName(t))));
+        if (hit) cover = await saveCover(s.id, s.folder, { uri: hit.cover });
+      }
+      if (!cover && want.length) {
+        const page = await md.search(s.title, 1).catch(() => null);
+        const hit = page?.items.find((x) => want.includes(coverName(x.title)));
+        if (hit?.cover) cover = await saveCover(s.id, s.folder, hit.cover);
       }
       if (cover) {
         await updateSeries([s.id], { cover });
+        delete misses[s.id];
         found++;
-      }
+        onFound?.(s.id);
+      } else misses[s.id] = now;
     } catch (e) {
       console.log(`[MANGA] cover for ${s.title}: ${String(e)}`);
     }
   }
+  await setSetting(MISSES_KEY, JSON.stringify(misses)).catch(() => undefined);
   return found;
 }
 

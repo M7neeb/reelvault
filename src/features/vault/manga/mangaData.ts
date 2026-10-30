@@ -213,8 +213,10 @@ export function useMangaData(): MangaData {
       // Covers that did not come with a backup: from your server or the source, quietly.
       setTimeout(() => {
         (async () => {
-          const n = await fillMissingCovers(allRef.current, prefsRef.current);
-          if (n) await refresh();
+          // Each cover shows as soon as it is found.
+          await fillMissingCovers(allRef.current, prefsRef.current, (id) => {
+            refreshOne(id).catch(() => undefined);
+          });
         })().catch((e) => console.log(`[MANGA] covers: ${String(e)}`));
       }, 30_000);
       // New chapters: asked when the app opens (at most every 6 hours), quietly.
