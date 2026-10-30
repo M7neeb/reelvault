@@ -175,6 +175,13 @@ export default function BrowseScreen({
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Skip Completed and Dropped</Text>
+            <Text style={styles.rowMeta}>The check for new chapters leaves those titles out (faster, fewer requests)</Text>
+          </View>
+          <Switch value={prefs.skipFinished} onValueChange={(v) => actions.setOption('skipFinished', v).catch(() => undefined)} />
+        </View>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Download new chapters</Text>
             <Text style={styles.rowMeta}>By themselves, for titles you are reading or plan to read</Text>
           </View>

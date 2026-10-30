@@ -256,19 +256,30 @@ export function useMangaData(): MangaData {
     }
   };
   const checkNow = async (byHand: boolean, p: BrowsePrefs): Promise<{ added: number; failed: string[] }> => {
-    const list = allRef.current.filter((x) => !x.deletedAt && x.sourceId && !tachiSourceOf(x.sourceId));
+    const list = allRef.current.filter((x) => !x.deletedAt && x.sourceId && !tachiSourceOf(x.sourceId) && !(p.skipFinished && (x.status === 'completed' || x.status === 'dropped')));
     const found: { title: string; count: number; seriesId: string; ids: string[] }[] = [];
     const failed: string[] = [];
-    for (const [i, x] of list.entries()) {
-      if (byHand) setStatus(`Checking for new chapters… ${i + 1} of ${list.length}`);
-      try {
-        const ids = await refreshSeries(x.id, p);
-        if (ids.length) found.push({ title: x.title, count: ids.length, seriesId: x.id, ids });
-      } catch (e) {
-        console.log(`[MANGA] refresh ${x.title}: ${String(e)}`);
-        failed.push(x.title);
+    // A few titles at a time (different sites answer in parallel); results keep the library's order.
+    let next = 0;
+    let done = 0;
+    const results: ({ title: string; count: number; seriesId: string; ids: string[] } | null)[] = [];
+    const worker = async () => {
+      while (next < list.length) {
+        const i = next++;
+        const x = list[i];
+        try {
+          const ids = await refreshSeries(x.id, p);
+          results[i] = ids.length ? { title: x.title, count: ids.length, seriesId: x.id, ids } : null;
+        } catch (e) {
+          console.log(`[MANGA] refresh ${x.title}: ${String(e)}`);
+          failed.push(x.title);
+        }
+        done++;
+        if (byHand) setStatus(`Checking for new chapters… ${done} of ${list.length}`);
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker));
+    for (const r of results) if (r) found.push(r);
     await markChecked(Date.now());
     await refresh();
     const added = found.reduce((a, f) => a + f.count, 0);
@@ -440,7 +451,10 @@ export function useMangaData(): MangaData {
         // (not this one: its pages are still on screen). They stay readable online.
         if (finished && prefsRef.current.removeAfterRead) {
           const s = allRef.current.find((x) => x.id === seriesId);
-          const done = (s?.chapters ?? []).filter((c) => c.id !== chapterId && c.readAt && c.folder && c.sourceKey);
+          // Only chapters before this one (re-reading an early chapter must not clear later ones,
+          // and the next chapter may already be loaded in the reader).
+          const idx = s?.chapters.findIndex((c) => c.id === chapterId) ?? -1;
+          const done = (s?.chapters ?? []).slice(0, Math.max(0, idx)).filter((c) => c.readAt && c.folder && c.sourceKey);
           for (const c of done) {
             removeDir(c.folder!);
             await clearChapterFiles(c.id);

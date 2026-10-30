@@ -293,6 +293,7 @@ export function fixtureBrowse(): { prefs: BrowsePrefs; actions: BrowseActions } 
     smallerPages: true,
     checkOnOpen: true,
     autoDownload: false,
+    skipFinished: true,
     removeAfterRead: false,
     syncProgress: true,
     wifiOnly: false,

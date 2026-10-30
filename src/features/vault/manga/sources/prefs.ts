@@ -79,6 +79,8 @@ export type BrowsePrefs = {
   checkOnOpen: boolean;
   /** Download new chapters by themselves (of titles you are reading or plan to read). */
   autoDownload: boolean;
+  /** The check for new chapters leaves out titles you marked Completed or Dropped. */
+  skipFinished: boolean;
   /** Free the space of downloaded chapters once you have read them (they stay readable online). */
   removeAfterRead: boolean;
   /** Download only on Wi-Fi (from app build 17). */
@@ -94,7 +96,7 @@ export type BrowsePrefs = {
   reader: ReaderPrefs;
 };
 
-export const DEFAULT_BROWSE: BrowsePrefs = { languages: ['en'], adult: false, servers: [], repos: [], installed: [], smallerPages: false, checkOnOpen: true, autoDownload: false, removeAfterRead: false, wifiOnly: false, patient: false, parallel: 3, autoUpdateExt: true, syncProgress: true, reader: DEFAULT_READER };
+export const DEFAULT_BROWSE: BrowsePrefs = { languages: ['en'], adult: false, servers: [], repos: [], installed: [], smallerPages: false, checkOnOpen: true, autoDownload: false, skipFinished: true, removeAfterRead: false, wifiOnly: false, patient: false, parallel: 3, autoUpdateExt: true, syncProgress: true, reader: DEFAULT_READER };
 
 /** Languages MangaDex offers that the picker lists (code, name). */
 export const LANGUAGES: [string, string][] = [
@@ -143,6 +145,7 @@ export function parseBrowsePrefs(json: string | null): BrowsePrefs {
     smallerPages: r.smallerPages === true,
     checkOnOpen: r.checkOnOpen !== false,
     autoDownload: r.autoDownload === true,
+    skipFinished: r.skipFinished !== false,
     removeAfterRead: r.removeAfterRead === true,
     wifiOnly: r.wifiOnly === true,
     patient: r.patient === true,

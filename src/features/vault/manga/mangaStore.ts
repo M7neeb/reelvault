@@ -315,7 +315,8 @@ export async function nextDownload(): Promise<DownloadRow | null> {
 /** The chapter is still in the queue (not cancelled). */
 export async function isQueued(chapterId: string): Promise<boolean> {
   const db = await getDb();
-  return !!(await db.getFirstAsync('SELECT 1 FROM manga_downloads WHERE chapter_id = ?;', [chapterId]));
+  // Put on hold while it was starting counts as not wanted now.
+  return !!(await db.getFirstAsync("SELECT 1 FROM manga_downloads WHERE chapter_id = ? AND state = 'queued';", [chapterId]));
 }
 
 export async function finishDownload(chapterId: string): Promise<void> {

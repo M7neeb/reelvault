@@ -32,6 +32,8 @@ let getPrefs: () => BrowsePrefs = () => {
 };
 let onChapterDone: (seriesId: string) => void = () => undefined;
 let running = false;
+/** Asked to start while the last run was finishing: start again once it has. */
+let again = false;
 let paused = false;
 let current: DownloadProgress = null;
 let lastEmit = 0;
@@ -170,6 +172,15 @@ async function downloadOne(row: DownloadRow): Promise<void> {
   {
     let next = 0;
     const worker = async () => {
+      try {
+        await pull();
+      } catch (e) {
+        // The first page that fails for good stops the other workers too.
+        stop ??= e instanceof Error ? e : new Error(String(e));
+        throw e;
+      }
+    };
+    const pull = async () => {
       while (next < pages.length) {
         check();
         const i = next++;
@@ -209,8 +220,13 @@ async function downloadOne(row: DownloadRow): Promise<void> {
 
 /** Works through the queue until it is empty (or paused). */
 export function kickDownloads(): void {
-  if (running || paused) return;
+  if (paused) return;
+  if (running) {
+    again = true;
+    return;
+  }
   running = true;
+  again = false;
   (async () => {
     try {
       for (;;) {
@@ -225,7 +241,11 @@ export function kickDownloads(): void {
           await downloadOne(next);
         } catch (e) {
           const msg = String(e).replace(/^Error:\s*/, '');
-          if (msg === 'Paused') break;
+          if (msg === 'Paused') {
+            // Already carried on again: keep going instead of stopping.
+            if (!paused) continue;
+            break;
+          }
           // Cancelled or deleted: its row is already gone.
           if (msg === 'Cancelled') continue;
           console.log(`[MANGA] download ${next.chapterId} failed: ${msg}`);
@@ -244,6 +264,11 @@ export function kickDownloads(): void {
       running = false;
       current = null;
       emit(true);
+      // Carry on tapped right after Pause (or something queued as the run ended): go again.
+      if (again && !paused) {
+        again = false;
+        kickDownloads();
+      }
     }
   })();
 }
