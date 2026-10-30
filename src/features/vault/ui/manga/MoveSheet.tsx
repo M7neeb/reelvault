@@ -39,17 +39,20 @@ export default function MoveSheet({
   const [name, setName] = useState('');
   // New categories typed here show at the top until the library catches up.
   const [added, setAdded] = useState<string[]>([]);
-  const all = [...added.filter((t) => !tags.includes(t)), ...tags];
+  const every = [...added.filter((t) => !tags.includes(t)), ...tags];
+  // With many categories, a search box narrows the list.
+  const [find, setFind] = useState('');
+  const all = find.trim() ? every.filter((t) => t.toLowerCase().includes(find.trim().toLowerCase())) : every;
   const n = picked.length;
   const word = n === 1 ? 'title' : 'titles';
 
   const addNew = () => {
-    const t = name.trim();
+    const t = name.trim().replace(/^#/, '').trim();
     setName('');
     setTyping(false);
     if (!t) return;
     tick();
-    setAdded((a) => [t, ...a]);
+    setAdded((a) => (a.includes(t) ? a : [t, ...a]));
     onTag(t, true);
   };
 
@@ -95,6 +98,12 @@ export default function MoveSheet({
               <View style={styles.rule} />
               <Text style={styles.head}>Categories</Text>
               <Text style={styles.sub}>{n === 1 ? 'Tick to add it, untick to take it out.' : `Tick to add all ${n}, untick to take them out.`} A title can be in many.</Text>
+              {every.length > 8 && (
+                <View style={styles.findRow}>
+                  <Icon name="search" size={15} color={p.textSecondary} />
+                  <TextInput value={find} onChangeText={setFind} placeholder={`Search ${every.length} categories`} placeholderTextColor={p.textMuted} style={styles.findInput} clearButtonMode="while-editing" autoCorrect={false} />
+                </View>
+              )}
               {all.map((t) => {
                 const { has, state } = tagState(picked, t);
                 return (
@@ -171,6 +180,8 @@ const makeStyles = (p: Palette) =>
     radioOn: { borderWidth: 2.5 },
     radioDot: { width: 13, height: 13, borderRadius: 7, backgroundColor: p.accent },
     rule: { height: 1, backgroundColor: p.separator, marginVertical: 10, marginHorizontal: -22 },
+    findRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+    findInput: { flex: 1, color: p.text, fontSize: 16 },
     newRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
     input: { flex: 1, height: 42, borderRadius: 12, backgroundColor: p.card, paddingHorizontal: 12, color: p.text, fontSize: 16 },
     add: { backgroundColor: p.accent, borderRadius: 12, paddingHorizontal: 16, height: 42, justifyContent: 'center' },

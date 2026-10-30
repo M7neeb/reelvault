@@ -127,7 +127,7 @@ export type BrowseActions = {
   setLanguages: (codes: string[]) => Promise<void>;
   setAdult: (on: boolean) => Promise<void>;
   /** Download and update options (smaller pages, check when the app opens, download new chapters). */
-  setOption: (key: 'smallerPages' | 'checkOnOpen' | 'autoDownload' | 'removeAfterRead' | 'wifiOnly' | 'patient' | 'autoUpdateExt' | 'syncProgress', on: boolean) => Promise<void>;
+  setOption: (key: 'smallerPages' | 'checkOnOpen' | 'autoDownload' | 'skipFinished' | 'removeAfterRead' | 'wifiOnly' | 'patient' | 'autoUpdateExt' | 'syncProgress', on: boolean) => Promise<void>;
   /** Pages downloaded at the same time. */
   setParallel?: (n: 1 | 3 | 5) => Promise<void>;
   /** The reader's own settings (tap zones, page colour, two pages side by side). */

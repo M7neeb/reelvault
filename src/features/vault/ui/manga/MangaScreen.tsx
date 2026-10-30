@@ -196,11 +196,24 @@ export default function MangaScreen({
   const list = useMemo(() => viewLibrary(source.filter((s) => matchesManga(s, { ...active.filter, query })), view), [source, active, query, view]);
   const sourceNames = useMemo(() => [...new Set(visible.map((s) => sourceLabel(s.sourceId)))].sort(), [visible]);
   const filtering = view.filter.unread || view.filter.downloaded || view.filter.completed || view.filter.sources.length > 0;
-  const counts = useMemo(() => Object.fromEntries(chips.map((c) => [c.key, visible.filter((s) => matchesManga(s, c.filter)).length])), [chips, visible]);
+  // Categories counted in one pass over the library; only the few built-in tabs run the filter.
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const s of visible) for (const t of new Set(s.tags.map((x) => x.toLowerCase()))) m[`#${t}`] = (m[`#${t}`] ?? 0) + 1;
+    return Object.fromEntries(chips.map((c) => [c.key, c.key.startsWith('#') ? (m[c.key.toLowerCase()] ?? 0) : visible.filter((s) => matchesManga(s, c.filter)).length]));
+  }, [chips, visible]);
+  // The tab you were on went away (its last title left it): back to Library.
+  useEffect(() => {
+    if (!chips.some((c) => c.key === chip)) setChip('all');
+  }, [chips, chip]);
   const resume = useMemo(() => (!view.continueRow || query || chip !== 'all' || inDeleted ? [] : continueReading(visible)), [visible, query, chip, inDeleted, view.continueRow]);
 
-  const ids = selected ? [...selected] : [];
-  const picked = useMemo(() => (selected ? items.filter((s) => selected.has(s.id)) : []), [items, selected]);
+  // Only failed downloads left: the bar gets an X to clear them.
+  const failedIds = downloads.queue.filter((q) => q.state === 'failed').map((q) => q.chapterId);
+  const onlyFailed = !downloads.current && failedIds.length > 0 && !downloads.queue.some((q) => q.state === 'queued' || q.state === 'held');
+  // Only titles you can see count (not deleted ones, not Private ones once it locks again).
+  const picked = useMemo(() => (selected ? visible.filter((s) => selected.has(s.id)) : []), [visible, selected]);
+  const ids = picked.map((s) => s.id);
   const listIds = useMemo(() => list.map((s) => s.id), [list]);
   const shownPicked = selected ? listIds.filter((id) => selected.has(id)).length : 0;
   const allShownPicked = listIds.length > 0 && shownPicked === listIds.length;
@@ -225,11 +238,16 @@ export default function MangaScreen({
     setSelected((s) => new Set([...(s ?? []), ...(range.length ? range : [id])]));
   };
   const moveTo = (status: MangaStatus | null) => {
-    const before = statusGroups(picked);
+    // Titles already there stay untouched (a Completed one keeps the day you finished it).
+    const moving = picked.filter((x) => x.status !== status);
+    const before = statusGroups(moving);
     const n = picked.length;
     const label = status ? MANGA_STATUSES.find((x) => x.key === status)?.label : 'No status';
     actions
-      .update(ids, { status })
+      .update(
+        moving.map((x) => x.id),
+        { status }
+      )
       .then(() =>
         say(`Moved ${titles(n)} to ${label}`, () => {
           Promise.all(before.map((g) => actions.update(g.ids, { status: g.status }))).catch(failed);
@@ -243,10 +261,12 @@ export default function MangaScreen({
   const chapterIds = (read: boolean) => picked.flatMap((s) => s.chapters.filter((c) => (c.readAt !== null) !== read).map((c) => c.id));
   const canDownload = picked.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:'));
   const downloadPicked = async (which: 'all' | 'unread') => {
-    let n = 0;
-    for (const id of ids) n += await actions.download(id, which).catch(() => 0);
-    say(n ? `${n} chapters added to Downloads` : 'Nothing new to download for these');
+    const list = ids;
     endSelect();
+    say(`Adding chapters of ${titles(list.length)} to Downloads…`);
+    let n = 0;
+    for (const id of list) n += await actions.download(id, which).catch(() => 0);
+    say(n ? `${n} chapters added to Downloads` : 'Nothing new to download for these');
   };
 
   const addOptions: OptionItem[] = [
@@ -266,8 +286,12 @@ export default function MangaScreen({
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
     ...(items.some((s) => s.sourceId?.startsWith('tachi:') || /^server:[^:]+:library$/.test(s.sourceId ?? '')) ? [{ label: 'Find backup titles', hint: 'On your Suwayomi server, extensions or MangaDex; fixes linked ones too', onPress: () => actions.autoLink().catch(failed) }] : []),
     { label: 'Edit tabs', hint: 'Order, hide, rename, new category', onPress: () => setTimeout(() => setTabsOpen(true), 250) },
-    { label: 'Select', hint: 'Pick titles to move, rate or mark read', onPress: () => setSelected(new Set()) },
-    { label: 'Select all', hint: chip === 'all' ? 'Every title in the library' : `Every title in ${active.label.replace(/^# /, '')}`, onPress: () => setSelected(new Set(list.map((x) => x.id))) },
+    ...(inDeleted
+      ? []
+      : [
+          { label: 'Select', hint: 'Pick titles to move, rate or mark read', onPress: () => setSelected(new Set()) },
+          { label: 'Select all', hint: chip === 'all' ? 'Every title in the library' : `Every title in ${active.label.replace(/^# /, '')}`, onPress: () => setSelected(new Set(list.map((x) => x.id))) },
+        ]),
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
   ];
@@ -357,7 +381,23 @@ export default function MangaScreen({
                     ? `${downloads.queue.filter((q) => q.state === 'failed').length} downloads failed · tap to retry`
                     : `${downloads.queue.filter((q) => q.state === 'held').length} chapters on hold · tap to choose`}
           </Text>
-          <Icon name="forward" size={12} color={p.textMuted} />
+          {onlyFailed ? (
+            <TouchableOpacity
+              hitSlop={10}
+              accessibilityLabel="Clear the failed downloads"
+              onPress={() =>
+                confirmAction(
+                  `Clear ${failedIds.length} failed ${failedIds.length === 1 ? 'download' : 'downloads'}?`,
+                  'They come off the list. You can download those chapters again from the title page.',
+                  () => actions.cancelDownloads(failedIds).catch(failed),
+                  { label: 'Clear' }
+                )
+              }>
+              <Icon name="close" size={14} color={p.textMuted} />
+            </TouchableOpacity>
+          ) : (
+            <Icon name="forward" size={12} color={p.textMuted} />
+          )}
         </TouchableOpacity>
       )}
       {inDeleted && <Text style={styles.summary}>Series here are removed for good after the days you chose in Settings. Tap one to restore it.</Text>}
@@ -639,7 +679,8 @@ export default function MangaScreen({
           }}
           onDelete={(keys) => {
             const gone = new Set(keys);
-            changeTabs({ ...tabPrefs, order: tabPrefs.order.filter((k) => !gone.has(k)), hidden: tabPrefs.hidden.filter((k) => !gone.has(k)), extra: tabPrefs.extra.filter((t) => !gone.has(`#${t}`)) });
+            const labels = Object.fromEntries(Object.entries(tabPrefs.labels).filter(([k]) => !gone.has(k)));
+            changeTabs({ ...tabPrefs, labels, order: tabPrefs.order.filter((k) => !gone.has(k)), hidden: tabPrefs.hidden.filter((k) => !gone.has(k)), extra: tabPrefs.extra.filter((t) => !gone.has(`#${t}`)) });
             if (gone.has(chip)) setChip('all');
             actions.deleteTag(keys.map((k) => k.slice(1))).catch(failed);
           }}
@@ -693,7 +734,8 @@ export default function MangaScreen({
               hint: `${chapterIds(true).length} chapters`,
               onPress: () => {
                 const ch = chapterIds(true);
-                actions.setRead(ch, false).then(() => say(`${ch.length} chapters marked unread`, () => actions.setRead(ch, true).catch(failed))).catch(failed);
+                // No Undo here: marking them read again would date every chapter today (stats, streaks).
+                actions.setRead(ch, false).then(() => say(`${ch.length} chapters marked unread`)).catch(failed);
                 endSelect();
               },
             },

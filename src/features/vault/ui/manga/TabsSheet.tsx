@@ -45,11 +45,16 @@ export default function TabsSheet({
   const [editing, setEditing] = useState<string | null>(null);
   const [text, setText] = useState('');
   const keys = tabs.map((t) => t.key);
-  const cats = tabs.filter((t) => t.key.startsWith('#'));
+  const allCats = tabs.filter((t) => t.key.startsWith('#'));
+  // With many categories, a search box narrows the list (and what Select all picks).
+  const [find, setFind] = useState('');
+  const q = find.trim().toLowerCase();
+  const matches = (t: EditTab) => !q || t.label.toLowerCase().includes(q);
+  const cats = allCats.filter(matches);
   // Picking many categories to hide or delete together.
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const pickedList = cats.filter((t) => picked.has(t.key));
+  const pickedList = allCats.filter((t) => picked.has(t.key));
   const togglePick = (key: string) => {
     tick();
     setPicked((s) => {
@@ -111,7 +116,7 @@ export default function TabsSheet({
             <View style={styles.grabber} />
             <View style={styles.header}>
               <Text style={styles.title}>{picking ? `${n} selected` : 'Edit tabs'}</Text>
-              {cats.length > 0 && (
+              {allCats.length > 0 && (
                 <TouchableOpacity style={styles.ghost} onPress={() => (picking ? stopPicking() : setPicking(true))}>
                   <Text style={styles.ghostText}>{picking ? 'Cancel' : 'Select'}</Text>
                 </TouchableOpacity>
@@ -124,17 +129,32 @@ export default function TabsSheet({
             </View>
             {picking ? (
               <View style={styles.quick}>
-                <TouchableOpacity style={styles.chip} onPress={() => setPicked(n === cats.length ? new Set() : new Set(cats.map((t) => t.key)))}>
-                  <Text style={styles.chipText}>{n === cats.length ? 'Unselect all' : `Select all ${cats.length}`}</Text>
+                <TouchableOpacity
+                  style={styles.chip}
+                  onPress={() => {
+                    const all = cats.length > 0 && cats.every((t) => picked.has(t.key));
+                    setPicked((s) => {
+                      const next = new Set(s);
+                      for (const t of cats) all ? next.delete(t.key) : next.add(t.key);
+                      return next;
+                    });
+                  }}>
+                  <Text style={styles.chipText}>{cats.length > 0 && cats.every((t) => picked.has(t.key)) ? 'Unselect all' : `Select all ${cats.length}`}</Text>
                 </TouchableOpacity>
                 {cats.some((t) => t.count <= 1) && (
-                  <TouchableOpacity style={styles.chip} onPress={() => setPicked(new Set(cats.filter((t) => t.count <= 1).map((t) => t.key)))}>
+                  <TouchableOpacity style={styles.chip} onPress={() => setPicked((s) => new Set([...s, ...cats.filter((t) => t.count <= 1).map((t) => t.key)]))}>
                     <Text style={styles.chipText}>Small ones (0-1 title)</Text>
                   </TouchableOpacity>
                 )}
               </View>
             ) : (
               <Text style={styles.sub}>Arrows move a tab, the eye hides it, tap a name to rename it. Select deletes many categories at once.</Text>
+            )}
+            {allCats.length > 8 && (
+              <View style={styles.findRow}>
+                <Icon name="search" size={15} color={p.textSecondary} />
+                <TextInput value={find} onChangeText={setFind} placeholder={`Search ${allCats.length} categories`} placeholderTextColor={p.textMuted} style={styles.findInput} clearButtonMode="while-editing" autoCorrect={false} />
+              </View>
             )}
             <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
               {picking &&
@@ -158,6 +178,7 @@ export default function TabsSheet({
                   );
                 })}
               {!picking && tabs.map((t, i) => {
+                if (!matches(t)) return null;
                 const hidden = prefs.hidden.includes(t.key);
                 const fixed = t.key === 'all';
                 const keyword = t.key.startsWith('#');
@@ -275,6 +296,8 @@ const makeStyles = (p: Palette) =>
     input: { flex: 1, height: 42, borderRadius: 12, backgroundColor: p.card, paddingHorizontal: 12, color: p.text, fontSize: 16 },
     save: { backgroundColor: p.accent, borderRadius: 12, paddingHorizontal: 14, height: 42, justifyContent: 'center' },
     saveText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    findRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+    findInput: { flex: 1, color: p.text, fontSize: 16 },
     ghost: { paddingHorizontal: 12, paddingVertical: 8 },
     ghostText: { color: p.accent, fontSize: 16, fontWeight: '800' },
     quick: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 22, paddingTop: 8, paddingBottom: 4 },

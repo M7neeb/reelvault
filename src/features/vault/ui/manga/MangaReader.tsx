@@ -431,6 +431,8 @@ export default function MangaReader({
     if (!c) return;
     tick();
     endSession();
+    // A new session now, so leaving before the next chapter loads does not count this time twice.
+    session.current = { startedAt: Date.now(), pages: new Set([0]) };
     void startAt;
     resume.current = false;
     atEnd.current = false;
@@ -553,9 +555,16 @@ export default function MangaReader({
     [count, mode, toList, slotOf, slots]
   );
 
-  // Back to the right page whenever the chapter or mode changes (and after a rotation).
+  // Back to the right page whenever the chapter or mode changes. After a rotation or a
+  // reloaded page (same chapter, same mode) it stays on the page you are reading.
+  const shownFor = useRef('');
   useEffect(() => {
-    const t = setTimeout(() => goTo(firstPage.current, false), 30);
+    const key = `${chapter.id}:${mode}`;
+    const same = shownFor.current === key && !!loaded;
+    shownFor.current = key;
+    const target = same ? pageRef.current : firstPage.current;
+    if (same) firstPage.current = target;
+    const t = setTimeout(() => goTo(target, false), 30);
     return () => clearTimeout(t);
   }, [chapter.id, mode, W, uris, spread]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -605,7 +614,7 @@ export default function MangaReader({
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken<Item>[] }) => {
     const first = viewableItems.find((v) => v.item && v.item.img);
     const last = viewableItems[viewableItems.length - 1];
-    if (last?.item && last.item.img === null) atEnd.current = true;
+    atEnd.current = !!(last?.item && last.item.img === null);
     if (first?.item) {
       session.current.pages.add(first.item.index);
       setPage(first.item.index);
