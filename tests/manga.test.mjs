@@ -188,3 +188,16 @@ test('logged reading lands on the right day', async () => {
   assert.equal(y.getHours(), 20);
   assert.deepEqual(nextUnread([{ id: 'a', readAt: 1 }, { id: 'b', readAt: null }, { id: 'c', readAt: null }, { id: 'd', readAt: null }], 2), ['b', 'c']);
 });
+
+test('download size left: same title average, else overall', async () => {
+  const { downloadSizeLeft } = await import('../src/features/vault/manga/mangaLogic.ts');
+  const ch = (id, size, downloaded) => ({ id, size, pageCount: 10, downloaded });
+  const series = [
+    { id: 'a', chapters: [ch('a1', 10e6, true), ch('a2', 30e6, true), ch('a3', 0, false)] },
+    { id: 'b', chapters: [ch('b1', 60e6, true)] },
+    { id: 'c', chapters: [ch('c1', 0, false)] },
+  ];
+  // a: 20 MB each; c has none, so the overall average (100/3 MB).
+  assert.equal(downloadSizeLeft(series, [{ seriesId: 'a', chapterId: 'a3' }, { seriesId: 'c', chapterId: 'c1' }]), Math.round(20e6 + 100e6 / 3));
+  assert.equal(downloadSizeLeft([{ id: 'c', chapters: [ch('c1', 0, false)] }], [{ seriesId: 'c', chapterId: 'c1' }]), null);
+});
