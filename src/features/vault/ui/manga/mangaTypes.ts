@@ -37,8 +37,8 @@ export type MangaActions = {
   removeTag: (ids: string | string[], name: string) => Promise<void>;
   /** Renames a keyword (category) on every title. */
   renameTag: (from: string, to: string) => Promise<void>;
-  /** Takes a keyword (category) off every title. */
-  deleteTag: (name: string) => Promise<void>;
+  /** Takes keywords (categories) off every title: one name or many. */
+  deleteTag: (names: string | string[]) => Promise<void>;
   /** To Recently Deleted. */
   trash: (ids: string[]) => Promise<void>;
   restore: (ids: string[]) => Promise<void>;

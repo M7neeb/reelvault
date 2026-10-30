@@ -771,6 +771,11 @@ export default function MangaReader({
 
         {count > 0 && prefs.filter !== 'none' && <View style={[s.overlay, FILTER[prefs.filter]]} pointerEvents="none" />}
 
+        {/* The left edge belongs to the swipe that closes the reader: the strip and the
+            pages scroll under fingers anywhere else, but would take this swipe first. */}
+        <View style={s.edge} />
+
+
         {chrome && count > 0 && (
           <>
             <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)} style={[s.top, { paddingTop: insets.top + 6 }]}>
@@ -1049,6 +1054,7 @@ const s = {
   trackFill: { position: 'absolute' as const, top: 0, bottom: 0 },
   knob: { position: 'absolute' as const, width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff', top: 10 },
   overlay: { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 },
+  edge: { position: 'absolute' as const, top: 0, left: 0, bottom: 0, width: 24 },
   pageLine: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 10 },
   autoBtn: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 5, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: 'rgba(255,255,255,0.14)' },
   autoText: { color: '#fff', fontSize: 12, fontWeight: '800' as const },

@@ -2,6 +2,8 @@
  * Edit the tabs above the manga library: move a tab up or down, hide or show
  * it, rename it (a category is renamed on every title in it), delete a
  * category (it comes off its titles; the titles stay) and make a new one.
+ * Select picks many categories at once (all, or the small ones with one
+ * title or none) to hide or delete together.
  * Library stays first. Every change shows at once and is kept.
  */
 
@@ -32,7 +34,8 @@ export default function TabsSheet({
   prefs: TabPrefs;
   onPrefs: (p: TabPrefs) => void;
   onRename: (key: string, name: string) => void;
-  onDelete: (key: string) => void;
+  /** Deletes these categories (keys start with '#'). */
+  onDelete: (keys: string[]) => void;
   onAdd: (name: string) => void;
   onClose: () => void;
 }) {
@@ -42,6 +45,26 @@ export default function TabsSheet({
   const [editing, setEditing] = useState<string | null>(null);
   const [text, setText] = useState('');
   const keys = tabs.map((t) => t.key);
+  const cats = tabs.filter((t) => t.key.startsWith('#'));
+  // Picking many categories to hide or delete together.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const pickedList = cats.filter((t) => picked.has(t.key));
+  const togglePick = (key: string) => {
+    tick();
+    setPicked((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  };
+  const stopPicking = () => {
+    setPicking(false);
+    setPicked(new Set());
+  };
+  const n = pickedList.length;
+  const word = n === 1 ? 'category' : 'categories';
 
   const startEdit = (t: EditTab) => {
     setEditing(t.key);
@@ -87,14 +110,54 @@ export default function TabsSheet({
           <View style={[styles.card, { paddingBottom: insets.bottom + 12 }]}>
             <View style={styles.grabber} />
             <View style={styles.header}>
-              <Text style={styles.title}>Edit tabs</Text>
-              <TouchableOpacity style={styles.done} onPress={onClose}>
-                <Text style={styles.doneText}>Done</Text>
-              </TouchableOpacity>
+              <Text style={styles.title}>{picking ? `${n} selected` : 'Edit tabs'}</Text>
+              {cats.length > 0 && (
+                <TouchableOpacity style={styles.ghost} onPress={() => (picking ? stopPicking() : setPicking(true))}>
+                  <Text style={styles.ghostText}>{picking ? 'Cancel' : 'Select'}</Text>
+                </TouchableOpacity>
+              )}
+              {!picking && (
+                <TouchableOpacity style={styles.done} onPress={onClose}>
+                  <Text style={styles.doneText}>Done</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            <Text style={styles.sub}>Arrows move a tab, the eye hides it, tap a name to rename it. Empty tabs only show here.</Text>
+            {picking ? (
+              <View style={styles.quick}>
+                <TouchableOpacity style={styles.chip} onPress={() => setPicked(n === cats.length ? new Set() : new Set(cats.map((t) => t.key)))}>
+                  <Text style={styles.chipText}>{n === cats.length ? 'Unselect all' : `Select all ${cats.length}`}</Text>
+                </TouchableOpacity>
+                {cats.some((t) => t.count <= 1) && (
+                  <TouchableOpacity style={styles.chip} onPress={() => setPicked(new Set(cats.filter((t) => t.count <= 1).map((t) => t.key)))}>
+                    <Text style={styles.chipText}>Small ones (0-1 title)</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <Text style={styles.sub}>Arrows move a tab, the eye hides it, tap a name to rename it. Select deletes many categories at once.</Text>
+            )}
             <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-              {tabs.map((t, i) => {
+              {picking &&
+                cats.map((t) => {
+                  const on = picked.has(t.key);
+                  return (
+                    <TouchableOpacity key={t.key} style={styles.row} onPress={() => togglePick(t.key)} accessibilityRole="checkbox" accessibilityState={{ checked: on }}>
+                      <View style={styles.iconBtn}>
+                        <View style={[styles.box, on && styles.boxOn]}>{on && <Icon name="check" size={14} color={p.bg} weight="bold" />}</View>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.label} numberOfLines={1}>
+                          {t.label}
+                        </Text>
+                        <Text style={styles.count}>
+                          {t.count} {t.count === 1 ? 'title' : 'titles'}
+                          {prefs.hidden.includes(t.key) ? ' · hidden' : ''}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              {!picking && tabs.map((t, i) => {
                 const hidden = prefs.hidden.includes(t.key);
                 const fixed = t.key === 'all';
                 const keyword = t.key.startsWith('#');
@@ -121,7 +184,7 @@ export default function TabsSheet({
                           confirmAction(
                             `Delete the category ${t.label}?`,
                             t.count ? `It comes off its ${t.count} ${t.count === 1 ? 'title' : 'titles'}; the titles stay in your library.` : 'No title is in it.',
-                            () => onDelete(t.key),
+                            () => onDelete([t.key]),
                             { label: 'Delete', destructive: true }
                           )
                         }>
@@ -141,7 +204,7 @@ export default function TabsSheet({
                   </View>
                 );
               })}
-              {editing === '+new' ? (
+              {picking ? null : editing === '+new' ? (
                 input
               ) : (
                 <TouchableOpacity style={styles.row} onPress={() => startEdit({ key: '+new', label: '', count: 0 })}>
@@ -152,6 +215,39 @@ export default function TabsSheet({
                 </TouchableOpacity>
               )}
             </ScrollView>
+            {picking && (
+              <View style={styles.bar}>
+                <TouchableOpacity
+                  style={[styles.barBtn, !n && { opacity: 0.4 }]}
+                  disabled={!n}
+                  onPress={() => {
+                    tick();
+                    onPrefs({ ...prefs, hidden: [...new Set([...prefs.hidden, ...pickedList.map((t) => t.key)])] });
+                    stopPicking();
+                  }}>
+                  <Icon name="eyeOff" size={18} color={p.text} />
+                  <Text style={styles.barText}>Hide {n || ''}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.barBtn, styles.barDanger, !n && { opacity: 0.4 }]}
+                  disabled={!n}
+                  onPress={() => {
+                    const titles = pickedList.reduce((a, t) => a + t.count, 0);
+                    confirmAction(
+                      `Delete ${n} ${word}?`,
+                      titles ? 'They come off the titles in them; the titles stay in your library.' : 'No title is in them.',
+                      () => {
+                        onDelete(pickedList.map((t) => t.key));
+                        stopPicking();
+                      },
+                      { label: 'Delete', destructive: true }
+                    );
+                  }}>
+                  <Icon name="trash" size={18} color="#fff" />
+                  <Text style={[styles.barText, { color: '#fff' }]}>Delete {n || ''}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -179,4 +275,15 @@ const makeStyles = (p: Palette) =>
     input: { flex: 1, height: 42, borderRadius: 12, backgroundColor: p.card, paddingHorizontal: 12, color: p.text, fontSize: 16 },
     save: { backgroundColor: p.accent, borderRadius: 12, paddingHorizontal: 14, height: 42, justifyContent: 'center' },
     saveText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    ghost: { paddingHorizontal: 12, paddingVertical: 8 },
+    ghostText: { color: p.accent, fontSize: 16, fontWeight: '800' },
+    quick: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 22, paddingTop: 8, paddingBottom: 4 },
+    chip: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+    chipText: { color: p.text, fontSize: 14, fontWeight: '700' },
+    box: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: p.accent, alignItems: 'center', justifyContent: 'center' },
+    boxOn: { backgroundColor: p.accent },
+    bar: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 10 },
+    barBtn: { flex: 1, flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', height: 48, borderRadius: 14, backgroundColor: p.card },
+    barDanger: { backgroundColor: p.danger },
+    barText: { color: p.text, fontSize: 16, fontWeight: '800' },
   });

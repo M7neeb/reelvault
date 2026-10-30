@@ -360,8 +360,8 @@ export function useMangaData(): MangaData {
         await renameMangaTag(from, to);
         await refresh();
       },
-      deleteTag: async (name) => {
-        await deleteMangaTag(name);
+      deleteTag: async (names) => {
+        for (const name of typeof names === 'string' ? [names] : names) await deleteMangaTag(name);
         await refresh();
       },
       trash: async (ids) => {
