@@ -23,6 +23,12 @@ export type EditPlan = {
   fps: number | null;
   /** Trim only, no re-encoding: instant and loses nothing. Ignored when anything else changes. */
   lossless: boolean;
+  /**
+   * Make Smaller strength: keep this share of the video's current bitrate
+   * (0.6 = the picture data shrinks by 40%). null/undefined = Apple's
+   * standard "highest quality" export, which has no size control.
+   */
+  squeeze?: number | null;
 };
 
 export type SourceInfo = {
@@ -50,6 +56,14 @@ export const FRAME_RATES: { key: number | null; label: string }[] = [
   { key: 30, label: '30' },
   { key: 25, label: '25' },
   { key: 24, label: '24' },
+];
+
+/** Make Smaller strengths. From H.264 (most downloaded episodes) HEVC needs about half the data for the same picture. */
+export const SQUEEZES: { key: number | null; label: string; hint: string }[] = [
+  { key: null, label: 'Standard', hint: "Apple's best quality. Shrinks camera videos, but often can't shrink files that are already small." },
+  { key: 0.75, label: 'Light', hint: 'About 25% less picture data. No visible change.' },
+  { key: 0.55, label: 'Balanced', hint: 'About 45% less. Looks the same for H.264 files (most anime downloads); HEVC files lose a little detail.' },
+  { key: 0.4, label: 'Strong', hint: 'About 60% less. Fine on a phone screen; fast action can look soft.' },
 ];
 
 export const ASPECTS: { key: string; label: string; ratio: number | null }[] = [
@@ -150,7 +164,7 @@ export function outputOf(plan: EditPlan, src: SourceInfo): { width: number | nul
 
 /** Whether the frames have to be re-encoded (anything but a lossless trim). */
 export function needsReencode(plan: EditPlan, src: SourceInfo): boolean {
-  if (!plan.lossless) return true;
+  if (!plan.lossless || plan.squeeze) return true;
   if (plan.crop) return true;
   const out = outputOf(plan, src);
   if (out.width !== src.width || out.height !== src.height) return true;
@@ -176,6 +190,16 @@ export function estimateBytes(plan: EditPlan, src: SourceInfo): number | null {
   if (!needsReencode(plan, src)) return Math.round(asIs);
   if (!out.width || !out.height) return null;
   const seconds = out.durationMs / 1000;
+  if (plan.squeeze) {
+    // The source's video rate, guessed from the file size minus its sound.
+    const total = (src.sizeBytes * 8) / (src.durationMs / 1000);
+    const audioIn = Math.min(192_000, total * 0.15);
+    const pixels = src.width && src.height ? Math.min(1, (out.width * out.height) / (src.width * src.height)) : 1;
+    const frames = src.fps && out.fps && src.fps <= 240 ? Math.min(1, out.fps / src.fps) : 1;
+    const video = Math.max(200_000, (total - audioIn) * plan.squeeze * pixels ** 0.7 * frames ** 0.5);
+    const audio = Math.min(128_000, Math.max(64_000, audioIn));
+    return Math.round(Math.min(asIs, ((video + audio) * seconds) / 8));
+  }
   const videoBits = out.width * out.height * (out.fps ?? 30) * 0.1 * seconds;
   const audioBits = 160_000 * seconds;
   return Math.round(Math.min(asIs, (videoBits + audioBits) / 8));
@@ -199,7 +223,8 @@ export function nativeOptions(plan: EditPlan) {
     cropH: crop.h,
     maxShortSide: plan.maxShortSide ?? 0,
     fps: plan.fps ?? 0,
-    passthrough: plan.lossless && !plan.crop && !plan.maxShortSide && !plan.fps,
+    passthrough: plan.lossless && !plan.crop && !plan.maxShortSide && !plan.fps && !plan.squeeze,
+    bitrateShare: plan.squeeze ?? 0,
   };
 }
 

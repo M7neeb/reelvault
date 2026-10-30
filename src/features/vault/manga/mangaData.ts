@@ -282,6 +282,7 @@ export function useMangaData(): MangaData {
 
   const byId = (id: string) => allRef.current.find((s) => s.id === id);
 
+  const actionsRef = useRef<MangaData['actions'] | null>(null);
   const actions = useMemo<MangaData['actions']>(
     () => ({
       importFiles: async () => {
@@ -545,14 +546,28 @@ export function useMangaData(): MangaData {
           const summary = await importTachiBackup(await file.bytes(), prefsRef.current, setStatus);
           await refresh();
           const parts = [`Added ${summary.titles} ${summary.titles === 1 ? 'title' : 'titles'} with ${summary.chapters} chapters`];
+          if (summary.added) parts.push(`${summary.added} new ${summary.added === 1 ? 'chapter' : 'chapters'} on titles you had`);
           if (summary.skipped) parts.push(`${summary.skipped} already here`);
           if (summary.linked) parts.push(`${summary.linked} linked to a source`);
           setStatus(parts.join(' · '));
-          if (summary.unlinked) {
-            Alert.alert(
-              'Some titles need a source',
-              `${summary.unlinked} ${summary.unlinked === 1 ? 'title is' : 'titles are'} from ${summary.sources.filter((x) => !/mangadex/i.test(x)).join(', ') || 'other sources'}. Your read marks are kept. To read or download them, open one and tap Find on a source, or add your Suwayomi server in Browse and tap Link backup titles.`
-            );
+          const missing = summary.unlinked
+            ? `\n\n${summary.unlinked} ${summary.unlinked === 1 ? 'title was' : 'titles were'} not found on MangaDex or your extensions (from ${summary.sources.filter((x) => !/mangadex/i.test(x)).join(', ') || 'other sources'}). Their read marks are kept. Open one and tap Find on a source, or add an extension or your Suwayomi server in Browse, then tap Find backup titles.`
+            : '';
+          if (summary.linked) {
+            Alert.alert('Your Tachimanga library is here', `${summary.linked} ${summary.linked === 1 ? 'title is' : 'titles are'} ready to download.${missing}`, [
+              { text: 'Later', style: 'cancel' },
+              {
+                text: 'Download everything',
+                onPress: () => {
+                  actionsRef.current
+                    ?.downloadLibrary()
+                    .then((n) => setStatus(n ? `Downloading ${n} chapters (Manga menu > Downloads)` : 'Nothing new to download'))
+                    .catch((e) => Alert.alert('Downloads did not start', String(e).replace(/^Error:\s*/, '')));
+                },
+              },
+            ]);
+          } else if (missing) {
+            Alert.alert('Some titles need a source', missing.trim());
           }
         } catch (e) {
           setStatus('');
@@ -593,6 +608,7 @@ export function useMangaData(): MangaData {
     }),
     [refresh, run, loadDownloads, refreshOne] // eslint-disable-line react-hooks/exhaustive-deps
   );
+  actionsRef.current = actions;
 
   const browseActions = useMemo<BrowseActions>(
     () => ({

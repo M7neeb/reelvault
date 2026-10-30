@@ -17,6 +17,8 @@ struct EditOptions: Record {
   @Field var fps: Double = 0
   /// Copy the frames as they are (trim only)
   @Field var passthrough: Bool = false
+  /// Make Smaller strength: keep this share of the source's video bitrate; 0 = automatic
+  @Field var bitrateShare: Double = 0
 }
 
 /// The picture changes, as plain values (shared by both encoders).
@@ -37,6 +39,8 @@ struct BackupPlan {
   let track: AVAssetTrack
   let timeRange: CMTimeRange
   let shape: Shape
+  /// > 0: aim for this share of the source's video bitrate (Make Smaller strength).
+  var bitrateShare: Double = 0
 }
 
 /// One writer input's progress; only touched on that input's own queue.
@@ -147,7 +151,20 @@ public class ReelVaultCompressModule: Module {
       let brokenRate = (track?.nominalFrameRate ?? 0) > 240
       let needsComposition = !shape.fullFrame || shape.maxShortSide > 0 || shape.fps > 0 || brokenRate
       let passthrough = options.passthrough && !needsComposition
-      let backup = passthrough ? nil : track.map { BackupPlan(asset: asset, track: $0, timeRange: timeRange, shape: shape) }
+      let share = passthrough ? 0 : min(1, max(0, options.bitrateShare))
+      let backup = passthrough
+        ? nil
+        : track.map { BackupPlan(asset: asset, track: $0, timeRange: timeRange, shape: shape, bitrateShare: share) }
+
+      // A chosen strength needs a bitrate, which Apple's exporter can't take: use the writer directly.
+      if share > 0 {
+        guard let backup = backup else {
+          promise.reject("ERR_TRACK", "This file has no video picture.")
+          return
+        }
+        self.runBackup(backup, outURL: outURL, jobId: jobId, promise: promise, firstError: nil)
+        return
+      }
 
       let preset = passthrough ? AVAssetExportPresetPassthrough : AVAssetExportPresetHEVCHighestQuality
       guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
@@ -168,6 +185,11 @@ public class ReelVaultCompressModule: Module {
         session.videoComposition = Self.composition(for: asset, track: track, shape: shape, duration: duration)
       }
       self.run(session, asset: asset, outURL: outURL, jobId: jobId, promise: promise, backup: backup)
+    }
+
+    /// What this build's encoder can do; older builds have no such function.
+    Function("features") { () -> [String] in
+      ["bitrateShare"]
     }
 
     Function("cancel") { (jobId: String) in
@@ -232,6 +254,12 @@ public class ReelVaultCompressModule: Module {
     instruction.layerInstructions = [layer]
     composition.instructions = [instruction]
     return composition
+  }
+
+  /// The sound track that plays by default (the first enabled one).
+  private static func mainAudioTrack(_ asset: AVAsset) -> AVAssetTrack? {
+    let tracks = asset.tracks(withMediaType: .audio)
+    return tracks.first(where: { $0.isEnabled }) ?? tracks.first
   }
 
   private static func even(_ value: CGFloat) -> CGFloat {
@@ -400,10 +428,28 @@ public class ReelVaultCompressModule: Module {
 
     // Bitrate: enough for a sharp picture, never more than the original used.
     let pixelsPerSecond = Double(width * height) * fps
-    var bitrate = max(1_000_000, pixelsPerSecond * 0.06)
     let sourceRate = Double(track.estimatedDataRate)
-    if sourceRate > 0 { bitrate = min(bitrate, sourceRate * 0.8) }
-    bitrate = max(500_000, bitrate)
+    var bitrate: Double
+    if plan.bitrateShare > 0 && sourceRate > 0 {
+      // A chosen strength: a share of what the source used, less again for fewer pixels or frames.
+      let natural = track.naturalSize
+      let sourcePixels = Double(abs(natural.width * natural.height))
+      let pixelShare = sourcePixels > 0 ? min(1, Double(width * height) / sourcePixels) : 1
+      let sourceFps = Double(track.nominalFrameRate)
+      let frameShare = sourceFps > 0 && sourceFps <= 240 ? min(1, fps / sourceFps) : 1
+      bitrate = max(200_000, sourceRate * plan.bitrateShare * pow(pixelShare, 0.7) * pow(frameShare, 0.5))
+    } else {
+      bitrate = max(1_000_000, pixelsPerSecond * 0.06)
+      if sourceRate > 0 { bitrate = min(bitrate, sourceRate * 0.8) }
+      bitrate = max(500_000, bitrate)
+    }
+
+    // Sound: 160 kbit/s, or with a chosen strength at most 128 kbit/s and never more than the source had.
+    var audioRate = 160_000
+    if plan.bitrateShare > 0 {
+      let sourceAudio = Double(Self.mainAudioTrack(plan.asset)?.estimatedDataRate ?? 0)
+      audioRate = sourceAudio > 0 ? Int(min(128_000, max(64_000, sourceAudio))) : 128_000
+    }
 
     func videoSettings(_ codec: AVVideoCodecType, _ rate: Double) -> [String: Any] {
       [
@@ -441,7 +487,7 @@ public class ReelVaultCompressModule: Module {
         AVFormatIDKey: kAudioFormatMPEG4AAC,
         AVNumberOfChannelsKey: 2,
         AVSampleRateKey: 44_100,
-        AVEncoderBitRateKey: 160_000,
+        AVEncoderBitRateKey: audioRate,
       ])
       input.expectsMediaDataInRealTime = false
       if writer.canAdd(input) {
@@ -554,9 +600,9 @@ public class ReelVaultCompressModule: Module {
     reader.add(videoOut)
 
     var audioOut: AVAssetReaderOutput?
-    let audioTracks = plan.asset.tracks(withMediaType: .audio)
-    if withAudio && !audioTracks.isEmpty {
-      let mix = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: [
+    // Only the main sound track: mixing every track would play two languages at once.
+    if withAudio, let audioTrack = mainAudioTrack(plan.asset) {
+      let mix = AVAssetReaderAudioMixOutput(audioTracks: [audioTrack], audioSettings: [
         AVFormatIDKey: kAudioFormatLinearPCM,
         AVSampleRateKey: 44_100,
         AVNumberOfChannelsKey: 2,

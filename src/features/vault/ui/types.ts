@@ -219,6 +219,11 @@ export type SmartRule = {
   maxDurationSec?: number;
   minSizeMb?: number;
   maxSizeMb?: number;
+  /** Frame rate range (fps, inclusive; 59.94 counts as 60). Videos with an unknown rate never match. */
+  minFps?: number;
+  maxFps?: number;
+  /** Video codec as the file says it: 'H.264', 'HEVC', ... */
+  codec?: string;
   orientation?: Orientation;
   /** File extension, e.g. 'MOV'. */
   format?: string;
@@ -450,6 +455,8 @@ export type VaultActions = {
   onResetCover: (item: VaultItem) => Promise<void>;
   /** Make Smaller is only there in app builds with the encoder (1.1+). */
   canMakeSmaller: () => boolean;
+  /** Make Smaller's Light / Balanced / Strong (app build 18 on). */
+  canChooseStrength?: () => boolean;
   /** Replace the file with a re-encoded one, only if it saves at least 10%. */
   onMakeSmaller: (item: VaultItem, plan: EditPlan, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
   /** Trim / crop / resolution / frame rate: replace the video or save a new copy. */

@@ -21,6 +21,7 @@ import { Modal } from '../screen';
 import { Segment, SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import AudioCover from './AudioCover';
+import { AudioPhotos } from './AudioPhotos';
 import type { AudioActions, AudioBookmark, AudioUiItem } from './audioTypes';
 import { useAudioPlayback } from './playback';
 import ReadAlong from './ReadAlong';
@@ -178,6 +179,7 @@ export function AudioPlayerScreen({
           ) : (
             <Animated.View entering={FadeIn} style={{ alignItems: 'center', paddingHorizontal: 30 }}>
               <AudioCover item={item} size={290} radius={22} />
+              <AudioPhotos itemId={item.id} actions={actions} playing={pb.playing} onToggle={pb.toggle} title={displayTitle(item)} />
             </Animated.View>
           )}
         </View>

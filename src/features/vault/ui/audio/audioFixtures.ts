@@ -201,6 +201,13 @@ export function fixtureAudioData(): AudioData {
     loadBook: async (id) => (id === 'book-1' ? { book: BOOK, chapterText: async (n) => (n === 0 ? CHAPTER_1 : `<html><body><h1 id="h${n + 1}">${BOOK.chapters[n].title}</h1><p>More of the story.</p></body></html>`), uriOf: () => '' } : null),
     share: noop,
     setCoverFromPhoto: noop,
+    listPhotos: async () => [
+      'https://picsum.photos/id/1015/1200/800',
+      'https://picsum.photos/id/1025/800/1200',
+      'https://picsum.photos/id/1043/1200/900',
+    ],
+    addPhotos: async () => 0,
+    removePhoto: noop,
     storageBytes: async () => 412_000_000,
   };
   return { items: FIXTURE_AUDIO, deleted: DELETED.map(asUi), busy: false, status: '', duplicateAsk: null, actions };

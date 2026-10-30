@@ -310,6 +310,7 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
     deleteList: async () => {},
     listEntries: async (id) => LIST_ENTRIES[id] ?? [],
     setInList: async () => {},
+    removeManyFromList: async () => {},
     addManyToList: async (_id, titles) => titles.length,
     setSearched: async () => {},
     importFile: async (onProgress) => {

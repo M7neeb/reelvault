@@ -42,7 +42,7 @@ import {
 } from './actions';
 import { allHistory, allPlays, metaMap, playsFor, sessionsFor } from './history';
 import { loadFranchises, matchFranchise, prefetchArt, scrobble } from './actions';
-import { addManyToList, allLinks, allLists, createList, deleteList, listEntries, setInList, setLink, setSearched, markLinkLogged, updateList, type SimklList } from './collections';
+import { addManyToList, allLinks, allLists, createList, deleteList, listEntries, removeManyFromList, setInList, setLink, setSearched, markLinkLogged, updateList, type SimklList } from './collections';
 import { buildIcs, calendarEntries } from './ics';
 import { pickImportFile, runImport } from './importer';
 import { describeImport } from './imports';
@@ -53,6 +53,17 @@ import { forgetSyncState, lastSyncAt as readLastSync, syncSimkl } from './sync';
 import type { SimklActions, SimklBridge, SimklPrefs } from './ui/types';
 
 const SPOILER_KEY = 'simkl.hideSpoilers';
+const VIEW_KEY = 'simkl.view';
+
+/** The saved sort/status per tab; anything unreadable is simply forgotten. */
+function parseView(raw: string | null): SimklPrefs['view'] {
+  try {
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
 
 const message = (e: unknown) => (e instanceof SimklError || e instanceof Error ? e.message : String(e));
 
@@ -76,8 +87,8 @@ export function useSimklData() {
   }, []);
 
   useEffect(() => {
-    getSetting(SPOILER_KEY)
-      .then((v) => setPrefs({ hideSpoilers: v === '1' }))
+    Promise.all([getSetting(SPOILER_KEY), getSetting(VIEW_KEY)])
+      .then(([spoilers, view]) => setPrefs({ hideSpoilers: spoilers === '1', view: parseView(view) }))
       .catch(() => undefined);
   }, []);
 
@@ -229,6 +240,7 @@ export function useSimklData() {
       deleteList: write(deleteList),
       listEntries,
       setInList: write(setInList),
+      removeManyFromList: write(removeManyFromList),
       addManyToList: async (listId, titles) => {
         try {
           return await addManyToList(listId, titles);
@@ -262,6 +274,7 @@ export function useSimklData() {
       setPrefs: async (next) => {
         setPrefs(next);
         await setSetting(SPOILER_KEY, next.hideSpoilers ? '1' : '0');
+        await setSetting(VIEW_KEY, JSON.stringify(next.view ?? {}));
       },
       openUrl: (url) => {
         Linking.openURL(url).catch((e) => console.log(`[SIMKL] could not open ${url}: ${String(e)}`));

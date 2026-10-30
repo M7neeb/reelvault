@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Share } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
@@ -17,7 +18,7 @@ import type { AudioStatus } from './audioLogic';
 import { DEFAULT_AUDIO_PREFS, displayTitle, parseAudioPrefs, type AudioPrefs } from './audioLogic';
 
 const AUDIO_PREFS_KEY = 'audio.prefs';
-import { addExtras, addTracks, importAudio, listExtras, removeExtra, type AudioDuplicateInfo, type AudioImportSummary, type PickedAudioFile } from './audioImport';
+import { addExtras, addPhotos, addTracks, importAudio, isAddedFile, listExtras, listPhotos, removeExtra, removePhoto, type AudioDuplicateInfo, type AudioImportSummary, type PickedAudioFile } from './audioImport';
 import {
   addAudioTag,
   addBookmark,
@@ -333,7 +334,7 @@ export function useAudioData(): AudioData {
           const sink = openSink(out);
           try {
             const w = zipWriter((b) => sink.write(b));
-            const files = walkFiles(itemDir(it.folder)).filter((f) => f.rel !== BOOK_JSON && !/^cover-\d+\.jpg$/.test(f.rel));
+            const files = walkFiles(itemDir(it.folder)).filter((f) => f.rel !== BOOK_JSON && !/^cover-\d+\.jpg$/.test(f.rel) && !isAddedFile(f.rel));
             const mime = files.find((f) => f.rel === 'mimetype');
             w.addStored('mimetype', strToU8(mime ? (readTextIn(it.folder, 'mimetype') ?? 'application/epub+zip').trim() : 'application/epub+zip'));
             for (const f of files) {
@@ -416,6 +417,24 @@ export function useAudioData(): AudioData {
         const n = await addExtras(id, (picked.assets ?? []).map((a) => ({ uri: a.uri, name: a.name, size: a.size ?? undefined })));
         await refresh();
         return n;
+      },
+      listPhotos: async (id) => {
+        const it = byId(id);
+        return it ? listPhotos(it.folder) : [];
+      },
+      addPhotos: async (id) => {
+        const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 0, quality: 0.9 });
+        if (picked.canceled || !picked.assets?.length) return 0;
+        const files = picked.assets.map((a, i) => ({ uri: a.uri, name: a.fileName ?? `photo-${i}.jpg` }));
+        // Big camera pictures are kept at 2048 px: sharp on the phone, a fraction of the space.
+        const shrink = ReelVaultMedia ? (uri: string) => ReelVaultMedia!.shrinkImage(uri, 2048, 0.85) : undefined;
+        const n = await addPhotos(id, files, shrink);
+        await refresh();
+        return n;
+      },
+      removePhoto: async (id, uri) => {
+        await removePhoto(id, uri);
+        await refresh();
       },
       openExtra: async (uri) => {
         await Share.share({ url: uri });

@@ -175,3 +175,16 @@ test('matching titles and chapters', () => {
   assert.equal(pageFileName(0, 'dir/Page.JPEG'), '0001.jpg');
   assert.equal(pageFileName(41, 'p.png'), '0042.png');
 });
+
+test('logged reading lands on the right day', async () => {
+  const { loggedRead, nextUnread } = await import('../src/features/vault/manga/mangaLogic.ts');
+  const now = new Date(2026, 9, 29, 15, 0).getTime();
+  const today = loggedRead('s1', 30, 0, now);
+  assert.equal(today.readMs, 30 * 60_000);
+  assert.equal(today.startedAt, now - 30 * 60_000);
+  assert.equal(today.chapterId, null);
+  const y = new Date(loggedRead('s1', 45, 1, now).startedAt);
+  assert.equal(y.getDate(), 28);
+  assert.equal(y.getHours(), 20);
+  assert.deepEqual(nextUnread([{ id: 'a', readAt: 1 }, { id: 'b', readAt: null }, { id: 'c', readAt: null }, { id: 'd', readAt: null }], 2), ['b', 'c']);
+});

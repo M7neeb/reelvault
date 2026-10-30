@@ -275,3 +275,12 @@ test('home: the week ahead and what is new this week', () => {
   // Show 1's unwatched episode from Friday, the movie released yesterday; show 3's episode is from weeks ago.
   assert.deepEqual(fresh.map((x) => [x.simklId, x.label]), [[4, null], [1, 'S01E05']]);
 });
+
+test('next unwatched episode after the last one watched', async () => {
+  const { nextUnwatched } = await import('../src/features/simkl/logic.ts');
+  const ep = (season, episode, aired = true, special = false) => ({ season, episode, title: null, aired, date: null, img: null, special });
+  const list = [ep(1, 1), ep(1, 2), ep(5, 1), ep(5, 2), ep(5, 3, false), ep(0, 1, true, true)];
+  assert.deepEqual(nextUnwatched(list, new Set()), { season: 1, episode: 1 });
+  assert.deepEqual(nextUnwatched(list, new Set(['5:1'])), { season: 5, episode: 2 });
+  assert.equal(nextUnwatched(list, new Set(['5:1', '5:2'])), null);
+});

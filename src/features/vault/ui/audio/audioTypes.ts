@@ -51,6 +51,11 @@ export type AudioActions = {
   /** The share sheet: the audio file, or the book rebuilt as an .epub. */
   share: (id: string) => Promise<void>;
   setCoverFromPhoto: (id: string) => Promise<void>;
+  /** Pictures to look at while listening, in order (file addresses). */
+  listPhotos?: (id: string) => Promise<string[]>;
+  /** Picks one or more pictures from Photos; how many were added. */
+  addPhotos?: (id: string) => Promise<number>;
+  removePhoto?: (id: string, uri: string) => Promise<void>;
   /** What the Audio section takes on the phone (bytes). */
   storageBytes: () => Promise<number>;
   /** More audio files for this item, added on the end as chapters. Resolves how many. */

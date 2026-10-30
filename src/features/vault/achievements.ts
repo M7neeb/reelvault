@@ -1203,7 +1203,12 @@ const WEEKLIES: Weekly[] = [
 
 /** Each week (from Monday) has its own goal, picked from the week itself. */
 export function weeklyFor(weekStart: number): Weekly {
-  return WEEKLIES[Math.floor((weekStart + 3 * DAY) / (7 * DAY)) % WEEKLIES.length];
+  // Counted from the calendar date, so every time zone gives a week the same goal
+  // (same numbering as before for Central Europe, so earned weeks stay earned).
+  const d = new Date(weekStart);
+  const days = Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY);
+  const n = Math.floor((days - 4) / 7);
+  return WEEKLIES[((n % WEEKLIES.length) + WEEKLIES.length) % WEEKLIES.length];
 }
 
 /** Plays in time order, videos by id and memory times, worked out once per input (weeks look them up many times). */

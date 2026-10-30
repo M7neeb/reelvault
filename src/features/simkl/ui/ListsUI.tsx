@@ -559,6 +559,31 @@ export function ListModal({
   const [adding, setAdding] = useState(initialAdding);
   const [filter, setFilter] = useState<'all' | 'movie' | 'show' | 'anime'>('all');
   const [searched, setSearchedFilter] = useState<Searched>('all');
+  /** Select mode: the titles picked for removal (null = not selecting). */
+  const [picked, setPicked] = useState<Set<number> | null>(null);
+  const togglePick = (id: number) => {
+    tick();
+    setPicked((now) => {
+      const next = new Set(now ?? []);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  function removePicked() {
+    const ids = [...(picked ?? [])];
+    if (!ids.length) return;
+    confirmAction(
+      `Remove ${ids.length} ${ids.length === 1 ? 'title' : 'titles'} from "${list.name}"?`,
+      'They stay in your library and on Simkl; only this list changes.',
+      () => {
+        setEntries((all) => (all ?? []).filter((e) => !ids.includes(e.simklId)));
+        setPicked(null);
+        actions.removeManyFromList(list.id, ids).catch(() => undefined);
+      },
+      { label: 'Remove', destructive: true }
+    );
+  }
 
   useEffect(() => {
     actions
@@ -591,8 +616,26 @@ export function ListModal({
         <View style={styles.listHeader}>
           <IconButton icon="back" label="Back" onPress={onClose} />
           <View style={{ flex: 1 }} />
-          <IconButton icon="plus" label="Add many" onPress={() => setAdding(true)} />
-          <IconButton icon="more" label="List options" onPress={() => setMenu(true)} />
+          {picked ? (
+            <>
+              <TouchableOpacity style={styles.selectBtn} onPress={() => setPicked(picked.size === shown.length ? new Set() : new Set(shown.map((e) => e.simklId)))}>
+                <Text style={styles.selectText}>{picked.size === shown.length && shown.length ? 'Select none' : 'Select all'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.selectBtn} onPress={() => setPicked(null)}>
+                <Text style={[styles.selectText, { fontWeight: '700' }]}>Done</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              {!!entries?.length && (
+                <TouchableOpacity style={styles.selectBtn} onPress={() => setPicked(new Set())} accessibilityLabel="Select titles">
+                  <Text style={styles.selectText}>Select</Text>
+                </TouchableOpacity>
+              )}
+              <IconButton icon="plus" label="Add many" onPress={() => setAdding(true)} />
+              <IconButton icon="more" label="List options" onPress={() => setMenu(true)} />
+            </>
+          )}
         </View>
         <FlatList
           data={shown}
@@ -654,9 +697,17 @@ export function ListModal({
           }
           renderItem={({ item }) => (
             <View style={{ width: w }}>
-              <TouchableOpacity onPress={() => onOpenTitle(item)} accessibilityLabel={item.title}>
+              <TouchableOpacity
+                onPress={() => (picked ? togglePick(item.simklId) : onOpenTitle(item))}
+                onLongPress={() => (picked ? undefined : (setPicked(new Set()), togglePick(item.simklId)))}
+                accessibilityLabel={picked ? `${picked.has(item.simklId) ? 'Picked' : 'Pick'} ${item.title}` : item.title}>
                 <Poster path={item.poster} title={item.title} width={w} height={h} radius={10} />
-                {item.searchedAt && (
+                {picked && (
+                  <View style={[styles.pickDot, picked.has(item.simklId) && styles.pickDotOn]}>
+                    {picked.has(item.simklId) && <Icon name="check" size={13} color="#fff" weight="bold" />}
+                  </View>
+                )}
+                {item.searchedAt && !picked && (
                   <View style={styles.searchedBadge}>
                     <Icon name="check" size={12} color="#fff" weight="bold" />
                   </View>
@@ -681,12 +732,22 @@ export function ListModal({
             </View>
           )}
         />
+        {picked && (
+          <View style={[styles.pickBar, { paddingBottom: insets.bottom + 10 }]}>
+            <Text style={styles.pickCount}>{picked.size ? `${picked.size} picked` : 'Tap titles to pick them'}</Text>
+            <TouchableOpacity style={[styles.removeBtn, !picked.size && { opacity: 0.4 }]} disabled={!picked.size} onPress={removePicked}>
+              <Icon name="trash" size={15} color="#fff" />
+              <Text style={styles.removeText}>Remove from list</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
       {menu && (
         <OptionsSheet
           title={list.name}
           options={[
             { label: 'Add many titles', onPress: () => setAdding(true) },
+            { label: 'Select titles to remove', onPress: () => setPicked(new Set()) },
             { label: 'Rename or change icon', onPress: () => setEditing(true) },
             {
               label: 'Mark all as not searched',
@@ -750,6 +811,36 @@ const makeStyles = (p: Palette) =>
     plusDot: { width: 28, height: 28, borderRadius: 14, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
 
     screen: { flex: 1, backgroundColor: p.bg },
+    selectBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+    selectText: { color: p.accent, fontSize: 16, fontWeight: '600' },
+    pickDot: {
+      position: 'absolute',
+      top: 6,
+      right: 6,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: '#fff',
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pickDotOn: { backgroundColor: p.accent, borderColor: p.accent },
+    pickBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      backgroundColor: p.elevated,
+      borderTopWidth: 1,
+      borderTopColor: p.separator,
+    },
+    pickCount: { color: p.textSecondary, fontSize: 14, flex: 1 },
+    removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.danger, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 },
+    removeText: { color: '#fff', fontSize: 15, fontWeight: '700' },
     listHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingBottom: 6 },
     listTop: { alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14, gap: 4 },
     listIcon: { fontSize: 52 },

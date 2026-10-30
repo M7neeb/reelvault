@@ -144,6 +144,15 @@ export async function setInList(listId: number, title: CatalogTitle, on: boolean
   );
 }
 
+/** Takes many titles out of a list at once (the titles stay in your library). */
+export async function removeManyFromList(listId: number, simklIds: number[]): Promise<void> {
+  if (!simklIds.length) return;
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const id of simklIds) await db.runAsync('DELETE FROM simkl_list_items WHERE list_id = ? AND simkl_id = ?;', [listId, id]);
+  });
+}
+
 /* -------------------------------------------------------------- video links */
 
 type LinkRow = {

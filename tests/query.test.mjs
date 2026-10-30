@@ -47,3 +47,25 @@ test('month and year, relative dates, sizes and durations', () => {
   assert.equal(parseSearch('rated 7', TAGS, NOW).rule.minRating, 7);
   assert.equal(parseSearch('never watched', TAGS, NOW).watch, 'unwatched');
 });
+
+test('frame rate and codec words', () => {
+  let p = parseSearch('>60fps', TAGS, NOW);
+  assert.equal(p.rule.minFps, 60);
+  assert.equal(p.rule.maxFps, undefined);
+  assert.equal(p.text, '');
+  p = parseSearch('60fps+ big', TAGS, NOW);
+  assert.equal(p.rule.minFps, 60);
+  assert.equal(p.rule.minSizeMb, 500);
+  p = parseSearch('<30fps', TAGS, NOW);
+  assert.equal(p.rule.maxFps, 30);
+  p = parseSearch('anime 120 fps', TAGS, NOW);
+  assert.equal(p.rule.minFps, 120);
+  assert.equal(p.rule.maxFps, 120);
+  assert.equal(p.text, 'anime');
+  p = parseSearch('high fps h264', TAGS, NOW);
+  assert.equal(p.rule.minFps, 50);
+  assert.equal(p.rule.codec, 'H.264');
+  p = parseSearch('1080p 60', TAGS, NOW);
+  assert.equal(p.rule.minFps, undefined);
+  assert.equal(p.text, '1080p 60');
+});

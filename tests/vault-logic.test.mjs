@@ -244,3 +244,18 @@ test('group by rating, keyword, series, length and week', async () => {
   // 14 October 2026 is a Wednesday: its week starts on Monday the 12th.
   assert.deepEqual(groupItems(items, 'week').map((s) => s.title), ['Week of 12 Oct 2026']);
 });
+
+test('frame rate and codec in a rule', async () => {
+  const { matchesRule, parseRule, describeRule } = await import('../src/features/vault/ui/logic.ts');
+  const v = (fps, codec) => ({ filename: 'a.mp4', rating: 0, tagNames: [], status: null, meta: fps ? { fps, codec } : null });
+  const rule = { minFps: 60 };
+  assert.equal(matchesRule(v(59.94, 'HEVC'), rule), true);
+  assert.equal(matchesRule(v(120, 'HEVC'), rule), true);
+  assert.equal(matchesRule(v(29.97, 'HEVC'), rule), false);
+  assert.equal(matchesRule(v(null), rule), false);
+  assert.equal(matchesRule(v(23.976, 'H.264'), { maxFps: 30, codec: 'h.264' }), true);
+  assert.equal(matchesRule(v(23.976, 'HEVC'), { codec: 'H.264' }), false);
+  const back = parseRule(JSON.stringify({ minFps: 60, codec: 'HEVC' }));
+  assert.deepEqual(back, { minFps: 60, codec: 'HEVC' });
+  assert.equal(describeRule(back), '60+ fps · HEVC');
+});

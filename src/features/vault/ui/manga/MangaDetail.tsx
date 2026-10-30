@@ -33,6 +33,7 @@ import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, withAccent, type Palette } from '../theme';
 import { tachiSourceOf } from '../../manga/mangaBackup';
 import LinkSheet from './LinkSheet';
+import LogReadingSheet from './LogReading';
 import AniListSheet from './AniListSheet';
 import type { AniListActions, AniListState } from '../../manga/anilistData';
 import MangaCover from './MangaCover';
@@ -101,6 +102,7 @@ export default function MangaDetail({
   /** Which chapters the list shows. */
   const [show, setShow] = useState<'all' | 'unread' | 'phone'>('all');
   const [checking, setChecking] = useState<string | null>(null);
+  const [logging, setLogging] = useState(false);
   const [linking, setLinking] = useState(false);
   const [aniOpen, setAniOpen] = useState(false);
   const tachi = tachiSourceOf(series.sourceId);
@@ -254,6 +256,10 @@ export default function MangaDetail({
                 <Icon name={series.rating ? 'star' : 'starOff'} size={18} color={series.rating ? p.rating : p.textSecondary} />
                 <Text style={styles.quickText}>{series.rating ? fmtRating(series.rating) : 'Rate'}</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={styles.quickBtn} onPress={() => setLogging(true)} accessibilityLabel="Log reading time">
+                <Icon name="clock" size={18} color={p.textSecondary} />
+                <Text style={styles.quickText}>Log time</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={styles.quickBtn} onPress={() => setMenu('mode')}>
                 <Icon name="bookOpen" size={18} color={p.textSecondary} />
                 <Text style={styles.quickText}>{READING_MODES.find((m) => m.key === mode)?.label}</Text>
@@ -393,6 +399,7 @@ export default function MangaDetail({
         </ScrollView>
       </View>
 
+      {logging && <LogReadingSheet series={series} actions={actions} onDone={setChecking} onClose={() => setLogging(false)} />}
       {rating && <RatingPicker title="Your rating" value={series.rating || null} onPick={(r) => actions.update([series.id], { rating: r ?? 0 }).catch(() => undefined)} onClose={() => setRating(false)} />}
       {tag && <PromptSheet title="Add a keyword" placeholder="e.g. action, isekai, favourite" onSubmit={(t) => t.trim() && actions.addTag([series.id], t.trim()).catch(() => undefined)} onClose={() => setTag(false)} />}
       {menu === 'mode' && (

@@ -419,6 +419,31 @@ export function planTachiImport(b: TachiBackup, now: number): PlannedTitle[] {
 
 /** Titles of the plan you don't have yet (same title, case and punctuation aside). */
 /**
+ * Chapters a fresh backup has that you do not: the point of keeping Tachimanga
+ * for browsing is that a later export brings the new chapters of a series you
+ * already have, not just its read marks. Matched by number, or by name when
+ * the source gives no number.
+ */
+export function pendingChapters<T extends { number: number | null; name: string }>(
+  local: { number: number | null; title?: string | null; filename?: string | null }[],
+  backup: T[]
+): T[] {
+  const numbers = new Set<number>();
+  const names = new Set<string>();
+  for (const c of local) {
+    if (c.number !== null) numbers.add(c.number);
+    // "Prologue.cbz" is the chapter a backup calls "Prologue".
+    const n = normTitle((c.title ?? c.filename ?? '').replace(/\.(cbz|cbr|zip|rar|pdf)$/i, ''));
+    if (n) names.add(n);
+  }
+  return backup.filter((c) => {
+    if (c.number !== null) return !numbers.has(c.number);
+    const n = normTitle(c.name);
+    return !n || !names.has(n);
+  });
+}
+
+/**
  * A backup of a title you already have: whichever progress is furthest wins,
  * chapter by chapter (matched by number). Read in the backup and not here:
  * marked read. Further into a chapter there: that page. Nothing you read is
@@ -462,4 +487,11 @@ export function newTitles(plan: PlannedTitle[], existing: string[]): PlannedTitl
 export function tachiSourceOf(sourceId: string | null): { id: string; name: string } | null {
   const m = sourceId?.match(/^tachi:(-?\d+):(.*)$/);
   return m ? { id: m[1], name: m[2] } : null;
+}
+
+/** The same title: the names match once case, accents and punctuation are set aside (or one of the other titles does). */
+export function sameTitle(wanted: string, title: string, altTitles: string[]): boolean {
+  const w = normTitle(wanted);
+  if (!w) return false;
+  return [title, ...altTitles].some((t) => normTitle(t) === w);
 }

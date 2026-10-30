@@ -65,6 +65,30 @@ export async function suwayomiSources(http: Http, server: SuwayomiServer): Promi
   return data.sources.nodes.filter((s) => s.id !== '0');
 }
 
+export type GqlLibraryChapter = { id: number; number: number | null };
+export type GqlLibraryTitle = { id: number; url: string | null; title: string; chapters: GqlLibraryChapter[] };
+
+/**
+ * A server's whole library with the chapters it already stores, in one
+ * request. Nothing is asked of any source, so this answers for 700 titles in
+ * about the time one search takes — and it keeps working when the sites are
+ * slow or down.
+ */
+export async function suwayomiLibrary(http: Http, server: SuwayomiServer): Promise<GqlLibraryTitle[]> {
+  type Row = { id: number; title: string; url?: string | null; chapters: { nodes: { id: number; chapterNumber?: number | null }[] } };
+  const data = await gql<{ mangas: { nodes: Row[] } }>(
+    http,
+    server,
+    'query { mangas(condition: { inLibrary: true }) { nodes { id title url chapters { nodes { id chapterNumber } } } } }'
+  );
+  return data.mangas.nodes.map((m) => ({
+    id: m.id,
+    url: str(m.url),
+    title: m.title || 'Untitled',
+    chapters: m.chapters.nodes.map((c) => ({ id: c.id, number: num(c.chapterNumber) })),
+  }));
+}
+
 /** One Suwayomi source (an extension on the server), or its library when `source` is null. */
 export function suwayomiSource(http: Http, server: SuwayomiServer, source: GqlSource | null): MangaSource {
   const fetchList = async (type: 'SEARCH' | 'POPULAR' | 'LATEST', page: number, query?: string): Promise<ListPage> => {

@@ -854,6 +854,13 @@ export function SmartFilterSheet({
         </View>
       </Section>
 
+      <Section label="Frame rate">
+        <View style={styles.numbers}>
+          <NumberBox label="min fps" value={rule.minFps} onChange={(v) => set({ minFps: v })} />
+          <NumberBox label="max fps" value={rule.maxFps} onChange={(v) => set({ maxFps: v })} />
+        </View>
+      </Section>
+
       <Section label="Shape">
         <Wrap>
           <Chip label="Any" on={!rule.orientation} onPress={() => set({ orientation: undefined })} />

@@ -93,13 +93,15 @@ export default function SimklScreen(props: SimklScreenProps) {
   const p = usePalette();
   const { width } = useWindowDimensions();
 
-  // Status and sort are remembered per category while the app is open.
-  const [statusBy, setStatusBy] = useState<Record<SimklType, SimklStatus | 'all'>>({
-    movie: defaultStatus('movie'),
-    show: defaultStatus('show'),
-    anime: defaultStatus('anime'),
-  });
-  const [sortBy, setSortBy] = useState<Record<SimklType, SimklSort>>({ movie: 'seen', show: 'aired', anime: 'aired' });
+  // Status and sort per category: picked now, else the one saved from last time, else the default.
+  const [statusBy, setStatusBy] = useState<Partial<Record<SimklType, SimklStatus | 'all'>>>({});
+  const [sortBy, setSortBy] = useState<Partial<Record<SimklType, SimklSort>>>({});
+  const savedView = props.prefs?.view?.[category];
+  const remember = (change: { sort?: SimklSort; status?: SimklStatus | 'all' }) => {
+    const prefs = props.prefs ?? { hideSpoilers: false };
+    const view = prefs.view ?? {};
+    actions.setPrefs({ ...prefs, view: { ...view, [category]: { ...view[category], ...change } } }).catch(() => undefined);
+  };
   const [query, setQuery] = useState('');
   const [grid, setGrid] = useState(dev?.grid ?? false);
   const [sortMenu, setSortMenu] = useState(false);
@@ -177,9 +179,14 @@ export default function SimklScreen(props: SimklScreenProps) {
   }
   const tapItem = (item: SimklItem) => (selecting ? togglePick(item.simklId) : setOpen(asTitle(item)));
 
-  const filter = statusBy[category];
+  const savedStatus = savedView?.status;
+  const filter: SimklStatus | 'all' =
+    statusBy[category] ??
+    (savedStatus && (savedStatus === 'all' || statusesFor(category).includes(savedStatus)) ? savedStatus : defaultStatus(category));
   const pausedHere = paused.filter((x) => x.type === category);
-  const sort = sortBy[category];
+  const savedSort = savedView?.sort;
+  const sort: SimklSort =
+    sortBy[category] ?? (savedSort && sortsFor(category).some((x) => x.key === savedSort) ? savedSort : category === 'movie' ? 'seen' : 'aired');
   const typeInfo = SIMKL_TYPES.find((t) => t.key === category)!;
   const ofType = useMemo(() => items.filter((i) => i.type === category), [items, category]);
   const shown = useMemo(() => sortItems(filterItems(items, { type: category, status: filter, query }), sort), [items, category, filter, query, sort]);
@@ -494,6 +501,7 @@ export default function SimklScreen(props: SimklScreenProps) {
                   onPress={() => {
                     tick();
                     setStatusBy({ ...statusBy, [category]: s });
+                    remember({ status: s });
                   }}>
                   <Text style={[styles.chipText, on && styles.chipTextOn]}>{s === 'all' ? 'All' : STATUS_LABELS[s]}</Text>
                   <Text style={[styles.chipCount, on && styles.chipTextOn]}>{counts[s] ?? 0}</Text>
@@ -682,7 +690,10 @@ export default function SimklScreen(props: SimklScreenProps) {
           options={sortsFor(category).map((s) => ({
             label: s.label,
             hint: s.key === sort ? '✓' : undefined,
-            onPress: () => setSortBy({ ...sortBy, [category]: s.key }),
+            onPress: () => {
+              setSortBy({ ...sortBy, [category]: s.key });
+              remember({ sort: s.key });
+            },
           }))}
           onClose={() => setSortMenu(false)}
         />

@@ -364,6 +364,23 @@ export function upToHere(episodes: CatalogEpisode[], target: { season: number; e
     .map((e) => ({ season: e.season, episode: e.episode }));
 }
 
+/**
+ * The episode to watch next, worked out from the list: the first aired,
+ * unwatched regular episode after the last one watched (or the very first).
+ * Used right after ticking episodes, before Simkl's own answer comes back.
+ */
+export function nextUnwatched(episodes: CatalogEpisode[], watched: Set<string>): { season: number; episode: number } | null {
+  const regular = episodes
+    .filter((e) => !e.special)
+    .sort((a, b) => a.season - b.season || a.episode - b.episode);
+  let last = -1;
+  regular.forEach((e, i) => {
+    if (watched.has(watchedKey(e.season, e.episode))) last = i;
+  });
+  const after = regular.slice(last + 1).find((e) => e.aired && !watched.has(watchedKey(e.season, e.episode)));
+  return after ? { season: after.season, episode: after.episode } : null;
+}
+
 /** A half-watched movie or episode Simkl kept (`/sync/playback`). */
 export type PausedItem = {
   playbackId: number;

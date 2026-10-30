@@ -11,6 +11,7 @@ import * as Crypto from 'expo-crypto';
 import { ReelVaultCompress } from '../../../modules/reelvault-compress';
 import { contentKeyOf } from './contentKey';
 import { isTrimmed, nativeOptions, type EditPlan } from './edit';
+import { keepAwake } from './awake';
 import { readVideoMeta } from './metadata';
 import { copyLinks, insertVideo, recordReplaced, setCoverAt } from './repo';
 import { mergeMeta, spaceNeeded, worthKeeping } from './smaller';
@@ -26,6 +27,15 @@ export type EditResult =
 /** False in Expo Go and in app builds from before the encoder (needs app 1.1). */
 export function canMakeSmaller(): boolean {
   return ReelVaultCompress != null;
+}
+
+/** The "How much smaller" strengths need the encoder from app build 18 (it takes a target bitrate). */
+export function canChooseStrength(): boolean {
+  try {
+    return typeof ReelVaultCompress?.features === 'function' && ReelVaultCompress.features().includes('bitrateShare');
+  } catch {
+    return false;
+  }
 }
 
 let currentJob: string | null = null;
@@ -92,6 +102,8 @@ export async function editVideo(
     if (e.jobId === jobId) onProgress(Math.min(1, Math.max(0, e.progress)));
   });
   currentJob = jobId;
+  // A batch of long episodes takes a while: don't let the phone lock and stop it.
+  keepAwake('edit', true);
   try {
     const { size } = await native.edit(video.uri, output.uri, nativeOptions(plan), jobId);
     if (opts.onlyIfSmaller && !worthKeeping(video.size, size)) {
@@ -168,6 +180,7 @@ export async function editVideo(
     const reason = raw.replace(/\s*\(at ExpoModulesCore[\s\S]*$/, '').trim() || raw;
     return { kind: 'failed', reason };
   } finally {
+    keepAwake('edit', false);
     sub.remove();
     currentJob = null;
   }

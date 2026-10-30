@@ -196,3 +196,12 @@ test('.cbz files: ComicInfo.xml another reader understands, names that sort and 
   assert.equal(cbzName('A/B: C?', { number: null, volume: null, title: 'Extra', filename: null }), 'A B C - Extra.cbz');
   assert.equal(safeFileName('  ...  '), 'Untitled');
 });
+
+test('same title across sources: case, accents, punctuation and other titles', async () => {
+  const { sameTitle } = await import('../src/features/vault/manga/mangaBackup.ts');
+  assert.equal(sameTitle('Chainsaw Man', 'chainsaw man', []), true);
+  assert.equal(sameTitle('Kaguya-sama: Love Is War', 'Kaguya sama Love is War', []), true);
+  assert.equal(sameTitle('Shingeki no Kyojin', 'Attack on Titan', ['Shingeki no Kyojin']), true);
+  assert.equal(sameTitle('One Piece', 'One Punch-Man', []), false);
+  assert.equal(sameTitle('', '', []), false);
+});

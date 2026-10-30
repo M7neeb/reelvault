@@ -1590,6 +1590,7 @@ function VaultScreenBody({
         <SmallerSheet
           items={smallerFor}
           available={actions.canMakeSmaller()}
+          strengths={actions.canChooseStrength?.() ?? false}
           onMakeSmaller={actions.onMakeSmaller}
           onCancel={actions.onCancelMakeSmaller}
           onClose={() => setSmallerFor(null)}

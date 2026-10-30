@@ -85,7 +85,7 @@ import {
 } from '@/features/vault/security';
 import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share';
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
-import { cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
+import { canChooseStrength, cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
 import { planForQuality } from '@/features/vault/edit';
 import { fmtMs, parseRatingLabels } from '@/features/vault/stats';
 import {
@@ -915,6 +915,7 @@ export function useVaultData(): VaultData {
         await refresh();
       },
       canMakeSmaller,
+      canChooseStrength,
       onMakeSmaller: async (item, plan, onProgress) => {
         const v = byId(item.id);
         if (!v) return { kind: 'failed', reason: 'not found' };

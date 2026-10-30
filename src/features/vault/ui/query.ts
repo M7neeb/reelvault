@@ -2,7 +2,8 @@
  * Smarter search: plain words in the search box that mean filters.
  * "beach 2024 8+ long portrait #holiday unwatched" finds videos named or noted
  * "beach", filmed in 2024, rated 8 or more, over 5 minutes, upright, with the
- * keyword holiday, never watched. What is left over is searched as text.
+ * keyword holiday, never watched. ">60fps" / "60fps+" / "<30fps" / "60fps"
+ * filter by frame rate, "h264" / "hevc" by codec. What is left over is searched as text.
  * Pure (no native modules), so it is tested in Node.
  */
 
@@ -159,6 +160,38 @@ export function parseSearch(query: string, tags: string[], now: number): ParsedS
       continue;
     }
 
+    // Frame rate: >60fps, 60fps+, >=60fps, <30fps, 60fps, "60 fps", high fps (= 50 or more).
+    m = /^(>=?|<=?)?(\d{1,3}(?:\.\d+)?)(fps|p)?(\+)?$/.exec(w);
+    const fpsWord = m && (m[3] === 'fps' || (!m[3] && next === 'fps'));
+    if (m && fpsWord && m[3] !== 'p') {
+      const n = Number(m[2]);
+      if (!m[3]) i++;
+      if (m[1]?.startsWith('>') || m[4]) {
+        rule.minFps = n;
+        chips.push({ key: 'fps', label: `${n}+ fps` });
+      } else if (m[1]?.startsWith('<')) {
+        rule.maxFps = n;
+        chips.push({ key: 'fps', label: `Up to ${n} fps` });
+      } else {
+        rule.minFps = n;
+        rule.maxFps = n;
+        chips.push({ key: 'fps', label: `${n} fps` });
+      }
+      continue;
+    }
+    if (w === 'high' && next === 'fps') {
+      rule.minFps = 50;
+      chips.push({ key: 'fps', label: '50+ fps' });
+      i++;
+      continue;
+    }
+    const codec = ({ h264: 'H.264', 'h.264': 'H.264', avc: 'H.264', x264: 'H.264', hevc: 'HEVC', h265: 'HEVC', 'h.265': 'HEVC', x265: 'HEVC', av1: 'AV1', vp9: 'VP9', prores: 'ProRes' } as Record<string, string>)[w];
+    if (codec) {
+      rule.codec = codec;
+      chips.push({ key: 'codec', label: codec });
+      continue;
+    }
+
     // Length: >2m, <30s, 10m+, long, short.
     m = /^([<>])(.+)$/.exec(w) ?? /^(.+?)(\+)$/.exec(w);
     if (m) {
@@ -249,4 +282,4 @@ export function parseSearch(query: string, tags: string[], now: number): ParsedS
 export const isSmartSearch = (p: ParsedSearch) => p.chips.some((c) => c.key !== 'text');
 
 /** Ideas shown under an empty search box. */
-export const SEARCH_EXAMPLES = ['beach 2024', '8+ long', 'unwatched this year', 'portrait >1m', 'last month #family', 'big mov'];
+export const SEARCH_EXAMPLES = ['beach 2024', '8+ long', 'unwatched this year', 'portrait >1m', 'last month #family', 'big mov', '>60fps', 'h264 big'];

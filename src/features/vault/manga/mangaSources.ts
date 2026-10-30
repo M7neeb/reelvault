@@ -18,7 +18,7 @@ import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { getSetting, setSetting } from '../library';
 import { ensureMangaRoot, fileIn, fileUri, seriesFolderFor } from './mangaFiles';
 import type { MangaChapter, MangaSeries } from './mangaLogic';
-import { newTitles, progressToMerge, planTachiImport, readTachiBackup, tachiSourceOf, TMB_QUERIES, type PlannedTitle, type TmbRows } from './mangaBackup';
+import { newTitles, pendingChapters, progressToMerge, planTachiImport, readTachiBackup, sameTitle, tachiSourceOf, TMB_QUERIES, type PlannedTitle, type TmbRows } from './mangaBackup';
 import { normTitle } from './mangaLogic';
 import { addMangaTag, getSeries, insertChapter, insertSeries, listManga, saveProgress as saveMangaProgress, setChaptersRead, setChapterSource, setSeriesSource, updateSeries } from './mangaStore';
 import { loadExtension, parseRepo, type RepoExtension } from './sources/extensions';
@@ -26,7 +26,8 @@ import { sourceHttp } from './sources/http';
 import { mangadexSource } from './sources/mangadex';
 import { opdsSource } from './sources/opds';
 import { DEFAULT_BROWSE, normaliseServerUrl, parseBrowsePrefs, updatesFor, type BrowsePrefs, type ServerConfig, type ServerKind } from './sources/prefs';
-import { suwayomiSource, suwayomiSources, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
+import { suwayomiLibrary, suwayomiSource, suwayomiSources, type GqlLibraryTitle, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
+import { planLinks, type LinkableSeries } from './mangaLink';
 import { basicAuth, infoOf, type ImageRef, type MangaSource, type SourceChapter, type SourceDetails, type SourceInfo } from './sources/types';
 
 const PREFS_KEY = 'manga.browse';
@@ -419,10 +420,18 @@ export async function pagesOf(series: Pick<MangaSeries, 'sourceId'>, c: MangaCha
  * (or name), so your read marks and pages stay; chapters the source has and
  * you don't are added. Returns how many matched and how many were added.
  */
-export async function linkSeries(seriesId: string, src: MangaSource, key: string): Promise<{ matched: number; added: number }> {
+export async function linkSeries(
+  seriesId: string,
+  src: MangaSource,
+  key: string,
+  known?: { details?: SourceDetails | null; chapters?: SourceChapter[] }
+): Promise<{ matched: number; added: number }> {
   const s = await getSeries(seriesId);
   if (!s) throw new Error('That title is gone');
-  const [d, list] = await Promise.all([src.details(key).catch(() => null), src.chapters(key)]);
+  const [d, list] = await Promise.all([
+    known?.details !== undefined ? Promise.resolve(known.details) : src.details(key).catch(() => null),
+    known?.chapters ?? src.chapters(key),
+  ]);
   const byNumber = new Map<string, MangaChapter>();
   const byName = new Map<string, MangaChapter>();
   for (const c of s.chapters) {
@@ -454,7 +463,7 @@ export async function linkSeries(seriesId: string, src: MangaSource, key: string
   return { matched, added: fresh.length };
 }
 
-export type BackupSummary = { titles: number; skipped: number; chapters: number; linked: number; unlinked: number; sources: string[] };
+export type BackupSummary = { titles: number; skipped: number; chapters: number; added: number; linked: number; unlinked: number; sources: string[] };
 
 async function insertPlanned(t: PlannedTitle): Promise<string> {
   const id = Crypto.randomUUID();
@@ -529,8 +538,9 @@ export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, o
   const have = (await listManga()).filter((x) => !x.deletedAt);
   const existing = have.map((x) => x.title);
   const todo = newTitles(plan, existing);
-  // Titles you already have keep whichever progress is furthest.
+  // Titles you already have keep whichever progress is furthest, and get the chapters the backup has since.
   let merged = 0;
+  let added = 0;
   for (const t of plan) {
     const s = have.find((x) => normTitle(x.title) === normTitle(t.title));
     if (!s) continue;
@@ -538,6 +548,16 @@ export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, o
     for (const r of read) await setChaptersRead([r.id], true, r.at);
     for (const p of pages) await saveMangaProgress(s.id, p.id, p.page, false, Date.now());
     merged += read.length + pages.length;
+    const fresh = pendingChapters(s.chapters, t.chapters);
+    for (const [i, c] of fresh.entries()) {
+      onStep(`Bringing ${s.title} up to date… ${i + 1} of ${fresh.length}`);
+      await insertChapter({
+        ...chapterRow(s.id, { key: c.key, number: c.number, volume: null, title: c.name || null, scanlator: c.scanlator, uploadedAt: c.uploadedAt, pageCount: null, externalUrl: null, lang: null }, s.chapters.length + i),
+        readAt: c.readAt,
+        lastPage: c.lastPage,
+      });
+      added++;
+    }
   }
   if (merged) onStep(`Brought ${merged} ${merged === 1 ? 'chapter' : 'chapters'} of titles you have up to date`);
   const ids: { id: string; t: PlannedTitle }[] = [];
@@ -567,20 +587,70 @@ export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, o
     titles: todo.length,
     skipped: plan.length - todo.length,
     chapters: todo.reduce((a, t) => a + t.chapters.length, 0),
+    added,
     linked: mangadex + viaServer,
     unlinked: ids.length - mangadex - viaServer,
     sources: [...new Set(todo.map((t) => t.sourceName))],
   };
 }
 
+/** A series reduced to what matching needs (see mangaLink.ts). */
+const linkable = (s: MangaSeries): LinkableSeries => ({
+  id: s.id,
+  title: s.title,
+  sourceKey: s.sourceKey,
+  chapters: s.chapters.map((c) => ({ id: c.id, number: c.number })),
+});
+
 /**
- * Links imported titles to the same extension on your Suwayomi servers
- * (Suwayomi runs Tachiyomi extensions, with the same source ids): it
- * searches the title there and links an exact match. The number linked.
+ * Finds titles brought over from a Tachimanga backup on a source ReelVault can
+ * read and download from, and links them (read marks are kept). Tried in order:
+ * 1. your Suwayomi servers' libraries: one request brings every title a server
+ *    holds with its chapters, matched by the page they point at (see
+ *    mangaLink.ts), so hundreds of titles link in seconds;
+ * 2. a search on your Suwayomi servers, same extension as in Tachimanga;
+ * 3. an installed extension with the same name as the Tachimanga source;
+ * 4. MangaDex (also matching its other titles, e.g. the Japanese name).
+ * The number linked.
  */
 export async function autoLink(seriesIds: string[], prefs: BrowsePrefs, onStep: (t: string) => void): Promise<number> {
   const servers = prefs.servers.filter((s) => s.kind === 'suwayomi');
-  if (!servers.length) return 0;
+  const all = await listManga();
+  const wanted = seriesIds.length ? all.filter((s) => seriesIds.includes(s.id)) : all;
+  // A title that already points at a server (or at MangaDex) needs nothing.
+  let pending = wanted.filter((s) => !s.deletedAt && !!tachiSourceOf(s.sourceId));
+  if (!pending.length) return 0;
+  let linked = 0;
+  const done = new Set<string>();
+
+  for (const s of servers) {
+    if (!pending.length) break;
+    const server = { id: s.id, name: s.name, url: s.url, auth: await authFor(s) };
+    onStep(`Reading ${s.name}’s library…`);
+    let library: GqlLibraryTitle[];
+    try {
+      library = await suwayomiLibrary(sourceHttp, server);
+    } catch {
+      continue; // that server is off
+    }
+    const plans = planLinks(pending.map(linkable), library);
+    for (const [i, p] of plans.entries()) {
+      if (i % 25 === 0) onStep(`Linking your titles… ${i + 1} of ${plans.length}`);
+      try {
+        // The server's library source needs only the server, so the link survives its source list changing.
+        await setSeriesSource(p.seriesId, `server:${s.id}:library`, String(p.mangaId), null);
+        for (const c of p.chapters) await setChapterSource(c.chapterId, String(c.sourceKey), null, null);
+        done.add(p.seriesId);
+        linked++;
+      } catch (e) {
+        console.log(`[MANGA] link ${p.seriesId}: ${String(e)}`);
+      }
+    }
+    pending = pending.filter((x) => !done.has(x.id));
+  }
+  if (!pending.length) return linked;
+
+  // Whatever the libraries did not have: search for it.
   const lists: { server: SuwayomiServer; sources: GqlSource[] }[] = [];
   for (const s of servers) {
     const server = { id: s.id, name: s.name, url: s.url, auth: await authFor(s) };
@@ -590,24 +660,60 @@ export async function autoLink(seriesIds: string[], prefs: BrowsePrefs, onStep: 
       // that server is off
     }
   }
-  if (!lists.length) return 0;
-  let linked = 0;
-  for (const [i, id] of seriesIds.entries()) {
-    const s = await getSeries(id);
-    const tachi = tachiSourceOf(s?.sourceId ?? null);
-    if (!s || !tachi) continue;
-    onStep(`Finding your titles on your server… ${i + 1} of ${seriesIds.length}`);
+  const extensions: { name: string; src: MangaSource }[] = [];
+  for (const i of prefs.installed) {
+    const code = extCode(i.id);
+    if (!code) continue;
+    try {
+      extensions.push({ name: i.name, src: loadExtension(code, i, sourceHttp) });
+    } catch {
+      // a broken extension is skipped
+    }
+  }
+  const mangadex = mangadexSource(sourceHttp, { languages: prefs.languages, adult: prefs.adult });
+
+  /** Searches one source; links an exact match that has chapters. */
+  async function tryLink(id: string, title: string, search: MangaSource, linkVia: MangaSource, alsoAltTitles: boolean): Promise<boolean> {
+    const res = await search.search(title, 1);
+    let hit = res.items.find((x) => !x.folder && sameTitle(title, x.title, []));
+    let details: SourceDetails | null | undefined;
+    if (!hit && alsoAltTitles) {
+      for (const x of res.items.filter((r) => !r.folder).slice(0, 3)) {
+        const d = await search.details(x.key).catch(() => null);
+        if (d && sameTitle(title, d.title, d.altTitles)) {
+          hit = x;
+          details = d;
+          break;
+        }
+      }
+    }
+    if (!hit) return false;
+    const chapters = await search.chapters(hit.key);
+    if (!chapters.length) return false;
+    await linkSeries(id, linkVia, hit.key, { details, chapters: linkVia === search ? chapters : undefined });
+    return true;
+  }
+
+  for (const [i, s] of pending.entries()) {
+    const tachi = tachiSourceOf(s.sourceId);
+    if (!tachi) continue;
+    onStep(`Finding your titles on a source… ${i + 1} of ${pending.length}`);
+    const attempts: (() => Promise<boolean>)[] = [];
     for (const { server, sources } of lists) {
       const gs = sources.find((x) => x.id === tachi.id) ?? sources.find((x) => x.name.toLowerCase() === tachi.name.toLowerCase());
-      if (!gs) continue;
+      // The server's library source needs only the server, so the link survives its source list changing.
+      if (gs) attempts.push(() => tryLink(s.id, s.title, suwayomiSource(sourceHttp, server, gs), suwayomiSource(sourceHttp, server, null), false));
+    }
+    for (const e of extensions) {
+      if (normTitle(e.name) === normTitle(tachi.name)) attempts.push(() => tryLink(s.id, s.title, e.src, e.src, false));
+    }
+    attempts.push(() => tryLink(s.id, s.title, mangadex, mangadex, true));
+    for (const attempt of attempts) {
       try {
-        const res = await suwayomiSource(sourceHttp, server, gs).search(s.title, 1);
-        const hit = res.items.find((x) => normTitle(x.title) === normTitle(s.title));
-        if (!hit) continue;
-        // The server's library source needs only the server, so the link survives its source list changing.
-        await linkSeries(id, suwayomiSource(sourceHttp, server, null), hit.key);
-        linked++;
-        break;
+        if (await attempt()) {
+          linked++;
+          break;
+        }
       } catch (e) {
         console.log(`[MANGA] autolink ${s.title}: ${String(e)}`);
       }
