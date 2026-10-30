@@ -125,7 +125,15 @@ export type TachiManga = {
   history: { url: string; lastRead: number; readDuration: number }[];
   notes: string | null;
 };
-export type TachiBackup = { mangas: TachiManga[]; categories: { name: string; order: number; id: number }[]; sources: { name: string; id: string }[] };
+/** Time spent reading a title on one occasion (Tachimanga: per title per day; Tachiyomi/Mihon: per chapter). */
+export type ReadTime = { title: string; at: number; ms: number };
+export type TachiBackup = {
+  mangas: TachiManga[];
+  categories: { name: string; order: number; id: number }[];
+  sources: { name: string; id: string }[];
+  /** Reading time the app recorded, for stats and Wrapped. */
+  readTime?: ReadTime[];
+};
 
 const orNull = (s: string) => (s.trim() ? s : null);
 
@@ -164,14 +172,16 @@ export function decodeTachiBackup(proto: Uint8Array): TachiBackup {
   );
   const categories = msgs(top, 2).map((c) => ({ name: text(c, 1), order: int(c, 2), id: int(c, 3) }));
   const sources = msgs(top, 101).map((s) => ({ name: text(s, 1), id: bigText(s, 2) }));
-  return { mangas, categories, sources };
+  // Tachiyomi and Mihon keep how long each chapter was read (milliseconds) in its history.
+  const readTime = mangas.flatMap((m) => m.history.filter((h) => h.readDuration > 0 && h.lastRead > 0).map((h) => ({ title: m.title.trim(), at: h.lastRead, ms: h.readDuration })));
+  return { mangas, categories, sources, readTime };
 }
 
 /* ------------------------------------------------- Tachimanga (.tmb) */
 
 type Row = Record<string, unknown>;
 /** The tables of tachimanga.db that matter, as rows. */
-export type TmbRows = { manga: Row[]; chapters: Row[]; categories: Row[]; categoryManga: Row[]; history: Row[]; sources: Row[]; tracks: Row[] };
+export type TmbRows = { manga: Row[]; chapters: Row[]; categories: Row[]; categoryManga: Row[]; history: Row[]; sources: Row[]; tracks: Row[]; stats?: Row[] };
 
 /** The SQL that fills TmbRows (source ids as text: they are bigger than JavaScript numbers hold). */
 export const TMB_QUERIES: Record<keyof TmbRows, string> = {
@@ -182,6 +192,8 @@ export const TMB_QUERIES: Record<keyof TmbRows, string> = {
   history: 'SELECT manga_id, last_chapter_id, last_read_at FROM History',
   sources: 'SELECT CAST(id AS TEXT) AS id, "name" FROM "Source"',
   tracks: 'SELECT * FROM TrackRecord',
+  // Reading Insights: seconds read per title per day (day = 20250415; create_at = first read that day).
+  stats: 'SELECT s."day" AS day, s.read_duration AS secs, s.create_at AS at, m.title AS title FROM "Stats" s JOIN Manga m ON m.id = s.manga_id WHERE s.is_delete = 0 AND s.read_duration > 0',
 };
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -281,7 +293,25 @@ export function tachiFromTachimanga(r: TmbRows): TachiBackup {
       notes: null,
     };
   });
-  return { mangas, categories, sources: r.sources.map((x) => ({ name: s(x.name), id: s(x.id) })) };
+  const readTime = (r.stats ?? []).map((x) => ({ title: s(x.title).trim(), at: ms(x.at) || dayStart(n(x.day)), ms: n(x.secs) * 1000 })).filter((x) => x.title && x.at > 0 && x.ms > 0);
+  return { mangas, categories, sources: r.sources.map((x) => ({ name: s(x.name), id: s(x.id) })), readTime };
+}
+
+/** 20250415 -> noon that day (when Tachimanga gave no time). */
+function dayStart(day: number): number {
+  if (day < 19000101) return 0;
+  return new Date(Math.floor(day / 10000), (Math.floor(day / 100) % 100) - 1, day % 100, 12).getTime();
+}
+
+/**
+ * Reading time from a backup as reading sessions: on the title of that name in
+ * your library, or "other:<title>" for titles you read but never added (those
+ * count in totals and Wrapped's hours, not in lists of titles).
+ */
+export function planReadTime(times: ReadTime[], library: { id: string; title: string; altTitle?: string | null }[]): { seriesId: string; startedAt: number; readMs: number }[] {
+  const byName = new Map<string, string>();
+  for (const s of library) for (const t of [s.title, s.altTitle]) if (t && !byName.has(normTitle(t))) byName.set(normTitle(t), s.id);
+  return times.map((t) => ({ seriesId: byName.get(normTitle(t.title)) ?? `other:${t.title}`, startedAt: t.at, readMs: Math.round(t.ms) }));
 }
 
 /**

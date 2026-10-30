@@ -8,6 +8,9 @@
 
 import type { MangaRead, MangaSeries } from './mangaLogic.ts';
 
+/** Tachimanga reading time of titles not in the library ("other:<title>"): totals only (see mangaStats). */
+const counted = (ids: Set<string>, seriesId: string) => ids.has(seriesId) || seriesId.startsWith('other:');
+
 const DAY = 86_400_000;
 const sod = (t: number) => {
   const d = new Date(t);
@@ -40,9 +43,9 @@ export function readingIn(series: MangaSeries[], reads: MangaRead[], start: numb
   const live = series.filter((s) => !s.deletedAt);
   const ids = new Set(live.map((s) => s.id));
   const inside = (t: number | null | undefined) => typeof t === 'number' && t >= start && t < end;
-  const rs = reads.filter((r) => ids.has(r.seriesId) && inside(r.startedAt) && r.readMs > 0);
+  const rs = reads.filter((r) => counted(ids, r.seriesId) && inside(r.startedAt) && r.readMs > 0);
   const per = new Map<string, { ms: number; chapters: number }>();
-  for (const r of rs) per.set(r.seriesId, { ms: (per.get(r.seriesId)?.ms ?? 0) + r.readMs, chapters: 0 });
+  for (const r of rs) if (ids.has(r.seriesId)) per.set(r.seriesId, { ms: (per.get(r.seriesId)?.ms ?? 0) + r.readMs, chapters: 0 });
   let chapters = 0;
   const dayMs = new Map<number, { ms: number; chapters: number }>();
   for (const r of rs) {

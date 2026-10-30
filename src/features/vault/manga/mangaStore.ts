@@ -410,6 +410,18 @@ export async function deleteMangaTag(name: string): Promise<void> {
 
 /* --------------------------------------------------------------- reading */
 
+/** Marks reading time that came from a backup (so importing it again replaces it instead of adding it twice). */
+export const BACKUP_READ = 'backup';
+
+/** Puts the reading time from a backup in place of what an earlier import of it brought. */
+export async function replaceBackupReads(rows: { seriesId: string; startedAt: number; readMs: number }[]): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM manga_reads WHERE chapter_id = ?;', [BACKUP_READ]);
+    for (const r of rows) await db.runAsync('INSERT INTO manga_reads (series_id, chapter_id, started_at, read_ms, pages) VALUES (?, ?, ?, ?, 0);', [r.seriesId, BACKUP_READ, r.startedAt, r.readMs]);
+  });
+}
+
 export async function addRead(r: MangaRead): Promise<void> {
   if (r.readMs < 3000) return;
   const db = await getDb();
