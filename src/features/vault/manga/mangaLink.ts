@@ -14,12 +14,14 @@
 
 import { normTitle } from './mangaLogic.ts';
 
-/** A chapter as the server has it. */
-export type LibraryChapter = { id: number; number: number | null };
+/** A chapter as the server has it (url: its page on the source; order: its place in reading order). */
+export type LibraryChapter = { id: number; number: number | null; url?: string | null; order?: number };
 /** A title as the server has it: its id there, the path on its source, its chapters. */
 export type LibraryTitle = { id: number; url: string | null; title: string; chapters: LibraryChapter[] };
 /** Your series, as far as matching cares. */
-export type LinkableSeries = { id: string; title: string; sourceKey: string | null; chapters: { id: string; number: number | null }[] };
+export type LinkableSeries = { id: string; title: string; sourceKey: string | null; chapters: LinkableChapter[] };
+/** Your chapter: url is the page it came from (a backup keeps it), position its place in reading order. */
+export type LinkableChapter = { id: string; number: number | null; url?: string | null; position?: number };
 
 export type LinkPlan = {
   seriesId: string;
@@ -53,20 +55,71 @@ export function sourcePath(url: string | null | undefined): string | null {
   return s && s !== '/' ? s.toLowerCase() : null;
 }
 
-/** Your chapters paired with the server's, by chapter number (the only thing both sides agree on). */
-export function planChapters(local: { id: string; number: number | null }[], remote: LibraryChapter[]): { chapterId: string; sourceKey: number }[] {
-  const byNumber = new Map<number, LibraryChapter>();
-  for (const c of remote) {
-    // Two copies of one chapter (scanlators): the first is the one the list starts with.
-    if (c.number !== null && !byNumber.has(c.number)) byNumber.set(c.number, c);
+/**
+ * Your chapters paired with the server's. In order of trust:
+ * 1. the same page on the source (backups and the server keep the source's own path);
+ * 2. the same chapter number (no number, -1 on the server, is no number);
+ * 3. what is left over, when both sides have the same count and nothing tells
+ *    them apart (one-shots, chapters without numbers): in reading order.
+ * Each server chapter is used once; a second copy of a number (another
+ * scanlator) is never taken for a different chapter.
+ */
+export function planChapters(local: LinkableChapter[], remote: LibraryChapter[]): { chapterId: string; sourceKey: number }[] {
+  const realNumber = (n: number | null | undefined) => (n === null || n === undefined || !Number.isFinite(n) || n < 0 ? null : n);
+  const used = new Set<number>();
+  const pairs = new Map<string, number>();
+  const byPath = new Map<string, LibraryChapter>();
+  for (const r of remote) {
+    const p = sourcePath(r.url);
+    if (p && !byPath.has(p)) byPath.set(p, r);
   }
-  const out: { chapterId: string; sourceKey: number }[] = [];
   for (const c of local) {
-    if (c.number === null) continue;
-    const r = byNumber.get(c.number);
-    if (r) out.push({ chapterId: c.id, sourceKey: r.id });
+    const p = sourcePath(c.url);
+    const r = p ? byPath.get(p) : undefined;
+    if (r && !used.has(r.id)) {
+      used.add(r.id);
+      pairs.set(c.id, r.id);
+    }
   }
-  return out;
+  const byNumber = new Map<number, LibraryChapter>();
+  const numbers = new Set<number>();
+  for (const r of remote) {
+    const n = realNumber(r.number);
+    if (n === null) continue;
+    numbers.add(n);
+    // Two copies of one chapter (scanlators): the first is the one the list starts with.
+    if (!byNumber.has(n) && !used.has(r.id)) byNumber.set(n, r);
+  }
+  for (const c of local) {
+    if (pairs.has(c.id)) continue;
+    const n = realNumber(c.number);
+    const r = n === null ? undefined : byNumber.get(n);
+    if (r && !used.has(r.id)) {
+      used.add(r.id);
+      pairs.set(c.id, r.id);
+    }
+  }
+  // Leftovers: only when nothing else can tell them apart.
+  const takenNumbers = new Set<number>();
+  for (const c of local) {
+    const n = realNumber(c.number);
+    if (pairs.has(c.id) && n !== null) takenNumbers.add(n);
+  }
+  const restL = local
+    .map((c, i) => ({ c, at: c.position ?? i }))
+    .filter((x) => !pairs.has(x.c.id))
+    .sort((a, b) => a.at - b.at)
+    .map((x) => x.c);
+  const restR = remote
+    .map((r, i) => ({ r, at: r.order ?? i }))
+    .filter((x) => !used.has(x.r.id) && !(realNumber(x.r.number) !== null && takenNumbers.has(realNumber(x.r.number)!)))
+    .sort((a, b) => a.at - b.at)
+    .map((x) => x.r);
+  const unnumbered = restL.every((c) => realNumber(c.number) === null) && restR.every((r) => realNumber(r.number) === null);
+  if (restL.length && restL.length === restR.length && (restL.length === 1 || unnumbered)) {
+    restL.forEach((c, i) => pairs.set(c.id, restR[i].id));
+  }
+  return local.filter((c) => pairs.has(c.id)).map((c) => ({ chapterId: c.id, sourceKey: pairs.get(c.id)! }));
 }
 
 /**
