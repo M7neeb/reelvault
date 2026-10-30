@@ -7,6 +7,13 @@
 
 import type { MangaRead, MangaSeries, MangaStatus } from './mangaLogic.ts';
 
+/**
+ * Reading time brought from Tachimanga for titles that are not in the library
+ * (series id "other:<title>"): it counts in the totals, hours, days and months,
+ * never in a list of titles.
+ */
+const counted = (ids: Set<string>, seriesId: string) => ids.has(seriesId) || seriesId.startsWith('other:');
+
 const DAY = 86_400_000;
 const sod = (t: number) => {
   const d = new Date(t);
@@ -37,7 +44,7 @@ export type MangaStats = {
 export function mangaStats(series: MangaSeries[], reads: MangaRead[], now: number): MangaStats {
   const live = series.filter((s) => !s.deletedAt);
   const ids = new Set(live.map((s) => s.id));
-  const rs = reads.filter((r) => ids.has(r.seriesId) && r.readMs > 0);
+  const rs = reads.filter((r) => counted(ids, r.seriesId) && r.readMs > 0);
   const today = sod(now);
   const dow = (new Date(now).getDay() + 6) % 7;
   const monday = sod(today - dow * DAY + 3_600_000);
@@ -65,7 +72,7 @@ export function mangaStats(series: MangaSeries[], reads: MangaRead[], now: numbe
     return { label, ms: rs.filter((r) => r.startedAt >= start && r.startedAt < end).reduce((a, r) => a + r.readMs, 0), today: start === today };
   });
   const per = new Map<string, { ms: number; chapters: number }>();
-  for (const r of rs) per.set(r.seriesId, { ms: (per.get(r.seriesId)?.ms ?? 0) + r.readMs, chapters: per.get(r.seriesId)?.chapters ?? 0 });
+  for (const r of rs) if (ids.has(r.seriesId)) per.set(r.seriesId, { ms: (per.get(r.seriesId)?.ms ?? 0) + r.readMs, chapters: per.get(r.seriesId)?.chapters ?? 0 });
   for (const s of live) {
     const n = s.chapters.filter((c) => c.readAt).length;
     if (n) per.set(s.id, { ms: per.get(s.id)?.ms ?? 0, chapters: n });
@@ -119,10 +126,10 @@ export function readingYear(series: MangaSeries[], reads: MangaRead[], year: num
   const end = new Date(year + 1, 0, 1).getTime();
   const live = series.filter((s) => !s.deletedAt);
   const ids = new Set(live.map((s) => s.id));
-  const rs = reads.filter((r) => ids.has(r.seriesId) && r.startedAt >= start && r.startedAt < end && r.readMs > 0);
+  const rs = reads.filter((r) => counted(ids, r.seriesId) && r.startedAt >= start && r.startedAt < end && r.readMs > 0);
   const inYear = (t: number | null) => !!t && t >= start && t < end;
   const per = new Map<string, { ms: number; chapters: number }>();
-  for (const r of rs) per.set(r.seriesId, { ms: (per.get(r.seriesId)?.ms ?? 0) + r.readMs, chapters: 0 });
+  for (const r of rs) if (ids.has(r.seriesId)) per.set(r.seriesId, { ms: (per.get(r.seriesId)?.ms ?? 0) + r.readMs, chapters: 0 });
   let chapters = 0;
   for (const s of live) {
     const n = s.chapters.filter((c) => inYear(c.readAt)).length;

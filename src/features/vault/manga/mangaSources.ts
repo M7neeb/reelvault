@@ -18,9 +18,9 @@ import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import { getSetting, setSetting } from '../library';
 import { ensureMangaRoot, fileIn, fileUri, seriesFolderFor } from './mangaFiles';
 import type { MangaChapter, MangaSeries } from './mangaLogic';
-import { newTitles, pendingChapters, progressToMerge, planTachiImport, readTachiBackup, sameTitle, tachiSourceOf, TMB_QUERIES, type PlannedTitle, type TmbRows } from './mangaBackup';
+import { newTitles, pendingChapters, planReadTime, progressToMerge, planTachiImport, readTachiBackup, sameTitle, tachiSourceOf, TMB_QUERIES, type PlannedTitle, type TmbRows } from './mangaBackup';
 import { normTitle } from './mangaLogic';
-import { addMangaTag, getSeries, insertChapter, insertSeries, listManga, saveProgress as saveMangaProgress, setChaptersRead, setChapterSource, setSeriesSource, updateSeries } from './mangaStore';
+import { addMangaTag, getSeries, insertChapter, insertSeries, listManga, replaceBackupReads, saveProgress as saveMangaProgress, setChaptersRead, setChapterSource, setSeriesSource, updateSeries } from './mangaStore';
 import { loadExtension, parseRepo, type RepoExtension } from './sources/extensions';
 import { sourceHttp } from './sources/http';
 import { mangadexSource } from './sources/mangadex';
@@ -641,7 +641,7 @@ export async function linkSeries(
   return { matched, added: fresh.length };
 }
 
-export type BackupSummary = { titles: number; skipped: number; chapters: number; added: number; linked: number; unlinked: number; sources: string[] };
+export type BackupSummary = { titles: number; skipped: number; chapters: number; added: number; linked: number; unlinked: number; sources: string[]; /** Reading time brought over (Tachimanga's Reading Insights). */ readMs: number };
 
 async function insertPlanned(t: PlannedTitle): Promise<string> {
   const id = Crypto.randomUUID();
@@ -759,6 +759,15 @@ export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, o
     const cover = await saveCover(id, s.folder, { uri: t.cover });
     if (cover) await updateSeries([id], { cover });
   }
+  // The time you spent reading (Tachimanga's Reading Insights), for stats and Wrapped.
+  let readMs = 0;
+  if (backup.readTime?.length) {
+    onStep('Bringing over your reading time…');
+    const library = (await listManga()).filter((x) => !x.deletedAt);
+    const rows = planReadTime(backup.readTime, library);
+    await replaceBackupReads(rows);
+    readMs = rows.reduce((a, r) => a + r.readMs, 0);
+  }
   const viaServer = await autoLink(ids.map((x) => x.id), prefs, onStep);
   const mangadex = ids.filter((x) => x.t.sourceId === 'mangadex').length;
   return {
@@ -769,6 +778,7 @@ export async function importTachiBackup(bytes: Uint8Array, prefs: BrowsePrefs, o
     linked: mangadex + viaServer,
     unlinked: ids.length - mangadex - viaServer,
     sources: [...new Set(todo.map((t) => t.sourceName))],
+    readMs,
   };
 }
 

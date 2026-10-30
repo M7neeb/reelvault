@@ -648,6 +648,7 @@ export function useMangaData(): MangaData {
           if (summary.added) parts.push(`${summary.added} new ${summary.added === 1 ? 'chapter' : 'chapters'} on titles you had`);
           if (summary.skipped) parts.push(`${summary.skipped} already here`);
           if (summary.linked) parts.push(`${summary.linked} linked to a source`);
+          if (summary.readMs >= 60_000) parts.push(`${Math.floor(summary.readMs / 3_600_000)} h ${Math.round((summary.readMs % 3_600_000) / 60_000)} m of reading time`);
           setStatus(parts.join(' · '));
           const missing = summary.unlinked
             ? `\n\n${summary.unlinked} ${summary.unlinked === 1 ? 'title was' : 'titles were'} not found on MangaDex or your extensions (from ${summary.sources.filter((x) => !/mangadex/i.test(x)).join(', ') || 'other sources'}). Their read marks are kept. Open one and tap Find on a source, or add an extension or your Suwayomi server in Browse, then tap Find backup titles.`
