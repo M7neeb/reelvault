@@ -26,8 +26,8 @@ import { sourceHttp } from './sources/http';
 import { mangadexSource } from './sources/mangadex';
 import { opdsSource } from './sources/opds';
 import { DEFAULT_BROWSE, normaliseServerUrl, parseBrowsePrefs, updatesFor, type BrowsePrefs, type ServerConfig, type ServerKind } from './sources/prefs';
-import { suwayomiLibrary, suwayomiSource, suwayomiSources, type GqlLibraryTitle, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
-import { planLinks, type LinkableSeries } from './mangaLink';
+import { suwayomiLibrary, suwayomiSource, suwayomiSources, suwayomiTitleChapters, type GqlLibraryTitle, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
+import { planChapters, planLinks, type LinkableSeries } from './mangaLink';
 import { kavitaProgress, komgaProgress, progressTarget, suwayomiProgress } from './sources/progressSync';
 import { suwayomiBase } from './sources/suwayomi';
 import { basicAuth, infoOf, type ImageRef, type MangaSource, type SourceChapter, type SourceDetails, type SourceInfo } from './sources/types';
@@ -461,9 +461,42 @@ export async function pagesOf(series: Pick<MangaSeries, 'sourceId'>, c: MangaCha
   if (c.folder && c.pages.length) return c.pages.map((p) => ({ uri: fileUri(c.folder!, p) }));
   if (!series.sourceId || !c.sourceKey) return [];
   if (tachiSourceOf(series.sourceId)) throw new Error(NOT_LINKED);
+  let key = c.sourceKey;
+  if (serverLibraryOf(series.sourceId) && !SERVER_KEY.test(key)) {
+    // Linked before chapters without numbers were matched: pair them now.
+    await repairServerChapters(c.seriesId, prefs);
+    key = (await getSeries(c.seriesId))?.chapters.find((x) => x.id === c.id)?.sourceKey ?? key;
+    if (!SERVER_KEY.test(key)) throw new Error('Your server does not have this chapter. Refresh the title in Suwayomi, then try again.');
+  }
   const src = await sourceFor(series.sourceId, prefs);
   if (!src) throw new Error('This chapter’s source is not set up on this phone any more');
-  return src.pages(c.sourceKey);
+  return src.pages(key);
+}
+
+/** A Suwayomi server's chapter id (anything else is a page address left over from a backup). */
+const SERVER_KEY = /^\d+$/;
+/** The server id of a title linked to a Suwayomi library, else null. */
+const serverLibraryOf = (sourceId: string | null) => sourceId?.match(/^server:([^:]+):library$/)?.[1] ?? null;
+
+/**
+ * Pairs a linked title's chapters that still point at their old page address
+ * with the chapters the server stores. The number of chapters fixed.
+ */
+export async function repairServerChapters(seriesId: string, prefs: BrowsePrefs): Promise<number> {
+  const s = await getSeries(seriesId);
+  const serverId = serverLibraryOf(s?.sourceId ?? null);
+  if (!s || !serverId || !s.sourceKey || !SERVER_KEY.test(s.sourceKey)) return 0;
+  const bad = s.chapters.filter((c) => !c.folder && !SERVER_KEY.test(c.sourceKey ?? ''));
+  if (!bad.length) return 0;
+  const conf = prefs.servers.find((x) => x.id === serverId && x.kind === 'suwayomi');
+  if (!conf) return 0;
+  const server = { id: conf.id, name: conf.name, url: conf.url, auth: await authFor(conf) };
+  const remote = await suwayomiTitleChapters(sourceHttp, server, Number(s.sourceKey));
+  const taken = new Set(s.chapters.map((c) => c.sourceKey).filter((k): k is string => !!k && SERVER_KEY.test(k)));
+  const free = remote.filter((r) => !taken.has(String(r.id)));
+  const plan = planChapters(bad.map((c) => ({ id: c.id, number: c.number, url: c.sourceKey, position: c.position })), free);
+  for (const p of plan) await setChapterSource(p.chapterId, String(p.sourceKey), null, null);
+  return plan.length;
 }
 
 /* ------------------------------------------------------ linking, backups */
@@ -652,7 +685,7 @@ const linkable = (s: MangaSeries): LinkableSeries => ({
   id: s.id,
   title: s.title,
   sourceKey: s.sourceKey,
-  chapters: s.chapters.map((c) => ({ id: c.id, number: c.number })),
+  chapters: s.chapters.map((c) => ({ id: c.id, number: c.number, url: c.sourceKey, position: c.position })),
 });
 
 /**
@@ -671,9 +704,19 @@ export async function autoLink(seriesIds: string[], prefs: BrowsePrefs, onStep: 
   const all = await listManga();
   const wanted = seriesIds.length ? all.filter((s) => seriesIds.includes(s.id)) : all;
   // A title that already points at a server (or at MangaDex) needs nothing.
-  let pending = wanted.filter((s) => !s.deletedAt && !!tachiSourceOf(s.sourceId));
-  if (!pending.length) return 0;
   let linked = 0;
+  // Titles linked earlier whose chapters without numbers were left out: pair them now.
+  const toRepair = wanted.filter((s) => !s.deletedAt && serverLibraryOf(s.sourceId) && s.chapters.some((c) => !c.folder && !SERVER_KEY.test(c.sourceKey ?? '')));
+  for (const [i, s] of toRepair.entries()) {
+    if (i % 25 === 0) onStep(`Fixing linked titles… ${i + 1} of ${toRepair.length}`);
+    try {
+      if ((await repairServerChapters(s.id, prefs)) > 0) linked++;
+    } catch (e) {
+      console.log(`[MANGA] repair ${s.id}: ${String(e)}`);
+    }
+  }
+  let pending = wanted.filter((s) => !s.deletedAt && !!tachiSourceOf(s.sourceId));
+  if (!pending.length) return linked;
   const done = new Set<string>();
 
   for (const s of servers) {

@@ -65,7 +65,16 @@ export async function suwayomiSources(http: Http, server: SuwayomiServer): Promi
   return data.sources.nodes.filter((s) => s.id !== '0');
 }
 
-export type GqlLibraryChapter = { id: number; number: number | null };
+export type GqlLibraryChapter = { id: number; number: number | null; url: string | null; order: number };
+
+type LibraryChapterRow = { id: number; chapterNumber?: number | null; url?: string | null; sourceOrder?: number | null };
+
+/** Chapters in reading order (Suwayomi's sourceOrder counts from the newest). */
+function libraryChapters(rows: LibraryChapterRow[]): GqlLibraryChapter[] {
+  return [...rows]
+    .sort((a, b) => (b.sourceOrder ?? 0) - (a.sourceOrder ?? 0))
+    .map((c, i) => ({ id: c.id, number: num(c.chapterNumber), url: str(c.url), order: i }));
+}
 export type GqlLibraryTitle = { id: number; url: string | null; title: string; chapters: GqlLibraryChapter[] };
 
 /**
@@ -75,18 +84,29 @@ export type GqlLibraryTitle = { id: number; url: string | null; title: string; c
  * slow or down.
  */
 export async function suwayomiLibrary(http: Http, server: SuwayomiServer): Promise<GqlLibraryTitle[]> {
-  type Row = { id: number; title: string; url?: string | null; chapters: { nodes: { id: number; chapterNumber?: number | null }[] } };
+  type Row = { id: number; title: string; url?: string | null; chapters: { nodes: LibraryChapterRow[] } };
   const data = await gql<{ mangas: { nodes: Row[] } }>(
     http,
     server,
-    'query { mangas(condition: { inLibrary: true }) { nodes { id title url chapters { nodes { id chapterNumber } } } } }'
+    'query { mangas(condition: { inLibrary: true }) { nodes { id title url chapters { nodes { id chapterNumber url sourceOrder } } } } }'
   );
   return data.mangas.nodes.map((m) => ({
     id: m.id,
     url: str(m.url),
     title: m.title || 'Untitled',
-    chapters: m.chapters.nodes.map((c) => ({ id: c.id, number: num(c.chapterNumber) })),
+    chapters: libraryChapters(m.chapters.nodes),
   }));
+}
+
+/** The chapters the server already stores for one title (nothing is asked of the site). */
+export async function suwayomiTitleChapters(http: Http, server: SuwayomiServer, mangaId: number): Promise<GqlLibraryChapter[]> {
+  const data = await gql<{ manga: { chapters: { nodes: LibraryChapterRow[] } } }>(
+    http,
+    server,
+    'query($id: Int!) { manga(id: $id) { chapters { nodes { id chapterNumber url sourceOrder } } } }',
+    { id: mangaId }
+  );
+  return libraryChapters(data.manga.chapters.nodes);
 }
 
 /** One Suwayomi source (an extension on the server), or its library when `source` is null. */

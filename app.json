@@ -14,8 +14,7 @@
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "ReelVault receives videos and audio you send from your computer over Wi-Fi, and reads manga from your own servers (Suwayomi, Komga, Kavita).",
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true,
-          "NSAllowsLocalNetworking": true
+          "NSAllowsArbitraryLoads": true
         },
         "LSSupportsOpeningDocumentsInPlace": false,
         "UIFileSharingEnabled": true,

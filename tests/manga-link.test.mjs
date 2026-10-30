@@ -51,8 +51,34 @@ test('planChapters matches by number and keeps a chapter matched once', () => {
   assert.deepEqual(planChapters(local, remote), [{ chapterId: 'a', sourceKey: 10 }]);
 });
 
-test('planChapters leaves a chapter with no number alone', () => {
-  assert.deepEqual(planChapters([{ id: 'x', number: null }], [{ id: 1, number: 1 }]), []);
+test('a one-shot pairs with the one chapter the server has, numbers or not', () => {
+  assert.deepEqual(planChapters([{ id: 'x', number: null }], [{ id: 1, number: 1 }]), [{ chapterId: 'x', sourceKey: 1 }]);
+  // Suwayomi says -1 for "no number": that is no number, not chapter -1.
+  assert.deepEqual(planChapters([{ id: 'x', number: null }], [{ id: 3891, number: -1 }]), [{ chapterId: 'x', sourceKey: 3891 }]);
+});
+
+test('a chapter without a number stays alone when the server has numbered ones to choose from', () => {
+  const local = [{ id: 'a', number: 1 }, { id: 'x', number: null }];
+  const remote = [{ id: 1, number: 1 }, { id: 2, number: 2 }, { id: 3, number: 3 }];
+  assert.deepEqual(planChapters(local, remote), [{ chapterId: 'a', sourceKey: 1 }]);
+});
+
+test('the same page on the source wins over numbers', () => {
+  const local = [{ id: 'a', number: null, url: 'https://comics.8muses.com/porn/album/Jay/Naruto-XXX' }];
+  const remote = [{ id: 9, number: 5, url: '/porn/album/Other' }, { id: 3888, number: -1, url: '/porn/album/Jay/Naruto-XXX' }];
+  assert.deepEqual(planChapters(local, remote), [{ chapterId: 'a', sourceKey: 3888 }]);
+});
+
+test('chapters without numbers on both sides pair in reading order when the counts agree', () => {
+  const local = [{ id: 'p2', number: null, position: 1 }, { id: 'p1', number: null, position: 0 }];
+  const remote = [{ id: 21, number: -1, order: 1 }, { id: 20, number: -1, order: 0 }];
+  assert.deepEqual(planChapters(local, remote), [{ chapterId: 'p2', sourceKey: 21 }, { chapterId: 'p1', sourceKey: 20 }]);
+});
+
+test('a server chapter is never used twice', () => {
+  const local = [{ id: 'a', number: 1, url: '/c/1' }, { id: 'b', number: 1 }];
+  const remote = [{ id: 1, number: 1, url: '/c/1' }];
+  assert.deepEqual(planChapters(local, remote), [{ chapterId: 'a', sourceKey: 1 }]);
 });
 
 /* --------------------------------------------------------------- planLinks */

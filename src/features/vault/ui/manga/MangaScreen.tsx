@@ -157,7 +157,7 @@ export default function MangaScreen({
     { label: 'Reading stats and Wrapped', onPress: onDashboard },
     { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
-    ...(items.some((s) => s.sourceId?.startsWith('tachi:')) ? [{ label: 'Find backup titles', hint: 'On MangaDex, your extensions or Suwayomi server', onPress: () => actions.autoLink().catch(failed) }] : []),
+    ...(items.some((s) => s.sourceId?.startsWith('tachi:') || /^server:[^:]+:library$/.test(s.sourceId ?? '')) ? [{ label: 'Find backup titles', hint: 'On your Suwayomi server, extensions or MangaDex; fixes linked ones too', onPress: () => actions.autoLink().catch(failed) }] : []),
     { label: 'Select', onPress: () => setSelected(new Set()) },
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
