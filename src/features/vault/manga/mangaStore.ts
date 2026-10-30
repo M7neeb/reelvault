@@ -392,6 +392,21 @@ export async function removeMangaTag(id: string, name: string): Promise<void> {
   await db.runAsync('DELETE FROM manga_tags WHERE series_id = ? AND name = ?;', [id, name]);
 }
 
+/** A keyword's new name on every title (titles that already have the new one keep a single copy). */
+export async function renameMangaTag(from: string, to: string): Promise<void> {
+  const n = to.trim().replace(/^#/, '');
+  if (!n || n === from) return;
+  const db = await getDb();
+  await db.runAsync('INSERT OR IGNORE INTO manga_tags (series_id, name) SELECT series_id, ? FROM manga_tags WHERE name = ?;', [n, from]);
+  await db.runAsync('DELETE FROM manga_tags WHERE name = ?;', [from]);
+}
+
+/** Takes a keyword off every title (the titles stay). */
+export async function deleteMangaTag(name: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM manga_tags WHERE name = ?;', [name]);
+}
+
 /* --------------------------------------------------------------- reading */
 
 export async function addRead(r: MangaRead): Promise<void> {

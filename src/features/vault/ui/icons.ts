@@ -84,6 +84,8 @@ export const ICONS = {
   arrowUp: { sf: 'arrow.up.right', ion: 'trending-up' },
   toTop: { sf: 'arrow.up.to.line', ion: 'arrow-up' },
   arrowDown: { sf: 'arrow.down.right', ion: 'trending-down' },
+  chevronUp: { sf: 'chevron.up', ion: 'chevron-up' },
+  chevronDown: { sf: 'chevron.down', ion: 'chevron-down' },
   medal: { sf: 'medal.fill', ion: 'medal' },
   moon: { sf: 'moon.stars.fill', ion: 'moon' },
   sun: { sf: 'sunrise.fill', ion: 'sunny' },

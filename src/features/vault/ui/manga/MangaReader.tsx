@@ -300,6 +300,8 @@ export default function MangaReader({
   /** Auto-scroll (long strip): on or off, and where the strip is. */
   const [auto, setAuto] = useState(false);
   const offset = useRef(0);
+  /** When the strip last moved: a double-tap right after a scroll is not a zoom. */
+  const scrolledAt = useRef(0);
   const listRef = useRef<FlatList<Item>>(null);
   const atEnd = useRef(false);
   const session = useRef({ startedAt: Date.now(), pages: new Set<number>([0]) });
@@ -718,7 +720,7 @@ export default function MangaReader({
             </TouchableOpacity>
           </View>
         ) : mode === 'webtoon' ? (
-          <ZoomStrip width={W} height={H} resetKey={chapter.id}>
+          <ZoomStrip width={W} height={H} resetKey={chapter.id} lastScrollAt={scrolledAt}>
           <FlatList
             key={`strip:${chapter.id}`}
             ref={listRef}
@@ -737,6 +739,7 @@ export default function MangaReader({
             showsVerticalScrollIndicator={false}
             onScroll={(e) => {
               offset.current = e.nativeEvent.contentOffset.y;
+              scrolledAt.current = Date.now();
             }}
             scrollEventThrottle={32}
             onScrollBeginDrag={() => {
