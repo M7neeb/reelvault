@@ -515,3 +515,26 @@ export function cbzName(seriesTitle: string, c: Pick<MangaChapter, 'number' | 'v
   const parts = [c.volume !== null ? `Vol. ${c.volume}` : null, c.number !== null ? `Ch. ${pad(c.number)}` : safeFileName(c.title ?? c.filename ?? 'Chapter', 40)].filter(Boolean);
   return `${safeFileName(seriesTitle, 60)} - ${parts.join(' ')}.cbz`;
 }
+
+/* ---------------------------------------------------------- logged reading */
+
+/**
+ * A reading session you log by hand (read somewhere else, or on paper).
+ * Today: it ends now. An earlier day: it starts at 8 pm that day, so it
+ * lands on the right day in the stats. No chapter, no pages.
+ */
+export function loggedRead(seriesId: string, minutes: number, daysAgo: number, now: number): MangaRead {
+  const ms = Math.max(1, Math.round(minutes)) * 60_000;
+  if (daysAgo <= 0) return { seriesId, chapterId: null, startedAt: now - ms, readMs: ms, pages: 0 };
+  const d = new Date(now);
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysAgo, 20, 0, 0, 0);
+  return { seriesId, chapterId: null, startedAt: day.getTime(), readMs: ms, pages: 0 };
+}
+
+/** The next `count` chapters you have not read, in reading order. */
+export function nextUnread(chapters: Pick<MangaChapter, 'id' | 'readAt'>[], count: number): string[] {
+  return chapters
+    .filter((c) => !c.readAt)
+    .slice(0, Math.max(0, count))
+    .map((c) => c.id);
+}

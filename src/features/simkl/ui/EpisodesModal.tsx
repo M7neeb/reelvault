@@ -21,7 +21,7 @@ import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/
 
 import { fmtEpisodeRating, type EpisodeRatings } from '../episodeRatings';
 import { watchCounts } from '../insights';
-import { episodeCode, episodeImageUrl, finaleLabel, fmtMinutes, groupBySeason, minutesLeft, parseEpisodeCode, upToHere, watchedKey } from '../logic';
+import { episodeCode, episodeImageUrl, finaleLabel, fmtMinutes, groupBySeason, minutesLeft, nextUnwatched, parseEpisodeCode, upToHere, watchedKey } from '../logic';
 import { fmtDay } from './time';
 import type { CatalogEpisode, Play, Session, SimklActions, SimklItem } from './types';
 
@@ -108,8 +108,15 @@ export default function EpisodesModal({
   }
 
   const seasons = useMemo(() => groupBySeason(episodes ?? []), [episodes]);
-  const next = parseEpisodeCode(item.nextToWatch);
+  // Simkl's "up next" is cleared when you tick an episode (the next sync brings the new one): work it out here meanwhile.
+  const simklNext = parseEpisodeCode(item.nextToWatch);
+  const localNext = useMemo(() => (episodes ? nextUnwatched(episodes, watched) : null), [episodes, watched]);
+  const next = simklNext ?? localNext;
   const shownSeason = openSeason ?? next?.season ?? seasons[0]?.season ?? null;
+  // Stay on the season that first opened: ticking its last episode must not jump to another season.
+  useEffect(() => {
+    if (openSeason === null && shownSeason !== null && episodes) setOpenSeason(shownSeason);
+  }, [openSeason, shownSeason, episodes]);
 
   function toggle(eps: { season: number; episode: number }[], on: boolean) {
     if (!eps.length) return;

@@ -10,7 +10,10 @@ import { simklRequest } from './api';
 import { combineRatings, OMDB, omdbKeyProblem, omdbSeasons, parseOmdbSeason, parseTvmazeEpisodes, TVMAZE, type EpisodeRatings, type SourceEpisode } from './episodeRatings';
 import { franchiseQuery, parseFranchises, simklTypeOf, WIKIDATA_SPARQL, type Franchise, type FranchiseEntry, type FranchiseItem } from './franchise';
 import {
+  episodeCode,
+  nextUnwatched,
   parseCatalog,
+  watchedKey,
   parseEpisodes,
   parsePlayback,
   type PausedItem,
@@ -22,7 +25,7 @@ import {
   type SimklStatus,
   type SimklType,
 } from './logic';
-import { cacheGet, cachePut, deleteSimklItems, listSimklItems, markEpisodesLocal, patchSimklItem, upsertSimklItems } from './repo';
+import { cacheGet, cachePut, deleteSimklItems, listSimklItems, markEpisodesLocal, patchSimklItem, upsertSimklItems, watchedEpisodes as watchedEpisodesOf } from './repo';
 import {
   addPlays,
   createSession,
@@ -117,11 +120,20 @@ export async function setEpisodesWatched(
   });
   await markEpisodesLocal(item.simklId, episodes, watched);
   const count = Math.max(0, item.watchedEpisodes + (watched ? episodes.length : -episodes.length));
-  // next_to_watch is Simkl's to compute; the next sync brings it. Clear it when it was just watched.
+  // next_to_watch is Simkl's to compute and the next sync brings it; until then, work it out
+  // from the (cached) episode list so "up next" never goes blank.
+  let nextToWatch: string | null | undefined = watched ? null : undefined;
+  try {
+    const [list, seen] = await Promise.all([loadEpisodes(item.type, item.simklId), watchedEpisodesOf(item.simklId)]);
+    const next = nextUnwatched(list, new Set(seen.map((w) => watchedKey(w.season, w.episode))));
+    if (list.length) nextToWatch = next ? episodeCode(item.type, next.season, next.episode) : null;
+  } catch {
+    // No episode list right now: the next sync fills it in.
+  }
   await patchSimklItem(item.simklId, {
     watchedEpisodes: count,
     lastWatchedAt: watched ? now : item.lastWatchedAt,
-    ...(watched ? { nextToWatch: null } : {}),
+    ...(nextToWatch !== undefined ? { nextToWatch } : {}),
   });
 }
 

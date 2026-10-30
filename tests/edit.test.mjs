@@ -76,3 +76,22 @@ test('old Make Smaller choices map to plans', () => {
   assert.equal(planForQuality('same').maxShortSide, null);
   assert.equal(planForQuality('same').lossless, false);
 });
+
+test('Make Smaller strength: a share of the current bitrate', () => {
+  // A 24-minute 1080p anime episode of 220 MB (about 1.2 Mbit/s).
+  const ep = { width: 1920, height: 1080, fps: 23.976, durationMs: 24 * 60_000, sizeBytes: 220 * 1024 * 1024 };
+  const plan = { ...EMPTY_PLAN, lossless: false, maxShortSide: 1080, squeeze: 0.55 };
+  const est = estimateBytes(plan, ep);
+  assert.ok(est > 100 * 1024 * 1024 && est < 150 * 1024 * 1024, `about 125 MB, got ${est}`);
+  // Standard (no strength) would not save anything on such a file.
+  const std = estimateBytes({ ...plan, squeeze: null }, ep);
+  assert.equal(std, ep.sizeBytes);
+  // Stronger = smaller; 720p = smaller again.
+  assert.ok(estimateBytes({ ...plan, squeeze: 0.4 }, ep) < est);
+  assert.ok(estimateBytes({ ...plan, maxShortSide: 720 }, ep) < est);
+  const opts = nativeOptions(plan);
+  assert.equal(opts.bitrateShare, 0.55);
+  assert.equal(opts.passthrough, false);
+  assert.equal(nativeOptions({ ...EMPTY_PLAN, squeeze: 0.55 }).passthrough, false);
+  assert.equal(nativeOptions(EMPTY_PLAN).bitrateShare, 0);
+});

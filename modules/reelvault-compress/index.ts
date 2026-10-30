@@ -14,6 +14,8 @@ export type EditOptions = {
   maxShortSide: number;
   fps: number;
   passthrough: boolean;
+  /** Keep this share of the source's video bitrate (0 = automatic). */
+  bitrateShare: number;
 };
 
 type ProgressEvent = { jobId: string; progress: number };
@@ -23,6 +25,8 @@ type NativeCompress = {
   compress(input: string, output: string, quality: CompressQuality, jobId: string): Promise<{ size: number }>;
   edit(input: string, output: string, options: EditOptions, jobId: string): Promise<{ size: number }>;
   cancel(jobId: string): void;
+  /** Missing in app builds before 18. */
+  features?: () => string[];
   addListener(event: 'onProgress', listener: (e: ProgressEvent) => void): { remove(): void };
 };
 

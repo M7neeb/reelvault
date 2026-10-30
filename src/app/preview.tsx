@@ -471,6 +471,7 @@ export default function PreviewRoute() {
       onPickCover: async () => false,
       onResetCover: noop,
       canMakeSmaller: () => true,
+      canChooseStrength: () => true,
       // Pretends to re-encode: a short progress run, then about 45% saved.
       onMakeSmaller: async (item, _quality, onProgress) => {
         for (let i = 1; i <= 10; i++) {

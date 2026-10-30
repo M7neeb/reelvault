@@ -141,6 +141,14 @@ export function matchesRule(item: RuleTarget, rule: SmartRule, watch: WatchInfo 
     const mb = item.sizeBytes !== undefined ? item.sizeBytes / MB : undefined;
     if (outside(mb, rule.minSizeMb, rule.maxSizeMb)) return false;
   }
+  if (rule.minFps !== undefined || rule.maxFps !== undefined) {
+    // Cameras write 59.94 or 29.97 for "60" and "30": half a frame either way still counts.
+    const fps = item.meta?.fps;
+    if (!fps) return false;
+    if (rule.minFps !== undefined && fps < rule.minFps - 0.5) return false;
+    if (rule.maxFps !== undefined && fps > rule.maxFps + 0.5) return false;
+  }
+  if (rule.codec && (item.meta?.codec ?? '').toUpperCase() !== rule.codec.toUpperCase()) return false;
   if (rule.orientation && orientationOf(item.width, item.height) !== rule.orientation) return false;
   if (rule.format && formatOf(item.filename) !== rule.format.toUpperCase()) return false;
   if ((rule.minKeywords !== undefined || rule.maxKeywords !== undefined) && outside(item.tagNames.length, rule.minKeywords, rule.maxKeywords)) {
@@ -189,6 +197,8 @@ export function describeRule(rule: SmartRule): string {
   else if (rule.dateTo !== undefined) parts.push(`until ${shortDate(rule.dateTo)}`);
   if (rule.minDurationSec !== undefined || rule.maxDurationSec !== undefined) parts.push(range(rule.minDurationSec, rule.maxDurationSec, 's'));
   if (rule.minSizeMb !== undefined || rule.maxSizeMb !== undefined) parts.push(range(rule.minSizeMb, rule.maxSizeMb, 'MB'));
+  if (rule.minFps !== undefined || rule.maxFps !== undefined) parts.push(range(rule.minFps, rule.maxFps, 'fps'));
+  if (rule.codec) parts.push(rule.codec);
   if (rule.orientation) parts.push(rule.orientation);
   if (rule.format) parts.push(rule.format.toUpperCase());
   if (rule.minKeywords !== undefined || rule.maxKeywords !== undefined) parts.push(range(rule.minKeywords, rule.maxKeywords, 'keywords'));
@@ -241,6 +251,11 @@ export function parseRule(json: string): SmartRule {
     const v = num(r[key], 0, 1e9);
     if (v !== undefined) rule[key] = v;
   }
+  for (const key of ['minFps', 'maxFps'] as const) {
+    const v = num(r[key], 0, 10_000);
+    if (v !== undefined) rule[key] = v;
+  }
+  if (typeof r.codec === 'string' && /^[a-z0-9. -]{1,16}$/i.test(r.codec)) rule.codec = r.codec;
   for (const key of ['minKeywords', 'maxKeywords', 'minAlbums', 'maxAlbums'] as const) {
     const v = num(r[key], 0, 1e6);
     if (v !== undefined) rule[key] = Math.round(v);

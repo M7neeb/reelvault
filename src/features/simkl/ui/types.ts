@@ -15,6 +15,7 @@ import type {
   CatalogTitle,
   PausedItem,
   SimklItem,
+  SimklSort,
   SimklStatus,
   SimklType,
   WatchedEpisode,
@@ -46,7 +47,11 @@ export type Category = 'videos' | 'movie' | 'show' | 'anime';
 export type SimklPrefs = {
   /** Blur titles, pictures and summaries of episodes you have not watched yet. */
   hideSpoilers: boolean;
+  /** The last sort and status picked in each tab (Movies, Shows, Anime), kept across launches. */
+  view?: SimklView;
 };
+
+export type SimklView = Partial<Record<SimklType, { sort?: SimklSort; status?: SimklStatus | 'all' }>>;
 
 /**
  * What the Videos tab gets from Simkl: link one of your videos to a movie or an
@@ -157,6 +162,8 @@ export type SimklActions = {
   setInList: (listId: number, title: CatalogTitle, on: boolean) => Promise<void>;
   /** Many titles at once; resolves with how many were new to the list. */
   addManyToList: (listId: number, titles: CatalogTitle[]) => Promise<number>;
+  /** Takes the picked titles out of the list (they stay in your library). */
+  removeManyFromList: (listId: number, simklIds: number[]) => Promise<void>;
   /** Looked up on Google (or not). */
   setSearched: (listId: number, simklId: number, on: boolean) => Promise<void>;
   /** Pick an IMDb / Letterboxd CSV and send it to Simkl. null = cancelled, 'unknown' = not a known export. */

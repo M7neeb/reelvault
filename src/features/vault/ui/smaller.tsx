@@ -7,7 +7,7 @@
 import { useRef, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 
-import { EMPTY_PLAN, estimateBytes, fmtFormatLine, FRAME_RATES, RESOLUTIONS, type EditPlan } from '../edit';
+import { EMPTY_PLAN, estimateBytes, fmtFormatLine, FRAME_RATES, RESOLUTIONS, SQUEEZES, type EditPlan } from '../edit';
 import { confirmAction } from './confirm';
 import { fmtBitrate, fmtSize } from './format';
 import { Chip, Section, SheetFrame, Wrap } from './sheets';
@@ -22,6 +22,7 @@ const EMPTY: Tally = { done: 0, skipped: 0, failed: 0, saved: 0, notes: [] };
 export function SmallerSheet({
   items,
   available,
+  strengths = false,
   onMakeSmaller,
   onCancel,
   onClose,
@@ -29,6 +30,8 @@ export function SmallerSheet({
   items: VaultItem[];
   /** False until the app build has the encoder (1.1). */
   available: boolean;
+  /** Light / Balanced / Strong can be picked (app build 18 on); otherwise Apple's standard quality only. */
+  strengths?: boolean;
   onMakeSmaller: (item: VaultItem, plan: EditPlan, onProgress: (f: number) => void) => Promise<UiSmallerResult>;
   onCancel: () => void;
   onClose: () => void;
@@ -36,7 +39,9 @@ export function SmallerSheet({
   const styles = useStyles(makeStyles);
   const [maxShortSide, setMaxShortSide] = useState<number | null>(1080);
   const [fps, setFps] = useState<number | null>(null);
-  const plan: EditPlan = { ...EMPTY_PLAN, maxShortSide, fps, lossless: false };
+  const [squeeze, setSqueeze] = useState<number | null>(strengths ? 0.55 : null);
+  const plan: EditPlan = { ...EMPTY_PLAN, maxShortSide, fps, squeeze, lossless: false };
+  const squeezeHint = SQUEEZES.find((q) => q.key === squeeze)?.hint;
   const [run, setRun] = useState<Run | null>(null);
   const [tally, setTally] = useState<Tally | null>(null);
   const stopped = useRef(false);
@@ -128,6 +133,16 @@ export function SmallerSheet({
           <Section label="Now">
             <Text style={styles.body}>{now}</Text>
           </Section>
+          {strengths && (
+            <Section label="How much smaller">
+              <Wrap>
+                {SQUEEZES.map((q) => (
+                  <Chip key={q.label} label={q.label} on={squeeze === q.key} onPress={() => setSqueeze(q.key)} />
+                ))}
+              </Wrap>
+              {squeezeHint && <Text style={styles.hint}>{squeezeHint}</Text>}
+            </Section>
+          )}
           <Section label="Resolution (short side)">
             <Wrap>
               {RESOLUTIONS.map((r) => (

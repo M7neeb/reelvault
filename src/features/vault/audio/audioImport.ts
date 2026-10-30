@@ -521,6 +521,51 @@ export async function removeExtra(itemId: string, name: string): Promise<void> {
   await updateAudio([item.id], { size: folderBytes(item.folder) });
 }
 
+/* ------------------------------------------------------------------ photos */
+
+/** Pictures to look at while you listen: Documents/audio/<id>/photos/, in the order added. */
+const PHOTOS = 'photos';
+
+export function listPhotos(folder: string): string[] {
+  const dir = itemDir(`${folder}/${PHOTOS}`);
+  if (!dir.exists) return [];
+  return dir
+    .list()
+    .filter((f): f is File => f instanceof File && extraKindOf(f.name) === 'image')
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+    .map((f) => f.uri);
+}
+
+/** Moves picked pictures into the item; returns how many. Names start with the time, so new ones go last. */
+export async function addPhotos(itemId: string, picked: { uri: string; name: string }[], shrink?: (uri: string) => Promise<unknown>): Promise<number> {
+  const item = await getAudio(itemId);
+  if (!item) throw new Error('That item is gone.');
+  const folder = `${item.folder}/${PHOTOS}`;
+  const dir = itemDir(folder);
+  if (!dir.exists) dir.create({ intermediates: true });
+  const stamp = Date.now();
+  for (const [i, f] of picked.entries()) {
+    const ext = extOf(f.name) || 'jpg';
+    const to = fileIn(folder, `${stamp}-${String(i).padStart(3, '0')}.${ext}`);
+    await bringIn(new File(f.uri), to, false);
+    if (shrink) await shrink(to.uri).catch(() => undefined);
+  }
+  await updateAudio([item.id], { size: folderBytes(item.folder) });
+  return picked.length;
+}
+
+export async function removePhoto(itemId: string, uri: string): Promise<void> {
+  const item = await getAudio(itemId);
+  if (!item) return;
+  const name = decodeURIComponent(uri.split('/').pop() ?? '');
+  if (!name) return;
+  removeQuietly(fileIn(`${item.folder}/${PHOTOS}`, name));
+  await updateAudio([item.id], { size: folderBytes(item.folder) });
+}
+
+/** Files that belong to ReelVault, not to the book itself (left out when the .epub is made again). */
+export const isAddedFile = (rel: string) => rel.startsWith(`${PHOTOS}/`) || rel.startsWith(`${EXTRAS}/`);
+
 /** For Share / Save to Files: the item's main file (an EPUB is shared as its extracted folder's audio). */
 export function mainFileUri(item: AudioItem): string | null {
   const t = item.tracks[0];
