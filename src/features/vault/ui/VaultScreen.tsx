@@ -144,6 +144,7 @@ type PasscodeRequest = {
   onCreate?: (code: string) => Promise<void>;
 };
 
+const NO_GROUPS: string[][] = [];
 const NO_PRINTS = new Map<string, string[]>();
 
 function VaultScreenBody({
@@ -487,9 +488,16 @@ function VaultScreenBody({
     () => duplicateGroups.map((g) => g.filter((id) => publicIds.has(id))).filter((g) => g.length > 1),
     [duplicateGroups, publicIds]
   );
+  // Comparing every video with every other is work: only while Similar is on screen.
+  const needSimilar = filter.kind === 'similar' || sidebarOpen || dupReview === 'similar';
   const similarGroups = useMemo(
-    () => (prints.size ? mergeGroups(confirmByPictures(groupSimilar(publicItems), prints), groupByPictures(publicItems, prints)) : groupSimilar(publicItems)),
-    [publicItems, prints]
+    () =>
+      !needSimilar
+        ? NO_GROUPS
+        : prints.size
+          ? mergeGroups(confirmByPictures(groupSimilar(publicItems), prints), groupByPictures(publicItems, prints))
+          : groupSimilar(publicItems),
+    [publicItems, prints, needSimilar]
   );
 
   const tagCounts = useMemo(() => {

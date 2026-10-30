@@ -132,3 +132,17 @@ test('nothing to match gives an empty plan', () => {
   assert.deepEqual(planLinks([], library), []);
   assert.deepEqual(planLinks([{ id: 's', title: 'Not There', sourceKey: '/nope', chapters: [] }], library), []);
 });
+
+/* ------------------------------------------------------- server errors */
+
+import { isStaleChapterList, suwayomiError } from '../src/features/vault/manga/sources/suwayomi.ts';
+
+test('server errors become one readable line', () => {
+  const trace = 'Exception while fetching data (/fetchChapterPages) : Refresh the chapter list.\n\njava.lang.IllegalStateException: Refresh the chapter list.\n at eu.kanade.tachiyomi...';
+  assert.equal(suwayomiError(trace), 'Refresh the chapter list.');
+  assert.match(suwayomiError('Exception while fetching data (/fetchChapterPages) : Source not installed: 5712'), /not installed on the server/);
+  assert.match(suwayomiError('Exception while fetching data (/x) : Cloudflare bypass currently disabled'), /FlareSolverr/);
+  assert.match(suwayomiError('Exception while fetching data (/x) : HTTP error 522'), /down right now \(522\)/);
+  assert.ok(isStaleChapterList(new Error('Suwayomi: Refresh the chapter list.')));
+  assert.ok(!isStaleChapterList(new Error('Suwayomi: HTTP error 522')));
+});

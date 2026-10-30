@@ -130,6 +130,23 @@ const norm = (s: string) =>
  * the text on screen. One moment per video (the first), best matches first:
  * a scene word beats text, and more matching frames rank higher.
  */
+type Prepared = { labels: { whole: string; words: string[] }[]; text: string };
+/** Each row made searchable once (typing a search runs through every row on each key). */
+const preparedRows = new WeakMap<SceneRow, Prepared>();
+function prepared(r: SceneRow): Prepared {
+  let p = preparedRows.get(r);
+  if (!p) {
+    p = {
+      labels: norm(r.labels)
+        .split(/\s*,\s*|\s{2,}/)
+        .map((whole) => ({ whole, words: whole.split(' ') })),
+      text: norm(r.words),
+    };
+    preparedRows.set(r, p);
+  }
+  return p;
+}
+
 export function findScenes(rows: SceneRow[], query: string, max = 30): SceneHit[] {
   const words = norm(query)
     .split(/\s+/)
@@ -138,13 +155,12 @@ export function findScenes(rows: SceneRow[], query: string, max = 30): SceneHit[
   if (!words.length) return [];
   const best = new Map<string, { atMs: number; why: string; score: number; count: number }>();
   for (const r of rows) {
-    const labels = norm(r.labels);
-    const text = norm(r.words);
+    const { labels, text } = prepared(r);
     let score = 0;
     const why: string[] = [];
     let ok = true;
     for (const w of words) {
-      const inLabel = labels.split(/\s*,\s*|\s{2,}/).some((l) => l === w || l.split(' ').includes(w) || (w.length >= 4 && l.startsWith(w)));
+      const inLabel = labels.some((l) => l.whole === w || l.words.includes(w) || (w.length >= 4 && l.whole.startsWith(w)));
       if (inLabel) {
         score += 2;
         why.push(w);
