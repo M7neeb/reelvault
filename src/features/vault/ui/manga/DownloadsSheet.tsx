@@ -5,9 +5,12 @@
  * in the background) and carry on when you come back. Presentational only.
  */
 
+import { Paths } from 'expo-file-system';
+import { useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 
-import { chapterLabel } from '../../manga/mangaLogic';
+import { chapterLabel, downloadSizeLeft } from '../../manga/mangaLogic';
+import { fmtBytes } from '../../stats';
 import Icon from '../Icon';
 import { SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
@@ -27,6 +30,14 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
   const failed = downloads.queue.filter((q) => q.state === 'failed');
   const cur = downloads.current;
   const now = cur ? label(cur.seriesId, cur.chapterId) : null;
+  const waiting = useMemo(() => downloads.queue.filter((q) => q.state === 'queued'), [downloads.queue]);
+  const sizeLeft = useMemo(() => downloadSizeLeft(items, waiting), [items, waiting]);
+  let free: number | null = null;
+  try {
+    free = Paths.availableDiskSpace;
+  } catch {
+    // unknown
+  }
 
   return (
     <SheetFrame title="Downloads" onClose={onClose}>
@@ -64,6 +75,21 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
               <View style={styles.bar}>
                 <View style={[styles.fill, { width: `${Math.round((cur.done / Math.max(1, cur.total)) * 100)}%` }]} />
               </View>
+            </View>
+          )}
+          {queued.length > 0 && (
+            <View style={styles.card}>
+              <Text style={styles.section}>Left to download</Text>
+              <Text style={styles.title}>{sizeLeft !== null ? `About ${fmtBytes(sizeLeft)}` : 'Size not known yet'}</Text>
+              <Text style={styles.meta}>
+                {queued.length} {queued.length === 1 ? 'chapter' : 'chapters'}
+                {sizeLeft !== null ? ' · estimated from the chapters already on your iPhone' : ' · shown once the first chapter is done'}
+              </Text>
+              {free !== null && free !== Infinity && (
+                <Text style={[styles.meta, sizeLeft !== null && sizeLeft > free ? { color: p.danger, fontWeight: '700' } : null]}>
+                  {fmtBytes(free)} free on your iPhone{sizeLeft !== null && sizeLeft > free ? ' · not enough for all of it' : ''}
+                </Text>
+              )}
             </View>
           )}
           {downloads.paused && <Text style={styles.paused}>Paused</Text>}

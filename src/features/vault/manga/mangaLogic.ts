@@ -538,3 +538,31 @@ export function nextUnread(chapters: Pick<MangaChapter, 'id' | 'readAt'>[], coun
     .slice(0, Math.max(0, count))
     .map((c) => c.id);
 }
+
+/**
+ * Roughly how much the waiting downloads will take, from the chapters already
+ * on the phone: the same title's average chapter when it has one, else the
+ * average of everything downloaded. Null until something is downloaded.
+ */
+export function downloadSizeLeft(series: { id: string; chapters: Pick<MangaChapter, 'id' | 'size' | 'pageCount' | 'downloaded'>[] }[], waiting: { seriesId: string; chapterId: string }[]): number | null {
+  let allBytes = 0;
+  let allCount = 0;
+  const perSeries = new Map<string, number>();
+  for (const s of series) {
+    let bytes = 0;
+    let count = 0;
+    for (const c of s.chapters)
+      if (c.downloaded && c.size > 0) {
+        bytes += c.size;
+        count++;
+      }
+    if (count) perSeries.set(s.id, bytes / count);
+    allBytes += bytes;
+    allCount += count;
+  }
+  if (!allCount) return null;
+  const overall = allBytes / allCount;
+  let left = 0;
+  for (const w of waiting) left += perSeries.get(w.seriesId) ?? overall;
+  return Math.round(left);
+}
