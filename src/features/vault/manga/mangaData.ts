@@ -70,6 +70,8 @@ import {
   expiredSeries,
   listManga,
   removeMangaTag,
+  renameMangaTag,
+  deleteMangaTag,
   restoreSeries,
   saveProgress,
   setChaptersRead,
@@ -352,6 +354,14 @@ export function useMangaData(): MangaData {
       },
       removeTag: async (ids, name) => {
         for (const id of typeof ids === 'string' ? [ids] : ids) await removeMangaTag(id, name);
+        await refresh();
+      },
+      renameTag: async (from, to) => {
+        await renameMangaTag(from, to);
+        await refresh();
+      },
+      deleteTag: async (name) => {
+        await deleteMangaTag(name);
         await refresh();
       },
       trash: async (ids) => {

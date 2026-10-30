@@ -753,3 +753,59 @@ export function statusGroups(series: Pick<MangaSeries, 'id' | 'status'>[]): { st
   for (const s of series) m.set(s.status, [...(m.get(s.status) ?? []), s.id]);
   return [...m.entries()].map(([status, ids]) => ({ status, ids }));
 }
+
+/* ------------------------------------------------------- the library tabs */
+
+/**
+ * How the tabs above the manga library are set up: their order, the ones
+ * hidden, names you gave the built-in ones, and categories you made that no
+ * title is in yet. Keys: 'all', a status, 'unread', 'fav', 'manhwa',
+ * 'comic', or '#' + a keyword.
+ */
+export type TabPrefs = { order: string[]; hidden: string[]; labels: Record<string, string>; extra: string[] };
+
+export const DEFAULT_TAB_PREFS: TabPrefs = { order: [], hidden: [], labels: {}, extra: [] };
+
+export function parseTabPrefs(raw: string | null): TabPrefs {
+  try {
+    const v = JSON.parse(raw ?? '{}') ?? {};
+    const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string') : []);
+    const labels: Record<string, string> = {};
+    if (v.labels && typeof v.labels === 'object') for (const [k, l] of Object.entries(v.labels)) if (typeof l === 'string' && l.trim()) labels[k] = l;
+    return { order: strs(v.order), hidden: strs(v.hidden), labels, extra: strs(v.extra) };
+  } catch {
+    return DEFAULT_TAB_PREFS;
+  }
+}
+
+/** The tabs in your order (Library always first; tabs not placed yet keep their usual place after the ones you placed). */
+export function arrangeTabs<T extends { key: string }>(tabs: T[], p: TabPrefs): T[] {
+  const rank = new Map(p.order.map((k, i) => [k, i]));
+  const first = tabs.filter((t) => t.key === 'all');
+  const rest = tabs.filter((t) => t.key !== 'all');
+  const placed = rest.filter((t) => rank.has(t.key)).sort((a, b) => rank.get(a.key)! - rank.get(b.key)!);
+  return [...first, ...placed, ...rest.filter((t) => !rank.has(t.key))];
+}
+
+/** Moves one tab a step up (-1) or down (1); returns the whole new order. */
+export function moveTab(keys: string[], key: string, dir: -1 | 1): string[] {
+  const list = keys.filter((k) => k !== 'all');
+  const i = list.indexOf(key);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return list;
+  [list[i], list[j]] = [list[j], list[i]];
+  return list;
+}
+
+/** A keyword got a new name: its place, hidden state and label move with it. */
+export function renameTabKey(p: TabPrefs, from: string, to: string): TabPrefs {
+  const swap = (k: string) => (k === from ? to : k);
+  const labels = { ...p.labels };
+  delete labels[from];
+  return {
+    order: [...new Set(p.order.map(swap))],
+    hidden: [...new Set(p.hidden.map(swap))],
+    labels,
+    extra: [...new Set(p.extra.map((t) => (`#${t}` === from ? to.replace(/^#/, '') : t)))],
+  };
+}

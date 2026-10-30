@@ -16,6 +16,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   DEFAULT_LIBRARY_VIEW,
+  DEFAULT_TAB_PREFS,
+  arrangeTabs,
+  parseTabPrefs,
+  renameTabKey,
+  type TabPrefs,
   MANGA_STATUSES,
   chapterLabel,
   continueReading,
@@ -50,9 +55,11 @@ import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import Fade from '../Fade';
 import MangaCover from './MangaCover';
 import MoveSheet from './MoveSheet';
+import TabsSheet from './TabsSheet';
 import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
 
 const VIEW_KEY = 'manga.libraryView';
+const TABS_KEY = 'manga.tabs';
 const SIDE = 12;
 const GAP = 10;
 
@@ -117,6 +124,18 @@ export default function MangaScreen({
     setView(v);
     setSetting(VIEW_KEY, JSON.stringify(v)).catch(() => undefined);
   };
+  // The tabs: your order, hidden ones, names, empty categories (Edit tabs).
+  const [tabPrefs, setTabPrefs] = useState<TabPrefs>(DEFAULT_TAB_PREFS);
+  useEffect(() => {
+    getSetting(TABS_KEY)
+      .then((raw) => setTabPrefs(parseTabPrefs(raw)))
+      .catch(() => undefined);
+  }, []);
+  const changeTabs = (t: TabPrefs) => {
+    setTabPrefs(t);
+    setSetting(TABS_KEY, JSON.stringify(t)).catch(() => undefined);
+  };
+  const [tabsOpen, setTabsOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // Big covers, two to a row by default (twice as many on wide screens), like Tachimanga.
@@ -152,17 +171,25 @@ export default function MangaScreen({
     for (const s of visible) for (const t of s.tags) m.set(t, (m.get(t) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [visible]);
+  // Categories: your keywords, plus ones you made that no title is in yet.
+  const categories = useMemo(() => [...tags, ...tabPrefs.extra.filter((t) => !tags.includes(t))], [tags, tabPrefs.extra]);
   const chips: Chip[] = useMemo(
-    () => [
-      { key: 'all', label: 'Library', filter: {} },
-      ...MANGA_STATUSES.map((s) => ({ key: s.key, label: s.label, filter: { status: s.key } as MangaFilter })),
-      { key: 'unread', label: 'Unread', filter: { unread: true } },
-      { key: 'fav', label: 'Favourites', filter: { favourites: true } },
-      { key: 'manhwa', label: 'Manhwa', filter: { kind: 'manhwa' } },
-      { key: 'comic', label: 'Comics', filter: { kind: 'comic' } },
-      ...tags.slice(0, 20).map((t) => ({ key: `#${t}`, label: `# ${t}`, filter: { tag: t } })),
-    ],
-    [tags]
+    () =>
+      arrangeTabs(
+        (
+          [
+          { key: 'all', label: 'Library', filter: {} },
+          ...MANGA_STATUSES.map((s) => ({ key: s.key, label: s.label, filter: { status: s.key } as MangaFilter })),
+          { key: 'unread', label: 'Unread', filter: { unread: true } },
+          { key: 'fav', label: 'Favourites', filter: { favourites: true } },
+          { key: 'manhwa', label: 'Manhwa', filter: { kind: 'manhwa' } },
+          { key: 'comic', label: 'Comics', filter: { kind: 'comic' } },
+          ...categories.map((t) => ({ key: `#${t}`, label: t, filter: { tag: t } as MangaFilter })),
+          ] as Chip[]
+        ).map((c) => ({ ...c, label: tabPrefs.labels[c.key] ?? c.label })),
+        tabPrefs
+      ),
+    [categories, tabPrefs]
   );
   const active = chips.find((c) => c.key === chip) ?? chips[0];
   const source = inDeleted ? deleted.filter((s) => showPrivate || !s.isPrivate) : visible;
@@ -238,6 +265,7 @@ export default function MangaScreen({
     { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
     ...(items.some((s) => s.sourceId?.startsWith('tachi:') || /^server:[^:]+:library$/.test(s.sourceId ?? '')) ? [{ label: 'Find backup titles', hint: 'On your Suwayomi server, extensions or MangaDex; fixes linked ones too', onPress: () => actions.autoLink().catch(failed) }] : []),
+    { label: 'Edit tabs', hint: 'Order, hide, rename, new category', onPress: () => setTimeout(() => setTabsOpen(true), 250) },
     { label: 'Select', hint: 'Pick titles to move, rate or mark read', onPress: () => setSelected(new Set()) },
     { label: 'Select all', hint: chip === 'all' ? 'Every title in the library' : `Every title in ${active.label.replace(/^# /, '')}`, onPress: () => setSelected(new Set(list.map((x) => x.id))) },
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
@@ -389,7 +417,7 @@ export default function MangaScreen({
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
             {chips.map((c) => {
               const on = c.key === chip;
-              if (c.key !== 'all' && !counts[c.key] && !on) return null;
+              if (!on && c.key !== 'all' && (tabPrefs.hidden.includes(c.key) || (!counts[c.key] && !tabPrefs.extra.includes(c.key.slice(1))))) return null;
               return (
                 <TouchableOpacity
                   key={c.key}
@@ -397,11 +425,18 @@ export default function MangaScreen({
                   onPress={() => {
                     tick();
                     setChip(c.key);
+                  }}
+                  onLongPress={() => {
+                    tick();
+                    setTabsOpen(true);
                   }}>
-                  <Text style={[styles.tabText, on && styles.tabTextOn]}>{c.label.replace(/^# /, '')}</Text>
+                  <Text style={[styles.tabText, on && styles.tabTextOn]}>{c.label}</Text>
                 </TouchableOpacity>
               );
             })}
+            <TouchableOpacity style={styles.tabEdit} onPress={() => setTabsOpen(true)} accessibilityLabel="Edit tabs">
+              <Icon name="edit" size={18} color={p.textSecondary} />
+            </TouchableOpacity>
           </ScrollView>
         </View>
       )}
@@ -590,6 +625,30 @@ export default function MangaScreen({
         </Animated.View>
       )}
 
+      {tabsOpen && (
+        <TabsSheet
+          tabs={chips.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] ?? 0 }))}
+          prefs={tabPrefs}
+          onPrefs={changeTabs}
+          onRename={(key, name) => {
+            if (!key.startsWith('#')) return changeTabs({ ...tabPrefs, labels: { ...tabPrefs.labels, [key]: name } });
+            const to = `#${name.replace(/^#/, '')}`;
+            changeTabs(renameTabKey(tabPrefs, key, to));
+            if (chip === key) setChip(to);
+            actions.renameTag(key.slice(1), name).catch(failed);
+          }}
+          onDelete={(key) => {
+            changeTabs({ ...tabPrefs, order: tabPrefs.order.filter((k) => k !== key), hidden: tabPrefs.hidden.filter((k) => k !== key), extra: tabPrefs.extra.filter((t) => `#${t}` !== key) });
+            if (chip === key) setChip('all');
+            actions.deleteTag(key.slice(1)).catch(failed);
+          }}
+          onAdd={(name) => {
+            const t = name.replace(/^#/, '').trim();
+            if (t && !categories.includes(t)) changeTabs({ ...tabPrefs, extra: [...tabPrefs.extra, t] });
+          }}
+          onClose={() => setTabsOpen(false)}
+        />
+      )}
       {viewOpen && <LibrarySheet view={view} sources={sourceNames} onChange={changeView} onClose={() => setViewOpen(false)} />}
       {menu === 'add' && <OptionsSheet title="Add to Manga" options={addOptions} onClose={() => setMenu(null)} />}
       {menu === 'more' && <OptionsSheet title="Manga" options={moreOptions} onClose={() => setMenu((m) => (m === 'more' ? null : m))} />}
@@ -609,7 +668,7 @@ export default function MangaScreen({
       {menu === 'move' && (
         <MoveSheet
           picked={picked}
-          tags={tags}
+          tags={categories}
           onStatus={moveTo}
           onTag={(t, add) => (add ? actions.addTag(ids, t) : actions.removeTag(ids, t)).catch(failed)}
           onClose={() => setMenu(null)}
@@ -744,6 +803,7 @@ const makeStyles = (p: Palette) =>
     tabOn: { backgroundColor: p.elevated },
     tabText: { color: p.textSecondary, fontSize: 17, fontWeight: '700' },
     tabTextOn: { color: p.text },
+    tabEdit: { width: 44, alignItems: 'center', justifyContent: 'center' },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: SIDE + 4, paddingVertical: 8 },
     rowTitle: { color: p.text, fontSize: 16, fontWeight: '800' },
     rowMeta: { color: p.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 2 },

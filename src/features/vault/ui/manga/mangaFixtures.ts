@@ -142,6 +142,8 @@ export function fixtureMangaData(): MangaData {
     update: none,
     addTag: none,
     removeTag: none,
+    renameTag: none,
+    deleteTag: none,
     trash: none,
     restore: none,
     purge: none,

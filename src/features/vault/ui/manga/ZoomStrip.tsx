@@ -3,6 +3,14 @@
  * fingers are; drag sideways to look along the page while zoomed (up and
  * down still scrolls the strip as usual); double-tap to zoom in there, or
  * back out. Pinching back to normal size, or a new chapter, resets it.
+ *
+ * Against zooming by accident while scrolling: a pinch only starts once the
+ * fingers have spread or closed a clear amount, and a double-tap only counts
+ * when the strip was not moving and the finger stayed put.
+ *
+ * The move and the size sit on two nested views (move outside, size inside),
+ * so the spot under your fingers stays there whatever order the phone
+ * applies transforms in.
  */
 
 import { useEffect, type ReactElement } from 'react';
@@ -12,10 +20,29 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 
 const MAX = 4;
 const DOUBLE = 2.2;
+/** How far the fingers must spread or close (10%) before a pinch zooms. */
+const PINCH_START = 0.1;
+/** A double-tap this soon after the strip moved is a scroll, not a zoom. */
+const STILL_MS = 450;
 
-export default function ZoomStrip({ width, height, resetKey, children }: { width: number; height: number; resetKey: string; children: ReactElement }) {
+export default function ZoomStrip({
+  width,
+  height,
+  resetKey,
+  lastScrollAt,
+  children,
+}: {
+  width: number;
+  height: number;
+  resetKey: string;
+  /** When the strip last scrolled (ms), so a tap that stops a scroll is not a zoom. */
+  lastScrollAt: { current: number };
+  children: ReactElement;
+}) {
   const scale = useSharedValue(1);
   const start = useSharedValue(1);
+  const base = useSharedValue(1);
+  const pinching = useSharedValue(false);
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
   const sx = useSharedValue(0);
@@ -44,13 +71,21 @@ export default function ZoomStrip({ width, height, resetKey, children }: { width
   const native = Gesture.Native();
   const pinch = Gesture.Pinch()
     .onStart(() => {
-      start.value = scale.value;
-      sx.value = tx.value;
-      sy.value = ty.value;
+      pinching.value = false;
     })
     .onUpdate((e) => {
-      const s = Math.min(MAX, Math.max(1, start.value * e.scale));
-      // Keep the spot between your fingers under your fingers.
+      if (!pinching.value) {
+        if (Math.abs(e.scale - 1) < PINCH_START) return;
+        // From here on it is a real pinch: measure from this moment, so it does not jump.
+        pinching.value = true;
+        base.value = e.scale;
+        start.value = scale.value;
+        sx.value = tx.value;
+        sy.value = ty.value;
+      }
+      const s = Math.min(MAX, Math.max(1, (start.value * e.scale) / base.value));
+      // Keep the spot between your fingers under your fingers:
+      // on screen, a point p of the strip (from the centre) sits at t + s * p.
       const fx = e.focalX - width / 2;
       const fy = e.focalY - height / 2;
       const k = s / start.value;
@@ -59,6 +94,7 @@ export default function ZoomStrip({ width, height, resetKey, children }: { width
       scale.value = s;
     })
     .onEnd(() => {
+      pinching.value = false;
       if (scale.value < 1.08) reset();
     })
     .simultaneousWithExternalGesture(native);
@@ -68,15 +104,24 @@ export default function ZoomStrip({ width, height, resetKey, children }: { width
       sx.value = tx.value;
     })
     .onUpdate((e) => {
-      if (scale.value <= 1.01) return;
+      if (scale.value <= 1.01 || pinching.value) return;
       tx.value = clamp(sx.value + e.translationX, scale.value, width);
     })
     .simultaneousWithExternalGesture(native);
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
-    .maxDuration(260)
-    .onEnd((e) => {
-      if (scale.value > 1.01) return reset();
+    .maxDuration(220)
+    .maxDelay(240)
+    .maxDistance(12)
+    .runOnJS(true)
+    .onEnd((e, ok) => {
+      if (!ok || Date.now() - lastScrollAt.current < STILL_MS) return;
+      if (scale.value > 1.01) {
+        scale.value = withTiming(1, { duration: 180 });
+        tx.value = withTiming(0, { duration: 180 });
+        ty.value = withTiming(0, { duration: 180 });
+        return;
+      }
       const fx = e.x - width / 2;
       const fy = e.y - height / 2;
       scale.value = withTiming(DOUBLE, { duration: 200 });
@@ -85,16 +130,16 @@ export default function ZoomStrip({ width, height, resetKey, children }: { width
     })
     .simultaneousWithExternalGesture(native);
 
-  const style = useAnimatedStyle(() => ({
-    flex: 1,
-    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
-  }));
+  const moveStyle = useAnimatedStyle(() => ({ transform: [{ translateX: tx.value }, { translateY: ty.value }] }));
+  const sizeStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   return (
     <GestureDetector gesture={Gesture.Simultaneous(pinch, pan, doubleTap)}>
       <View style={{ flex: 1, overflow: 'hidden' }} collapsable={false}>
-        <Animated.View style={style}>
-          <GestureDetector gesture={native}>{children}</GestureDetector>
+        <Animated.View style={[{ flex: 1 }, moveStyle]}>
+          <Animated.View style={[{ flex: 1 }, sizeStyle]}>
+            <GestureDetector gesture={native}>{children}</GestureDetector>
+          </Animated.View>
         </Animated.View>
       </View>
     </GestureDetector>
