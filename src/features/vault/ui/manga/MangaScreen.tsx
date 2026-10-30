@@ -2,12 +2,14 @@
  * The Manga section's library: manga, manhwa and comics as a wall of covers.
  * Continue reading at the top, then filters (status, unread, favourites,
  * kind, your keywords), search and sorting. Each cover shows your rating and
- * how many chapters are unread. Hold a cover to select several: rate, set a
- * status, add a keyword, move to Private or delete (Recently Deleted keeps
- * them for the days you chose). Presentational only (see types.ts).
+ * how many chapters are unread. Hold a cover to select several (hold a second
+ * one to pick everything between; All and Invert at the top work on the tab
+ * you are on, and the picks stay while you switch tabs), then Move them to a
+ * status or categories, rate, mark read, download, move to Private or delete
+ * (Recently Deleted keeps them for the days you chose). Presentational only.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions, Alert } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,11 +21,14 @@ import {
   continueReading,
   downloadedCount,
   fmtRating,
+  idsBetween,
+  invertSelection,
   matchesManga,
   nextChapter,
   parseLibraryView,
   progressOf,
   sourceLabel,
+  statusGroups,
   unreadCount,
   viewLibrary,
   type LibraryView,
@@ -39,11 +44,12 @@ import Icon from '../Icon';
 import IconButton from '../IconButton';
 import { enterUp } from '../motion';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
-import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
+import { OptionsSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import Fade from '../Fade';
 import MangaCover from './MangaCover';
+import MoveSheet from './MoveSheet';
 import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
 
 const VIEW_KEY = 'manga.libraryView';
@@ -122,9 +128,21 @@ export default function MangaScreen({
   const [chip, setChip] = useState('all');
   const [inDeleted, setInDeleted] = useState(initialDeleted);
   const [selected, setSelected] = useState<Set<string> | null>(null);
-  const [menu, setMenu] = useState<null | 'add' | 'more' | 'status' | 'deleted-one' | 'download-all'>(null);
+  // The last cover tapped while selecting: holding another picks everything between.
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const [menu, setMenu] = useState<null | 'add' | 'more' | 'move' | 'read' | 'dl' | 'pick-more' | 'deleted-one' | 'download-all'>(null);
   const [rating, setRating] = useState(false);
-  const [tagPrompt, setTagPrompt] = useState(false);
+  // A short note at the bottom after a change, with Undo when it can be taken back.
+  const [note, setNote] = useState<{ text: string; undo?: () => void } | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const say = (text: string, undo?: () => void) => {
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    setNote({ text, undo });
+    noteTimer.current = setTimeout(() => setNote(null), 6000);
+  };
+  useEffect(() => () => {
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+  }, []);
   const [deletedTarget, setDeletedTarget] = useState<MangaUiSeries | null>(null);
 
   const visible = useMemo(() => items.filter((s) => showPrivate || !s.isPrivate), [items, showPrivate]);
@@ -155,13 +173,54 @@ export default function MangaScreen({
   const resume = useMemo(() => (!view.continueRow || query || chip !== 'all' || inDeleted ? [] : continueReading(visible)), [visible, query, chip, inDeleted, view.continueRow]);
 
   const ids = selected ? [...selected] : [];
-  const toggle = (id: string) =>
+  const picked = useMemo(() => (selected ? items.filter((s) => selected.has(s.id)) : []), [items, selected]);
+  const listIds = useMemo(() => list.map((s) => s.id), [list]);
+  const shownPicked = selected ? listIds.filter((id) => selected.has(id)).length : 0;
+  const allShownPicked = listIds.length > 0 && shownPicked === listIds.length;
+  const titles = (n: number) => `${n} ${n === 1 ? 'title' : 'titles'}`;
+  const endSelect = () => {
+    setSelected(null);
+    setAnchor(null);
+  };
+  const toggle = (id: string) => {
+    setAnchor(id);
     setSelected((s) => {
       const n = new Set(s ?? []);
       if (n.has(id)) n.delete(id);
       else n.add(id);
       return n;
     });
+  };
+  /** Hold a second cover: it and everything between it and the last one tapped. */
+  const pickRange = (id: string) => {
+    const range = anchor ? idsBetween(listIds, anchor, id) : [id];
+    setAnchor(id);
+    setSelected((s) => new Set([...(s ?? []), ...(range.length ? range : [id])]));
+  };
+  const moveTo = (status: MangaStatus | null) => {
+    const before = statusGroups(picked);
+    const n = picked.length;
+    const label = status ? MANGA_STATUSES.find((x) => x.key === status)?.label : 'No status';
+    actions
+      .update(ids, { status })
+      .then(() =>
+        say(`Moved ${titles(n)} to ${label}`, () => {
+          Promise.all(before.map((g) => actions.update(g.ids, { status: g.status }))).catch(failed);
+          say('Moved back');
+        })
+      )
+      .catch(failed);
+    setMenu(null);
+    endSelect();
+  };
+  const chapterIds = (read: boolean) => picked.flatMap((s) => s.chapters.filter((c) => (c.readAt !== null) !== read).map((c) => c.id));
+  const canDownload = picked.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:'));
+  const downloadPicked = async (which: 'all' | 'unread') => {
+    let n = 0;
+    for (const id of ids) n += await actions.download(id, which).catch(() => 0);
+    say(n ? `${n} chapters added to Downloads` : 'Nothing new to download for these');
+    endSelect();
+  };
 
   const addOptions: OptionItem[] = [
     { label: 'From Files', hint: 'CBZ, ZIP, PDF or pictures', onPress: () => actions.importFiles().catch(failed) },
@@ -179,14 +238,45 @@ export default function MangaScreen({
     { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
     ...(items.some((s) => s.sourceId?.startsWith('tachi:') || /^server:[^:]+:library$/.test(s.sourceId ?? '')) ? [{ label: 'Find backup titles', hint: 'On your Suwayomi server, extensions or MangaDex; fixes linked ones too', onPress: () => actions.autoLink().catch(failed) }] : []),
-    { label: 'Select', onPress: () => setSelected(new Set()) },
+    { label: 'Select', hint: 'Pick titles to move, rate or mark read', onPress: () => setSelected(new Set()) },
+    { label: 'Select all', hint: chip === 'all' ? 'Every title in the library' : `Every title in ${active.label.replace(/^# /, '')}`, onPress: () => setSelected(new Set(list.map((x) => x.id))) },
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
   ];
 
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
-      {/* Tachimanga's header: the title, Filter, and a pill with Search and More. */}
+      {/* While picking: how many, and All / Invert for the tab you are on. */}
+      {selected ? (
+        <View>
+          <View style={styles.titleRow}>
+            <TouchableOpacity style={styles.round} onPress={endSelect} accessibilityLabel="Stop selecting">
+              <Icon name="close" size={20} color={p.text} />
+            </TouchableOpacity>
+            <Text style={[styles.title, { fontSize: 28 }]} numberOfLines={1}>
+              {ids.length} selected
+            </Text>
+            <View style={styles.pill}>
+              <TouchableOpacity
+                style={styles.pillText}
+                onPress={() => {
+                  tick();
+                  setSelected((s) => {
+                    const n = new Set(s ?? []);
+                    for (const id of listIds) allShownPicked ? n.delete(id) : n.add(id);
+                    return n;
+                  });
+                }}
+                accessibilityLabel={allShownPicked ? 'Unselect this tab' : 'Select everything in this tab'}>
+                <Text style={styles.pillLabel}>{allShownPicked ? 'Unselect all' : 'Select all'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.hint}>
+            {ids.length && ids.length !== shownPicked ? `${shownPicked} in this tab · ` : ''}Tap to pick · hold another cover to pick all between · switch tabs to add more · Select all picks this tab
+          </Text>
+        </View>
+      ) : (
       <View style={styles.titleRow}>
         <Text style={styles.title} numberOfLines={1}>
           {inDeleted ? 'Deleted' : 'Manga'}
@@ -213,7 +303,8 @@ export default function MangaScreen({
           </TouchableOpacity>
         </View>
       </View>
-      {!inDeleted && (
+      )}
+      {!inDeleted && !selected && (
         <View style={styles.modeRow}>
           <ModeSwitch mode="manga" onChange={onMode} />
         </View>
@@ -259,7 +350,7 @@ export default function MangaScreen({
         </View>
       )}
 
-      {resume.length > 0 && (
+      {resume.length > 0 && !selected && (
         <View style={{ marginTop: 16 }}>
           <Text style={styles.section}>Continue reading</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SIDE, gap: 12 }}>
@@ -368,8 +459,10 @@ export default function MangaScreen({
           const longPress = () => {
             tick();
             if (inDeleted) return;
-            if (!selected) setSelected(new Set([s.id]));
-            else toggle(s.id);
+            if (!selected) {
+              setSelected(new Set([s.id]));
+              setAnchor(s.id);
+            } else pickRange(s.id);
           };
           const label = `${s.title}${unread ? `, ${unread} unread` : ''}`;
 
@@ -404,7 +497,7 @@ export default function MangaScreen({
 
           return (
             <TouchableOpacity style={{ width: tileW }} onPress={press} onLongPress={longPress} accessibilityLabel={label}>
-              <View style={sel ? styles.tileSel : undefined}>
+              <View>
                 <MangaCover series={s} width={tileW} radius={small ? 10 : 14} bare />
                 {/* The title on the cover, over a dark fade (Tachimanga's look). */}
                 <Fade color="0,0,0" from={0} to={0.85} style={[styles.tileFade, small && { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }]} />
@@ -434,6 +527,7 @@ export default function MangaScreen({
                     <Text style={styles.ratingBadgeText}>★ {fmtRating(s.rating)}</Text>
                   </View>
                 )}
+                {sel && <View style={[styles.selRing, { borderRadius: small ? 10 : 14 }]} pointerEvents="none" />}
                 {selected && (
                   <View style={[styles.check, sel && styles.checkOn]}>{sel && <Icon name="check" size={12} color="#fff" weight="bold" />}</View>
                 )}
@@ -450,44 +544,49 @@ export default function MangaScreen({
 
       {selected && (
         <Animated.View entering={FadeInDown} exiting={FadeOut} style={[styles.selectBar, { bottom: tabSpace + 10 }]}>
-          <Text style={styles.selectCount}>{ids.length} selected</Text>
-          <TouchableOpacity disabled={!ids.length} onPress={() => setRating(true)} style={styles.selectBtn}>
-            <Text style={styles.selectBtnText}>Rate</Text>
-          </TouchableOpacity>
-          <TouchableOpacity disabled={!ids.length} onPress={() => setMenu('status')} style={styles.selectBtn}>
-            <Text style={styles.selectBtnText}>Status</Text>
-          </TouchableOpacity>
-          <TouchableOpacity disabled={!ids.length} onPress={() => setTagPrompt(true)} style={styles.selectBtn}>
-            <Text style={styles.selectBtnText}>#</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            disabled={!ids.length}
-            onPress={() => {
-              actions.update(ids, { isPrivate: true }).catch(() => undefined);
-              setSelected(null);
-            }}
-            style={styles.selectBtn}>
-            <Icon name="lock" size={14} color={p.text} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            disabled={!ids.length}
-            onPress={() =>
-              confirmAction(
-                `Delete ${ids.length} ${ids.length === 1 ? 'title' : 'titles'}?`,
-                'They go to Recently Deleted with their read marks; you can bring them back from there.',
-                () => {
-                  actions.trash(ids).catch(() => undefined);
-                  setSelected(null);
-                },
-                { label: 'Delete', destructive: true }
-              )
-            }
-            style={styles.selectBtn}>
-            <Icon name="trash" size={14} color={p.danger} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setSelected(null)} style={styles.selectBtn}>
-            <Text style={styles.selectBtnText}>Done</Text>
-          </TouchableOpacity>
+          {(
+            [
+              { key: 'move', icon: 'lists', label: 'Move to', onPress: () => setMenu('move'), main: true },
+              { key: 'rate', icon: 'star', label: 'Rate', onPress: () => setRating(true) },
+              { key: 'read', icon: 'checkCircle', label: 'Read', onPress: () => setMenu('read') },
+              ...(canDownload ? [{ key: 'dl', icon: 'import', label: 'Download', onPress: () => setMenu('dl') }] : []),
+              { key: 'more', icon: 'more', label: 'More', onPress: () => setMenu('pick-more') },
+            ] as { key: string; icon: 'lists'; label: string; onPress: () => void; main?: boolean }[]
+          ).map((b) => (
+            <TouchableOpacity
+              key={b.key}
+              disabled={!ids.length && b.key !== 'more'}
+              onPress={() => {
+                tick();
+                b.onPress();
+              }}
+              style={[styles.barBtn, b.main && styles.barMain, !ids.length && b.key !== 'more' && { opacity: 0.4 }]}
+              accessibilityLabel={b.label}>
+              <Icon name={b.icon} size={20} color={b.main ? '#fff' : p.text} />
+              <Text style={[styles.barLabel, b.main && { color: '#fff' }]} numberOfLines={1}>
+                {b.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </Animated.View>
+      )}
+
+      {note && !selected && (
+        <Animated.View entering={FadeInDown} exiting={FadeOut} style={[styles.note, { bottom: tabSpace + 10 }]}>
+          <Text style={styles.noteText} numberOfLines={2}>
+            {note.text}
+          </Text>
+          {note.undo && (
+            <TouchableOpacity
+              onPress={() => {
+                const u = note.undo;
+                setNote(null);
+                u?.();
+              }}
+              hitSlop={8}>
+              <Text style={styles.noteUndo}>Undo</Text>
+            </TouchableOpacity>
+          )}
         </Animated.View>
       )}
 
@@ -507,13 +606,84 @@ export default function MangaScreen({
           onClose={() => setMenu(null)}
         />
       )}
-      {menu === 'status' && (
+      {menu === 'move' && (
+        <MoveSheet
+          picked={picked}
+          tags={tags}
+          onStatus={moveTo}
+          onTag={(t, add) => (add ? actions.addTag(ids, t) : actions.removeTag(ids, t)).catch(failed)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu === 'read' && (
         <OptionsSheet
-          title={`Status of ${ids.length}`}
+          title={titles(ids.length)}
           options={[
-            ...MANGA_STATUSES.map((s) => ({ label: s.label, onPress: () => actions.update(ids, { status: s.key as MangaStatus }).then(() => setSelected(null)) })),
-            { label: 'No status', onPress: () => actions.update(ids, { status: null }).then(() => setSelected(null)) },
+            {
+              label: 'Mark every chapter read',
+              hint: `${chapterIds(false).length} chapters`,
+              onPress: () => {
+                const ch = chapterIds(false);
+                actions.setRead(ch, true).then(() => say(`${ch.length} chapters marked read`, () => actions.setRead(ch, false).catch(failed))).catch(failed);
+                endSelect();
+              },
+            },
+            {
+              label: 'Mark every chapter unread',
+              hint: `${chapterIds(true).length} chapters`,
+              onPress: () => {
+                const ch = chapterIds(true);
+                actions.setRead(ch, false).then(() => say(`${ch.length} chapters marked unread`, () => actions.setRead(ch, true).catch(failed))).catch(failed);
+                endSelect();
+              },
+            },
           ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu === 'dl' && (
+        <OptionsSheet
+          title={`Download for ${titles(ids.length)}`}
+          options={[
+            { label: 'Unread chapters', onPress: () => downloadPicked('unread').catch(failed) },
+            { label: 'Every chapter', onPress: () => downloadPicked('all').catch(failed) },
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu === 'pick-more' && (
+        <OptionsSheet
+          title={titles(ids.length)}
+          options={[
+            {
+              label: 'Invert the selection',
+              hint: 'In this tab',
+              onPress: () => setSelected((s) => invertSelection(listIds, s ?? [])),
+            },
+            {
+              label: 'Move to Private',
+              hint: 'Hidden until Face ID',
+              onPress: () => {
+                actions.update(ids, { isPrivate: true }).catch(failed);
+                endSelect();
+              },
+            },
+            {
+              label: `Delete ${titles(ids.length)}`,
+              danger: true,
+              hint: 'Goes to Recently Deleted',
+              onPress: () =>
+                confirmAction(
+                  `Delete ${titles(ids.length)}?`,
+                  'They go to Recently Deleted with their read marks; you can bring them back from there.',
+                  () => {
+                    actions.trash(ids).catch(failed);
+                    endSelect();
+                  },
+                  { label: 'Delete', destructive: true }
+                ),
+            },
+          ].filter((o, i) => i === 0 || ids.length > 0)}
           onClose={() => setMenu(null)}
         />
       )}
@@ -535,21 +705,10 @@ export default function MangaScreen({
           title={`Rate ${ids.length}`}
           value={null}
           onPick={(r) => {
-            actions.update(ids, { rating: r ?? 0 }).catch(() => undefined);
-            setSelected(null);
+            actions.update(ids, { rating: r ?? 0 }).then(() => say(r ? `Rated ${titles(ids.length)} ${fmtRating(r)}` : 'Rating cleared')).catch(failed);
+            endSelect();
           }}
           onClose={() => setRating(false)}
-        />
-      )}
-      {tagPrompt && (
-        <PromptSheet
-          title="Add a keyword"
-          placeholder="e.g. action, isekai, favourite"
-          onSubmit={(t) => {
-            if (t.trim()) actions.addTag(ids, t.trim()).catch(() => undefined);
-            setSelected(null);
-          }}
-          onClose={() => setTagPrompt(false)}
         />
       )}
     </View>
@@ -591,7 +750,7 @@ const makeStyles = (p: Palette) =>
     rowBadge: { minWidth: 26, height: 24, borderRadius: 8, paddingHorizontal: 7, backgroundColor: '#8BD88E', alignItems: 'center', justifyContent: 'center' },
     dlBadge: { position: 'absolute', top: 8, minWidth: 26, height: 26, borderRadius: 9, paddingHorizontal: 7, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
     dlText2: { color: '#fff', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'] },
-    tileSel: { opacity: 0.6 },
+    tileSel: { backgroundColor: 'rgba(10,132,255,0.15)' },
     tileFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '42%', borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
     tileCaption: { position: 'absolute', left: 12, right: 12, bottom: 11 },
     tileTitle: { color: '#fff', fontSize: 16, fontWeight: '800', lineHeight: 20, letterSpacing: -0.2, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 4 },
@@ -605,10 +764,17 @@ const makeStyles = (p: Palette) =>
     lockBadge: { position: 'absolute', top: 40, right: 8, width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
     check: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },
-    selectBar: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 18, padding: 8, borderWidth: 1, borderColor: p.border },
-    selectCount: { flex: 1, color: p.text, fontSize: 14, fontWeight: '700', paddingLeft: 6 },
-    selectBtn: { backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 10, height: 34, alignItems: 'center', justifyContent: 'center' },
-    selectBtnText: { color: p.text, fontSize: 14, fontWeight: '700' },
+    selectBar: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'stretch', gap: 6, backgroundColor: p.elevated, borderRadius: 22, padding: 6, borderWidth: 1, borderColor: p.border },
+    barBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 16, paddingVertical: 8 },
+    barMain: { flex: 1.4, backgroundColor: p.accent },
+    barLabel: { color: p.text, fontSize: 12, fontWeight: '700' },
+    selRing: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderWidth: 3, borderColor: p.accent, backgroundColor: 'rgba(10,132,255,0.18)' },
+    hint: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE + 4, paddingTop: 8 },
+    pillText: { paddingHorizontal: 12, height: 46, alignItems: 'center', justifyContent: 'center' },
+    pillLabel: { color: p.accent, fontSize: 16, fontWeight: '800' },
+    note: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: p.elevated, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, borderColor: p.border },
+    noteText: { flex: 1, color: p.text, fontSize: 15, fontWeight: '600' },
+    noteUndo: { color: p.accent, fontSize: 16, fontWeight: '800' },
     empty: { alignItems: 'center', paddingHorizontal: 32, paddingTop: 40, gap: 12 },
     emptyIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: p.accentSoft, alignItems: 'center', justifyContent: 'center' },
     emptyTitle: { color: p.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },

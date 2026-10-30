@@ -720,3 +720,36 @@ export function beyondNext(series: MangaSeries[], waiting: { seriesId: string; c
   for (const s of series) if (wanted.has(s.id)) for (const id of chaptersFromHere(s, keep)) keepIds.add(id);
   return waiting.filter((w) => wanted.has(w.seriesId) && !keepIds.has(w.chapterId)).map((w) => w.chapterId);
 }
+
+/* ---------------------------------------------------------- selecting many */
+
+/** Every id between two covers in the list as it shows (both included, either order). */
+export function idsBetween(listIds: string[], from: string, to: string): string[] {
+  const a = listIds.indexOf(from);
+  const b = listIds.indexOf(to);
+  if (a < 0 || b < 0) return b >= 0 ? [to] : [];
+  return listIds.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+/** The covers shown that are not picked yet, plus the picked ones from other tabs. */
+export function invertSelection(listIds: string[], selected: Iterable<string>): Set<string> {
+  const shown = new Set(listIds);
+  const out = new Set<string>();
+  for (const id of selected) if (!shown.has(id)) out.add(id);
+  const had = new Set(selected);
+  for (const id of listIds) if (!had.has(id)) out.add(id);
+  return out;
+}
+
+/** How many of the picked titles have this keyword (category): all, some or none. */
+export function tagState(series: Pick<MangaSeries, 'tags'>[], tag: string): { has: number; state: 'all' | 'some' | 'none' } {
+  const has = series.filter((s) => s.tags.includes(tag)).length;
+  return { has, state: !has ? 'none' : has === series.length ? 'all' : 'some' };
+}
+
+/** The picked titles grouped by the status they had, so a move can be taken back. */
+export function statusGroups(series: Pick<MangaSeries, 'id' | 'status'>[]): { status: MangaStatus | null; ids: string[] }[] {
+  const m = new Map<MangaStatus | null, string[]>();
+  for (const s of series) m.set(s.status, [...(m.get(s.status) ?? []), s.id]);
+  return [...m.entries()].map(([status, ids]) => ({ status, ids }));
+}

@@ -1,7 +1,8 @@
 /**
  * The reader. Four ways to read: right to left (manga), left to right
- * (comics), vertical pages, or one long webtoon strip. Pinch a page to zoom
- * (paged modes), tap the sides to turn pages (left = forward in manga), tap
+ * (comics), vertical pages, or one long webtoon strip. Pinch to zoom in
+ * every mode (in the strip also double-tap, and drag sideways while zoomed;
+ * see ZoomStrip), tap the sides to turn pages (left = forward in manga), tap
  * the middle for the controls: the chapter, how it reads, a page slider and
  * the chapters before and after. The page you are on is saved as you go;
  * reaching the last page marks the chapter read, and the end of a chapter
@@ -51,6 +52,7 @@ import Icon from '../Icon';
 import { OptionsSheet } from '../prompts';
 import { usePalette } from '../theme';
 import type { MangaActions, MangaUiSeries } from './mangaTypes';
+import ZoomStrip from './ZoomStrip';
 
 const END = '__end__';
 
@@ -716,6 +718,7 @@ export default function MangaReader({
             </TouchableOpacity>
           </View>
         ) : mode === 'webtoon' ? (
+          <ZoomStrip width={W} height={H} resetKey={chapter.id}>
           <FlatList
             key={`strip:${chapter.id}`}
             ref={listRef}
@@ -741,6 +744,7 @@ export default function MangaReader({
               setAuto(false);
             }}
           />
+          </ZoomStrip>
         ) : (
           <FlatList
             key={`paged:${chapter.id}:${mode}:${W}:${spread}`}
