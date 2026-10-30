@@ -62,6 +62,7 @@ import {
   listDownloads,
   queueDownloads,
   retryDownloads,
+  orderDownloads,
   deleteChapterRows,
   deleteSeriesRows,
   expiredSeries,
@@ -167,14 +168,28 @@ export function useMangaData(): MangaData {
     setDownloads({ queue: queue.map((q) => ({ chapterId: q.chapterId, seriesId: q.seriesId, state: q.state, error: q.error })), current: downloadProgress(), paused: downloadsPaused(), waitingWifi: waitingForWifi(), canTellWifi });
   }, []);
   useEffect(() => {
-    const off = subscribeDownloads(() => {
-      loadDownloads().catch(() => undefined);
+    const off = subscribeDownloads((progress) => {
+      // A page came in: only the counter changes (reading 3,000 queue rows for it made the app stutter).
+      if (progress) setDownloads((d) => ({ ...d, current: downloadProgress() }));
+      else loadDownloads().catch(() => undefined);
     });
+    // Finished chapters show up a few at a time, not one redraw of the library each.
+    const done = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | null = null;
     startDownloads(() => prefsRef.current, (id) => {
-      refreshOne(id).catch(() => undefined);
+      done.add(id);
+      timer ??= setTimeout(() => {
+        timer = null;
+        const ids = [...done];
+        done.clear();
+        for (const x of ids) refreshOne(x).catch(() => undefined);
+      }, 4000);
     });
     loadDownloads().catch(() => undefined);
-    return off;
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
   }, [loadDownloads, refreshOne]);
 
   useEffect(() => {
@@ -535,6 +550,10 @@ export function useMangaData(): MangaData {
       cancelDownloads: async (ids) => {
         await cancelDownloads(ids);
         forgetDownloads(ids);
+        await loadDownloads();
+      },
+      orderDownloads: async (ids) => {
+        await orderDownloads(ids);
         await loadDownloads();
       },
       retryDownloads: async () => {

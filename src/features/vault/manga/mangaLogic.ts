@@ -545,6 +545,13 @@ export function nextUnread(chapters: Pick<MangaChapter, 'id' | 'readAt'>[], coun
  * average of everything downloaded. Null until something is downloaded.
  */
 export function downloadSizeLeft(series: { id: string; chapters: Pick<MangaChapter, 'id' | 'size' | 'pageCount' | 'downloaded'>[] }[], waiting: { seriesId: string; chapterId: string }[]): number | null {
+  return sizeLeftWith(chapterSizes(series), waiting);
+}
+
+type ChapterSizes = { overall: number | null; perSeries: Map<string, number> };
+
+/** The average downloaded chapter, per title and overall (worked out once, used for many estimates). */
+function chapterSizes(series: { id: string; chapters: Pick<MangaChapter, 'size' | 'downloaded'>[] }[]): ChapterSizes {
   let allBytes = 0;
   let allCount = 0;
   const perSeries = new Map<string, number>();
@@ -560,9 +567,79 @@ export function downloadSizeLeft(series: { id: string; chapters: Pick<MangaChapt
     allBytes += bytes;
     allCount += count;
   }
-  if (!allCount) return null;
-  const overall = allBytes / allCount;
+  return { overall: allCount ? allBytes / allCount : null, perSeries };
+}
+
+function sizeLeftWith(sizes: ChapterSizes, waiting: { seriesId: string }[]): number | null {
+  if (sizes.overall === null) return null;
   let left = 0;
-  for (const w of waiting) left += perSeries.get(w.seriesId) ?? overall;
+  for (const w of waiting) left += sizes.perSeries.get(w.seriesId) ?? sizes.overall;
   return Math.round(left);
+}
+
+/** The `count` chapters to read next, from where you are (a part-read one, else after the last one read). */
+export function chaptersFromHere(s: Pick<MangaSeries, 'chapters'>, count: number): string[] {
+  const start = nextChapter(s);
+  const from = start ? s.chapters.indexOf(start) : 0;
+  return s.chapters
+    .slice(Math.max(0, from))
+    .filter((c) => !isRead(c))
+    .slice(0, Math.max(0, count))
+    .map((c) => c.id);
+}
+
+export type QueueTitle = {
+  seriesId: string;
+  title: string;
+  /** Its waiting chapters, in queue order. */
+  chapterIds: string[];
+  /** Chapters the title has in all. */
+  chapterCount: number;
+  /** You have started it (read a chapter or part of one). */
+  reading: boolean;
+  /** Estimated size of its waiting chapters; null when nothing is downloaded yet. */
+  bytes: number | null;
+};
+
+/** The waiting downloads, one entry per title. */
+export function queueByTitle(series: MangaSeries[], waiting: { seriesId: string; chapterId: string }[]): QueueTitle[] {
+  const byId = new Map(series.map((s) => [s.id, s]));
+  const out = new Map<string, QueueTitle>();
+  for (const w of waiting) {
+    let t = out.get(w.seriesId);
+    if (!t) {
+      const s = byId.get(w.seriesId);
+      t = {
+        seriesId: w.seriesId,
+        title: s?.title ?? 'A title',
+        chapterIds: [],
+        chapterCount: s?.chapters.length ?? 0,
+        reading: !!s?.chapters.some((c) => isRead(c) || c.lastPage > 0),
+        bytes: null,
+      };
+      out.set(w.seriesId, t);
+    }
+    t.chapterIds.push(w.chapterId);
+  }
+  const list = [...out.values()];
+  const sizes = chapterSizes(series);
+  for (const t of list) t.bytes = sizeLeftWith(sizes, t.chapterIds.map(() => ({ seriesId: t.seriesId })));
+  return list;
+}
+
+/** The queue with these titles moved to the front (in the order given); everything else keeps its place. */
+export function queueWithFirst(waiting: { seriesId: string; chapterId: string }[], firstSeries: string[]): string[] {
+  const rank = new Map(firstSeries.map((id, i) => [id, i]));
+  return waiting
+    .map((w, i) => ({ w, i, r: rank.get(w.seriesId) ?? Infinity }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.w.chapterId);
+}
+
+/** Waiting chapters of these titles that are not among the next `keep` from where you are: the ones to cancel. */
+export function beyondNext(series: MangaSeries[], waiting: { seriesId: string; chapterId: string }[], seriesIds: string[], keep: number): string[] {
+  const wanted = new Set(seriesIds);
+  const keepIds = new Set<string>();
+  for (const s of series) if (wanted.has(s.id)) for (const id of chaptersFromHere(s, keep)) keepIds.add(id);
+  return waiting.filter((w) => wanted.has(w.seriesId) && !keepIds.has(w.chapterId)).map((w) => w.chapterId);
 }

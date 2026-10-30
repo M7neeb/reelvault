@@ -208,7 +208,7 @@ export default function EditorModal({
   const freeAxis = crop ? (crop.w < 0.999 && crop.h < 0.999 ? 'both' : crop.w < 0.999 ? 'x' : crop.h < 0.999 ? 'y' : 'none') : 'none';
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible edgeBack={false} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={[styles.screen, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} disabled={running !== null} style={styles.headerBtn}>

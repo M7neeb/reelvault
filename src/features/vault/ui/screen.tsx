@@ -12,6 +12,9 @@
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Modal as RNModal, Platform, useWindowDimensions as useRNWindow, View, type ModalProps, type StyleProp, type ViewStyle } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePalette } from './theme';
@@ -42,7 +45,7 @@ export function SideSafe({ children, style }: { children: ReactNode; style?: Sty
  * side margins; see-through ones (sheets, players) and `fullBleed` ones lay
  * themselves out.
  */
-export function Modal({ children, fullBleed, ...props }: ModalProps & { fullBleed?: boolean }) {
+export function Modal({ children, fullBleed, ...props }: ModalProps & { fullBleed?: boolean; edgeBack?: boolean }) {
   return <GatedModal {...props}>{props.transparent || fullBleed ? children : <SideSafe>{children}</SideSafe>}</GatedModal>;
 }
 
@@ -65,8 +68,45 @@ export function afterModals(job: () => void): void {
   }, 60);
 }
 
-/** React Native's Modal, turning with the phone, that waits its turn (see above). */
-export function GatedModal({ visible = true, ...props }: ModalProps) {
+/** Where a swipe back has to start: this close to the left edge. */
+const EDGE = 28;
+
+/**
+ * Swipe right from the left edge to go back, like iOS pages: the page follows
+ * your finger and closes past a third of the screen (or with a quick flick).
+ * Only a drag that starts at the very edge counts, so taps and the page's own
+ * swipes elsewhere are untouched.
+ */
+export function EdgeBack({ onBack, children }: { onBack: () => void; children: ReactNode }) {
+  const { width } = useRNWindow();
+  const x = useSharedValue(0);
+  const pan = Gesture.Pan()
+    .hitSlop({ left: 0, width: EDGE })
+    .activeOffsetX(12)
+    .failOffsetY([-18, 18])
+    .onUpdate((e) => {
+      'worklet';
+      x.value = Math.max(0, e.translationX);
+    })
+    .onEnd((e) => {
+      'worklet';
+      if (e.translationX > width / 3 || (e.velocityX > 700 && e.translationX > 40)) {
+        x.value = withTiming(width, { duration: 160 });
+        scheduleOnRN(onBack);
+      } else x.value = withSpring(0, { damping: 22, stiffness: 260 });
+    });
+  const style = useAnimatedStyle(() => ({ flex: 1, transform: [{ translateX: x.value }], opacity: 1 - Math.min(0.35, x.value / (width * 2)) }));
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={style}>{children}</Animated.View>
+      </GestureDetector>
+    </GestureHandlerRootView>
+  );
+}
+
+/** React Native's Modal, turning with the phone, that waits its turn (see above). Full-screen pages close with a swipe from the left edge (`edgeBack={false}` turns it off). */
+export function GatedModal({ visible = true, edgeBack = true, children, ...props }: ModalProps & { edgeBack?: boolean }) {
   const [shown, setShown] = useState(false);
   const wasShown = useRef(false);
   useLayoutEffect(() => {
@@ -96,5 +136,11 @@ export function GatedModal({ visible = true, ...props }: ModalProps) {
     },
     []
   );
-  return <RNModal supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']} {...props} visible={shown} />;
+  // Sheets close with a swipe down already; see-through ones are overlays.
+  const swipeBack = edgeBack && !props.transparent && props.presentationStyle !== 'pageSheet' && props.presentationStyle !== 'formSheet' && !!props.onRequestClose;
+  return (
+    <RNModal supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']} {...props} visible={shown}>
+      {swipeBack ? <EdgeBack onBack={() => props.onRequestClose?.({} as never)}>{children}</EdgeBack> : children}
+    </RNModal>
+  );
 }

@@ -869,7 +869,12 @@ function ViewerPage({
               <Animated.View style={[fill, rowStyle]}>
                 {prev && <Image source={prev.thumbSource} style={[styles.neighbour, { left: -(W + PAGE_GAP), width: W }]} contentFit="contain" />}
                 {/* Ambient: a soft glow of the video's own colours around it (it follows the film strip). */}
-                {opts.ambient && !fillScreen && <Backdrop source={ambientSource} dim={chrome ? 0.38 : 0.55} blur={70} style={{ backgroundColor: 'transparent' }} />}
+                {/* Focused (a tap hid the controls): the video alone on black, no glow. */}
+                {opts.ambient && !fillScreen && chrome && (
+                  <Animated.View style={fill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.base)} pointerEvents="none">
+                    <Backdrop source={ambientSource} dim={0.38} blur={70} style={{ backgroundColor: 'transparent' }} />
+                  </Animated.View>
+                )}
                 {enableVideo ? (
                   <VideoView
                     ref={videoRef}

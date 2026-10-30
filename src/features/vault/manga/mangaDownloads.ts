@@ -15,7 +15,7 @@ import { ReelVaultWifi } from '../../../../modules/reelvault-wifi';
 import { chapterFolderFor, dirOf, fileIn, removeDir } from './mangaFiles';
 import { pageFileName } from './mangaLogic';
 import { pagesOf } from './mangaSources';
-import { failDownload, finishDownload, getSeries, listDownloads, setChapterFiles, type DownloadRow } from './mangaStore';
+import { failDownload, finishDownload, getSeries, isQueued, listDownloads, nextDownload, setChapterFiles, type DownloadRow } from './mangaStore';
 import type { BrowsePrefs } from './sources/prefs';
 
 /** Space kept free on the phone. */
@@ -23,7 +23,8 @@ const RESERVE = 400 * 1024 * 1024;
 
 export type DownloadProgress = { chapterId: string; seriesId: string; done: number; total: number } | null;
 
-type Listener = () => void;
+/** `progress`: only the page count of the chapter downloading moved (the queue is the same). */
+type Listener = (progress: boolean) => void;
 
 const listeners = new Set<Listener>();
 let getPrefs: () => BrowsePrefs = () => {
@@ -37,11 +38,17 @@ let lastEmit = 0;
 /** The chapter being downloaded was cancelled or deleted: stop it. */
 let dropped: string | null = null;
 
-const emit = (force = false) => {
+/** The queue changed (or something about it): listeners read it again. */
+const emit = (_force = true) => {
+  lastEmit = Date.now();
+  for (const l of listeners) l(false);
+};
+/** Only the page count moved: at most once a second, and nobody has to read the queue for it. */
+const emitProgress = () => {
   const now = Date.now();
-  if (!force && now - lastEmit < 400) return;
+  if (now - lastEmit < 1000) return;
   lastEmit = now;
-  for (const l of listeners) l();
+  for (const l of listeners) l(true);
 };
 
 export function subscribeDownloads(l: Listener): () => void {
@@ -180,7 +187,7 @@ async function downloadOne(row: DownloadRow): Promise<void> {
         names[i] = name;
         done++;
         current = { chapterId: chapter.id, seriesId: series.id, done, total: pages.length };
-        emit();
+        emitProgress();
       }
     };
     const results = await Promise.allSettled(Array.from({ length: prefs.parallel ?? 3 }, () => worker()));
@@ -191,7 +198,7 @@ async function downloadOne(row: DownloadRow): Promise<void> {
     }
   }
   // Cancelled while the last pages came in: keep nothing.
-  if (!(await listDownloads()).some((r) => r.chapterId === chapter.id)) {
+  if (!(await isQueued(chapter.id))) {
     removeDir(folder);
     return;
   }
@@ -212,7 +219,7 @@ export function kickDownloads(): void {
           emit(true);
           break;
         }
-        const next = (await listDownloads()).find((r) => r.state === 'queued');
+        const next = await nextDownload();
         if (!next) break;
         try {
           await downloadOne(next);

@@ -1119,12 +1119,13 @@ function VaultScreenBody({
     tick();
     actions.setPrefs({ ...prefs, pinned: prefs.pinned.filter((x) => x !== id) }).catch(fail('PREFS'));
   };
-  const gridOptions: ViewOptions =
+  // Kept the same object between renders so the grid's tiles can skip redrawing.
+  const gridOptions: ViewOptions = useMemo(() =>
     look === 'simple'
       ? { ...viewOptions, layout: 'grid', size: 'xlarge', infos: [], showRating: false, showKeywords: false, groupBy: 'none' }
       : look === 'compact'
         ? { ...viewOptions, layout: 'grid', size: 'small', infos: [], showRating: false, showKeywords: false }
-        : viewOptions;
+        : viewOptions, [look, viewOptions]);
 
   const videosMode = prefs.videosMode;
   function switchMode(m: VaultPrefs['videosMode']) {
