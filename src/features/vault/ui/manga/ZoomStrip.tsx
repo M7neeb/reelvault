@@ -13,10 +13,12 @@
  * applies transforms in.
  */
 
-import { useEffect, type ReactElement } from 'react';
+import { useContext, useEffect, type ReactElement } from 'react';
 import { View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+
+import { EdgeBackGesture } from '../screen';
 
 const MAX = 4;
 const DOUBLE = 2.2;
@@ -69,6 +71,9 @@ export default function ZoomStrip({
 
   // The strip's own scrolling keeps working alongside the zoom gestures.
   const native = Gesture.Native();
+  // ...and so does the swipe from the left edge that closes the reader.
+  const edge = useContext(EdgeBackGesture);
+  if (edge) native.simultaneousWithExternalGesture(edge);
   const pinch = Gesture.Pinch()
     .onStart(() => {
       pinching.value = false;
@@ -98,8 +103,15 @@ export default function ZoomStrip({
       if (scale.value < 1.08) reset();
     })
     .simultaneousWithExternalGesture(native);
+  // Only takes the finger while zoomed in; otherwise it steps aside at once, so the
+  // swipe from the left edge still closes the reader.
   const pan = Gesture.Pan()
     .maxPointers(1)
+    .manualActivation(true)
+    .onTouchesMove((_e, state) => {
+      if (scale.value > 1.01 && !pinching.value) state.activate();
+      else state.fail();
+    })
     .onStart(() => {
       sx.value = tx.value;
     })

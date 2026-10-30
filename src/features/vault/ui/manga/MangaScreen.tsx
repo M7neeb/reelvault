@@ -637,10 +637,11 @@ export default function MangaScreen({
             if (chip === key) setChip(to);
             actions.renameTag(key.slice(1), name).catch(failed);
           }}
-          onDelete={(key) => {
-            changeTabs({ ...tabPrefs, order: tabPrefs.order.filter((k) => k !== key), hidden: tabPrefs.hidden.filter((k) => k !== key), extra: tabPrefs.extra.filter((t) => `#${t}` !== key) });
-            if (chip === key) setChip('all');
-            actions.deleteTag(key.slice(1)).catch(failed);
+          onDelete={(keys) => {
+            const gone = new Set(keys);
+            changeTabs({ ...tabPrefs, order: tabPrefs.order.filter((k) => !gone.has(k)), hidden: tabPrefs.hidden.filter((k) => !gone.has(k)), extra: tabPrefs.extra.filter((t) => !gone.has(`#${t}`)) });
+            if (gone.has(chip)) setChip('all');
+            actions.deleteTag(keys.map((k) => k.slice(1))).catch(failed);
           }}
           onAdd={(name) => {
             const t = name.replace(/^#/, '').trim();

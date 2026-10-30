@@ -10,7 +10,7 @@
  * Upright, nothing changes.
  */
 
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Modal as RNModal, Platform, useWindowDimensions as useRNWindow, View, type ModalProps, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
@@ -68,6 +68,13 @@ export function afterModals(job: () => void): void {
   }, 60);
 }
 
+/**
+ * The swipe-back gesture of the page around you, for a scroll view inside that
+ * tells the gesture system about itself (the manga strip's zoom): it lets the
+ * two run together, so its scrolling does not cancel the swipe back.
+ */
+export const EdgeBackGesture = createContext<ReturnType<typeof Gesture.Pan> | null>(null);
+
 /** Where a swipe back has to start: this close to the left edge. */
 const EDGE = 28;
 
@@ -99,7 +106,9 @@ export function EdgeBack({ onBack, children }: { onBack: () => void; children: R
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
       <GestureDetector gesture={pan}>
-        <Animated.View style={style}>{children}</Animated.View>
+        <Animated.View style={style}>
+          <EdgeBackGesture.Provider value={pan}>{children}</EdgeBackGesture.Provider>
+        </Animated.View>
       </GestureDetector>
     </GestureHandlerRootView>
   );
