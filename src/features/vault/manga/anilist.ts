@@ -69,6 +69,19 @@ export async function searchAniList(q: string): Promise<AniMedia[]> {
   return (data?.Page?.media ?? []).map(parseMedia).filter((m: AniMedia | null): m is AniMedia => !!m);
 }
 
+/** Covers for a title, with every name AniList knows it by (for matching a title by name). */
+export async function aniListCoverSearch(q: string): Promise<{ titles: string[]; cover: string }[]> {
+  const data = await gql(`query ($q: String) { Page(perPage: 6) { media(search: $q, type: MANGA, sort: SEARCH_MATCH) { title { romaji english native } synonyms coverImage { extraLarge large } } } }`, { q });
+  const out: { titles: string[]; cover: string }[] = [];
+  for (const m of data?.Page?.media ?? []) {
+    const cover = m?.coverImage?.extraLarge ?? m?.coverImage?.large;
+    if (!cover) continue;
+    const titles = [m.title?.english, m.title?.romaji, m.title?.native, ...(m.synonyms ?? [])].filter((t: unknown): t is string => typeof t === 'string' && !!t);
+    out.push({ titles, cover });
+  }
+  return out;
+}
+
 export async function aniListDetails(id: number): Promise<AniDetails & { media: AniMedia | null }> {
   const data = await gql(
     `query ($id: Int) { Media(id: $id, type: MANGA) { ${MEDIA} description(asHtml: false) genres staff(perPage: 6) { edges { role node { name { full } } } } } }`,
