@@ -83,7 +83,7 @@ import {
   setFakePasscode,
   setPasscode,
 } from '@/features/vault/security';
-import { duplicateVideo, extractFrame, shareFile } from '@/features/vault/share';
+import { canSaveSound, duplicateVideo, extractFrame, saveSoundToAudio, shareFile, videoChapters } from '@/features/vault/share';
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
 import { canChooseStrength, cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
 import { planForQuality } from '@/features/vault/edit';
@@ -148,6 +148,8 @@ import { frozenTimes } from '@/features/vault/streakFreeze';
 import { applyMetadata, pickMetadataFile } from '@/features/vault/metaImport';
 import { clearPasscodeLog, logPasscodeAttempt, passcodeLog } from '@/features/vault/passcodeLog';
 import { wifiBridge } from '@/features/vault/wifi';
+import { useInside, type InsideProgress } from '@/features/vault/scenes';
+import type { SceneRow } from '@/features/vault/sceneLogic';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -254,6 +256,12 @@ function readFreeGb(): number | null {
 
 export type VaultData = {
   items: VaultItem[];
+  /** Picture fingerprints by video id (app build 18 on), for Similar. */
+  prints: Map<string, string[]>;
+  /** What the phone saw inside the videos, for search. */
+  sceneRows: SceneRow[];
+  /** How far the look inside your videos has got (null before it starts). */
+  insideProgress: InsideProgress | null;
   deletedItems: VaultItem[];
   duplicateGroups: string[][];
   smartFilters: SmartFilter[];
@@ -313,8 +321,9 @@ function parsePlayer(r: unknown): PlayerOptions {
   const d = DEFAULT_PLAYER;
   const bool = (v: unknown, def: boolean) => (typeof v === 'boolean' ? v : def);
   return {
-    autoplayNext: bool(o.autoplayNext, d.autoplayNext),
-    loop: bool(o.loop, d.loop),
+    // The end-of-video choice is new (loop by default): settings saved before it ("loop") start on Loop.
+    autoplayNext: 'endLoop' in o ? bool(o.autoplayNext, d.autoplayNext) : d.autoplayNext,
+    endLoop: bool(o.endLoop, d.endLoop),
     speed: typeof o.speed === 'number' && (PLAYER_SPEEDS as readonly number[]).includes(o.speed) ? o.speed : d.speed,
     ambient: bool(o.ambient, d.ambient),
     remaining: bool(o.remaining, d.remaining),
@@ -367,6 +376,7 @@ function parsePrefs(json: string | null): VaultPrefs {
       },
       gridPreview: r?.gridPreview === true,
       skipIntro: parseSkipIntro(r?.skipIntro),
+      customOrder: Array.isArray(r?.customOrder) ? [...new Set<string>(r.customOrder.filter((x: unknown) => typeof x === 'string'))].slice(0, 50_000) : [],
     };
   } catch {
     return DEFAULT_VAULT_PREFS;
@@ -415,7 +425,7 @@ export function useVaultData(): VaultData {
   }, []);
 
   // Sorts by plays are done in the UI; the database lists those newest first.
-  const sqlSort = (s: ViewOptions['sort']): SortKey => (WATCH_SORTS.includes(s) ? 'recent' : (s as SortKey));
+  const sqlSort = (s: ViewOptions['sort']): SortKey => (WATCH_SORTS.includes(s) || s === 'custom' ? 'recent' : (s as SortKey));
   const videosRef = useRef<Video[]>([]);
   videosRef.current = videos;
   const sortRef = useRef<SortKey>(sqlSort(viewOptions.sort));
@@ -893,6 +903,16 @@ export function useVaultData(): VaultData {
         const v = byId(item.id);
         if (v) await extractFrame(v, timeMs);
       },
+      canSaveSound,
+      onSaveSound: async (item) => {
+        const v = byId(item.id);
+        if (!v) throw new Error('That video is gone');
+        return saveSoundToAudio(v);
+      },
+      loadChapters: async (item) => {
+        const v = byId(item.id);
+        return v ? videoChapters(v) : [];
+      },
       onDuplicate: async (item) => {
         const v = byId(item.id);
         if (v) await duplicateVideo(v);
@@ -1118,8 +1138,13 @@ export function useVaultData(): VaultData {
     [onImport, onImportFolder, onImportLink, runImport, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
   );
 
+  const inside = useInside(videos, true);
+
   return {
     items,
+    prints: inside.prints,
+    sceneRows: inside.rows,
+    insideProgress: inside.progress,
     deletedItems,
     duplicateGroups,
     smartFilters,

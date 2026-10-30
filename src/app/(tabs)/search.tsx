@@ -19,6 +19,8 @@ import { TAB_BAR_HEIGHT, TabBarSpace } from '@/features/vault/ui/chrome';
 import { SideSafe } from '@/features/vault/ui/screen';
 import { ThemeContext } from '@/features/vault/ui/theme';
 import { resumeSavedAt } from '@/features/vault/watching';
+import { findScenes } from '@/features/vault/sceneLogic';
+import { fmtClock } from '@/features/vault/stats';
 
 const RECENT_KEY = 'search.recent';
 
@@ -86,14 +88,38 @@ export default function SearchRoute() {
     const mangaThumb = new Map(manga.items.map((m) => [m.id, m.coverSource]));
     const posters = new Map(simkl.items.map((t) => [t.simklId, t.poster]));
     const resume = [...vault.resume].map(([id, ms]) => ({ id, ms, at: resumeSavedAt(id) }));
+    // Moments inside your videos: "scene:<video id>:<ms>" so opening one starts there.
+    const shownVideos = new Map(vault.items.filter((v) => !v.isPrivate && !v.deletedAt).map((v) => [v.id, v]));
+    const scenes = (q: string) =>
+      findScenes(vault.sceneRows.filter((r) => shownVideos.has(r.videoId)), q, 20).map((h, n) => {
+        const v = shownVideos.get(h.videoId)!;
+        return {
+          kind: 'video' as const,
+          id: `scene:${h.videoId}:${h.atMs}`,
+          title: v.title?.trim() || v.filename,
+          sub: `Inside: ${h.why} · at ${fmtClock(h.atMs)}`,
+          score: 0.5 - n * 0.01,
+          rating: v.rating,
+          exact: true,
+        };
+      });
+    const sceneOf = (id: string) => {
+      const m = id.match(/^scene:(.+):(\d+)$/);
+      return m ? { id: m[1], atMs: Number(m[2]) } : null;
+    };
     return {
-      find: (q) => findEverything(q, input),
+      find: (q) => {
+        const found = findEverything(q, input);
+        const titles = new Set(found.filter((f) => f.kind === 'video').map((f) => f.id));
+        return [...found, ...scenes(q).filter((s) => !titles.has(sceneOf(s.id)!.id))];
+      },
       jump: jumpBackIn({ ...input, resume }),
-      thumb: (kind, id) => (kind === 'video' ? videoThumb.get(id) : kind === 'manga' ? mangaThumb.get(id) : audioThumb.get(id)) ?? null,
+      thumb: (kind, id) => (kind === 'video' ? videoThumb.get(sceneOf(id)?.id ?? id) : kind === 'manga' ? mangaThumb.get(id) : audioThumb.get(id)) ?? null,
       poster: (simklId) => posters.get(simklId) ?? null,
       open: (kind, id, resume) => {
         router.navigate('/' as Href);
-        if (kind === 'video') pushJump({ kind: 'video', id });
+        const scene = sceneOf(id);
+        if (kind === 'video') pushJump(scene ? { kind: 'video', id: scene.id, atMs: scene.atMs } : { kind: 'video', id });
         else if (kind === 'manga') pushJump({ kind: 'manga', id, read: resume });
         else pushJump({ kind: 'audio', id, play: resume });
       },
@@ -102,7 +128,7 @@ export default function SearchRoute() {
       remember: (q) => saveRecent(rememberSearch(recentRef.current, q)),
       clearRecent: () => saveRecent([]),
     };
-  }, [vault.items, vault.resume, audio.items, manga.items, simkl.items, router, week, recent, saveRecent]);
+  }, [vault.items, vault.resume, vault.sceneRows, audio.items, manga.items, simkl.items, router, week, recent, saveRecent]);
 
   return (
     <ThemeContext.Provider value={palette}>

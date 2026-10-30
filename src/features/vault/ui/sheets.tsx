@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { KeyboardAvoidingView, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal } from './screen';
 
 import { dayKey, matchesRule } from './logic';
@@ -83,13 +83,102 @@ export function SheetFrame({
   );
 }
 
-export function Section({ label, children }: { label: string; children: ReactNode }) {
+export function Section({ label, children, card, footer }: { label: string; children: ReactNode; /** Settings look: the content in a rounded card. */ card?: boolean; /** Small print under the card. */ footer?: string }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>{label}</Text>
-      {children}
+      {card ? <View style={styles.cardBox}>{children}</View> : children}
+      {!!footer && <Text style={styles.footer}>{footer}</Text>}
     </View>
+  );
+}
+
+/**
+ * A settings group like the iPhone's Settings app: rows in one rounded card,
+ * thin lines between them, a heading above and small print below.
+ */
+export function Rows({ label, footer, children }: { label?: string; footer?: string; children: ReactNode }) {
+  const styles = useStyles(makeStyles);
+  const list = (Array.isArray(children) ? children.flat(3) : [children]).filter((c) => c !== null && c !== undefined && c !== false && c !== '');
+  return (
+    <View style={styles.section}>
+      {!!label && <Text style={styles.sectionLabel}>{label}</Text>}
+      <View style={styles.rows}>
+        {list.map((c, i) => (
+          <View key={i}>
+            {i > 0 && <View style={styles.rowLine} />}
+            {c}
+          </View>
+        ))}
+      </View>
+      {!!footer && <Text style={styles.footer}>{footer}</Text>}
+    </View>
+  );
+}
+
+/** One settings row: a coloured icon, a title (and a line under it), and a value, a switch or an arrow on the right. */
+export function Row({
+  icon,
+  tint,
+  title,
+  sub,
+  value,
+  onPress,
+  danger,
+  toggle,
+  right,
+}: {
+  icon?: import('./icons').IconName;
+  /** The icon tile's colour. */
+  tint?: string;
+  title: string;
+  sub?: string;
+  /** Grey text on the right (the current choice). */
+  value?: string;
+  onPress?: () => void;
+  danger?: boolean;
+  /** A switch on the right. */
+  toggle?: { value: boolean; onChange: (v: boolean) => void };
+  right?: ReactNode;
+}) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const body = (
+    <View style={styles.row}>
+      {icon && (
+        <View style={[styles.rowIcon, { backgroundColor: tint ?? p.accent }]}>
+          <Icon name={icon} size={15} color="#fff" />
+        </View>
+      )}
+      <View style={styles.rowText}>
+        <Text style={[styles.rowTitle, danger && { color: p.dangerText }]} numberOfLines={2}>
+          {title}
+        </Text>
+        {!!sub && <Text style={styles.rowSub}>{sub}</Text>}
+      </View>
+      {!!value && (
+        <Text style={styles.rowValue} numberOfLines={1}>
+          {value}
+        </Text>
+      )}
+      {right}
+      {toggle && <Switch value={toggle.value} onValueChange={toggle.onChange} trackColor={{ false: p.switchOff, true: p.accent }} thumbColor="#fff" />}
+      {onPress && !toggle && !right && <Icon name="forward" size={13} color={p.textMuted} />}
+    </View>
+  );
+  if (!onPress) return body;
+  return (
+    <TouchableOpacity
+      activeOpacity={0.6}
+      onPress={() => {
+        tick();
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={value ? `${title}: ${value}` : title}>
+      {body}
+    </TouchableOpacity>
   );
 }
 
@@ -954,13 +1043,23 @@ const makeStyles = (p: Palette) =>
     done: { color: p.link, fontSize: 13, fontWeight: '600' },
     hint: { color: p.textSecondary, fontSize: 12 },
 
-    section: { gap: 10 },
+    section: { gap: 8 },
+    cardBox: { backgroundColor: p.card, borderRadius: 16, padding: 14, gap: 12 },
+    footer: { color: p.textSecondary, fontSize: 12.5, lineHeight: 17, paddingHorizontal: 4 },
+    rows: { backgroundColor: p.card, borderRadius: 16, overflow: 'hidden' },
+    rowLine: { height: StyleSheet.hairlineWidth, backgroundColor: p.separator, marginLeft: 56 },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, minHeight: 50, paddingVertical: 9 },
+    rowIcon: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+    rowText: { flex: 1, gap: 2 },
+    rowTitle: { color: p.text, fontSize: 16 },
+    rowSub: { color: p.textSecondary, fontSize: 12.5, lineHeight: 16 },
+    rowValue: { color: p.textSecondary, fontSize: 15, maxWidth: '45%' },
     sectionLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
     wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
     chip: {
       alignSelf: 'flex-start',
-      backgroundColor: p.card,
+      backgroundColor: p.circle,
       borderRadius: 999,
       paddingHorizontal: 14,
       paddingVertical: 8,
@@ -975,7 +1074,7 @@ const makeStyles = (p: Palette) =>
       width: 30,
       height: 34,
       borderRadius: 8,
-      backgroundColor: p.card,
+      backgroundColor: p.circle,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -984,7 +1083,7 @@ const makeStyles = (p: Palette) =>
     inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
     input: {
       flex: 1,
-      backgroundColor: p.card,
+      backgroundColor: p.circle,
       borderRadius: 10,
       paddingHorizontal: 12,
       paddingVertical: 11,
@@ -994,7 +1093,7 @@ const makeStyles = (p: Palette) =>
     numberWrap: { alignItems: 'center', gap: 4 },
     number: {
       width: 72,
-      backgroundColor: p.card,
+      backgroundColor: p.circle,
       borderRadius: 10,
       paddingVertical: 9,
       color: p.text,
@@ -1005,7 +1104,7 @@ const makeStyles = (p: Palette) =>
     dayBox: { width: 128 },
     numberLabel: { color: p.textMuted, fontSize: 11 },
 
-    segment: { flexDirection: 'row', backgroundColor: p.card, borderRadius: 10, padding: 3 },
+    segment: { flexDirection: 'row', backgroundColor: p.circle, borderRadius: 10, padding: 3 },
     segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
     segmentPill: { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 8, backgroundColor: p.accent },
     segmentText: { color: p.textSoft, fontWeight: '600', fontSize: 13 },

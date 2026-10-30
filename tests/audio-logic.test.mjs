@@ -4,7 +4,7 @@ import { test } from 'node:test';
 
 import {
   audioStats, chapterIndexAt, chaptersOf, continueListening, fmtClockMs, fmtLength, fmtRating, groupIntoBooks, isAtEnd, locate, matchesAudio, nextSpeed,
-  normaliseRating, overallMs, progressOf, smartRewindMs, sortAudio, totalMs, authorsOf,
+  normaliseRating, overallMs, progressOf, smartRewindMs, sortAudio, totalMs, authorsOf, seriesNumber, seriesBooks, seriesOf, nextInSeries, pickNext, parseAudioPrefs,
 } from '../src/features/vault/audio/audioLogic.ts';
 
 const item = (id, extra = {}) => ({
@@ -130,4 +130,39 @@ test('the info backup carries the Audio section and finds each item again', asyn
   assert.deepEqual([...m.entries()], [[0, 'x'], [1, 'y'], [2, 'z']]);
   // An older backup without audio still reads.
   assert.deepEqual(parseBackup(JSON.stringify({ kind: 'reelvault-library-info', videos: [] })).audio, []);
+});
+
+test('series: the number of a book from its title or file name', () => {
+  assert.equal(seriesNumber({ title: 'The Way of Kings (Book 1)', filename: 'x.m4b' }), 1);
+  assert.equal(seriesNumber({ title: 'Harry Potter, Band 3', filename: 'x.m4b' }), 3);
+  assert.equal(seriesNumber({ title: 'Dune Vol. 2', filename: 'x.m4b' }), 2);
+  assert.equal(seriesNumber({ title: 'Mistborn #4', filename: 'x.m4b' }), 4);
+  assert.equal(seriesNumber({ title: null, filename: '05 - The Hero.mp3' }), 5);
+  assert.equal(seriesNumber({ title: 'Project Hail Mary', filename: 'phm.m4b' }), null);
+  // "part" inside a word is not a number marker.
+  assert.equal(seriesNumber({ title: 'Departure 7', filename: 'x.m4b' }), null);
+});
+
+test('series: books in order, what comes next, and Listen next first', () => {
+  const s = (id, title, extra = {}) => item(id, { title, album: 'Stormlight', ...extra });
+  const list = [s('c', 'Oathbringer (Book 3)'), s('a', 'The Way of Kings (Book 1)', { status: 'finished', lastPlayedAt: 5 }), s('b', 'Words of Radiance (Book 2)'), item('z', { title: 'Alone' })];
+  assert.deepEqual(seriesBooks(list, 'stormlight').map((x) => x.id), ['a', 'b', 'c']);
+  const all = seriesOf(list);
+  assert.equal(all.length, 1);
+  assert.equal(all[0].finished, 1);
+  assert.equal(all[0].next.id, 'b');
+  assert.equal(nextInSeries(list, list[1]).id, 'b');
+  assert.equal(nextInSeries(list, list[0]), null);
+  // Listen next wins over the series, and gone items are skipped.
+  assert.deepEqual(pickNext(list, list[1], { upNext: ['gone', 'z', 'c'], seriesAutoplay: true }), { next: list[3], upNext: ['c'] });
+  assert.equal(pickNext(list, list[1], { upNext: [], seriesAutoplay: true }).next.id, 'b');
+  assert.equal(pickNext(list, list[1], { upNext: [], seriesAutoplay: false }).next, null);
+});
+
+test('audio settings: listen next, series and Voice Boost read safely', () => {
+  const p = parseAudioPrefs(JSON.stringify({ rewind: 2, upNext: ['a', 'a', 3, 'b'], seriesAutoplay: false, boosted: ['x'] }));
+  assert.deepEqual(p.upNext, ['a', 'b']);
+  assert.equal(p.seriesAutoplay, false);
+  assert.deepEqual(p.boosted, ['x']);
+  assert.equal(parseAudioPrefs(null).seriesAutoplay, true);
 });

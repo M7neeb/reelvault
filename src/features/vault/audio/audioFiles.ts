@@ -34,6 +34,9 @@ export function fileIn(folder: string, rel: string): File {
   return new File(itemDir(folder), ...split(rel));
 }
 
+/** Where the Voice Boost copy of a track lives, inside the item's folder. */
+export const boostRel = (file: string) => `.boost/${file.replace(/\.[^./]+$/, '')}.m4a`;
+
 export function fileUri(folder: string, rel: string): string {
   if (!canUseFs) return '';
   return fileIn(folder, rel).uri;

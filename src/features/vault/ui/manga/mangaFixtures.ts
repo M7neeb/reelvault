@@ -289,11 +289,12 @@ export function fixtureBrowse(): { prefs: BrowsePrefs; actions: BrowseActions } 
     checkOnOpen: true,
     autoDownload: false,
     removeAfterRead: false,
+    syncProgress: true,
     wifiOnly: false,
     patient: false,
     parallel: 3,
     autoUpdateExt: true,
-    reader: { tapZones: true, tapInvert: false, page: 'black', spreads: true, fit: 'screen', filter: 'none', autoSpeed: 2, longStrip: false, crop: false, autoBg: false },
+    reader: { tapZones: true, tapInvert: false, page: 'black', spreads: true, fit: 'screen', filter: 'none', autoSpeed: 3, longStrip: false, crop: false, autoBg: false, volumeKeys: true, volumeInvert: false, holdSpeed: 5 },
   };
   const none = async () => undefined;
   return {

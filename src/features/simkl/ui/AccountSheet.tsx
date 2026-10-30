@@ -82,7 +82,7 @@ export function AccountSheet({
   return (
     <SheetFrame title="Simkl" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
       {!!note && <Text style={styles.note}>{note}</Text>}
-      <Section label="Library">
+      <Section card label="Library">
         <Text style={styles.body}>
           {count} titles on this phone ·{' '}
           {syncing ? 'syncing…' : lastSyncAt ? `synced ${fmtAgo(new Date(lastSyncAt).toISOString())}` : 'not synced yet'}
@@ -97,12 +97,12 @@ export function AccountSheet({
         </Text>
       </Section>
 
-      <Section label="Bring your history">
+      <Section card label="Bring your history">
         <Chip label="Import from IMDb or Letterboxd…" onPress={onImport} />
         <Text style={styles.hint}>Your ratings, watched films and watchlists, from their CSV exports.</Text>
       </Section>
 
-      <Section label="Spoilers">
+      <Section card label="Spoilers">
         <ToggleRow
           label="Hide unwatched episode titles and pictures"
           value={spoilers}
@@ -114,7 +114,7 @@ export function AccountSheet({
         <Text style={styles.hint}>Episode lists and Up Next show only "Episode 5" and a blurred still until you have seen it.</Text>
       </Section>
 
-      <Section label="Episode ratings">
+      <Section card label="Episode ratings">
         <Text style={styles.body}>
           {hasKey === null ? ' ' : hasKey ? 'IMDb ratings are on (your OMDb key is saved on this phone).' : 'Episodes show TVmaze ratings. Add a free OMDb key for IMDb ratings.'}
         </Text>
@@ -150,7 +150,7 @@ export function AccountSheet({
         )}
       </Section>
 
-      <Section label="Notifications">
+      <Section card label="Notifications">
         {reminders && (
           <>
             <ToggleRow
@@ -185,7 +185,7 @@ export function AccountSheet({
         )}
       </Section>
 
-      <Section label="Rewatches">
+      <Section card label="Rewatches">
         <Text style={styles.body}>
           Rewatches you log are always kept in ReelVault and count in Stats and the review.
         </Text>
@@ -212,7 +212,7 @@ export function AccountSheet({
         )}
       </Section>
 
-      <Section label="Export">
+      <Section card label="Export">
         <Chip
           label="Export library as CSV…"
           onPress={() =>
@@ -235,7 +235,7 @@ export function AccountSheet({
         <Text style={styles.hint}>The next two months of episodes and releases you follow, as a calendar file. No calendar permission needed.</Text>
       </Section>
 
-      <Section label="Account">
+      <Section card label="Account">
         <Chip
           label="Sign out of Simkl"
           danger
@@ -260,5 +260,5 @@ const makeStyles = (p: Palette) =>
     body: { color: p.textSoft, fontSize: 14 },
     hint: { color: p.textSecondary, fontSize: 12 },
     note: { color: p.link, fontSize: 13, fontWeight: '600' },
-    input: { backgroundColor: p.card, color: p.text, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+    input: { backgroundColor: p.circle, color: p.text, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   });

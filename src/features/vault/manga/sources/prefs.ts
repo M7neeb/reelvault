@@ -26,8 +26,14 @@ export type ReaderPrefs = {
   fit: 'screen' | 'width' | 'height' | 'original';
   /** A look over the pages: grey (no colour), warm (easier at night) or dimmed. */
   filter: 'none' | 'gray' | 'warm' | 'dim';
-  /** Auto-scroll speed in the long strip, 1 (slow) to 5 (fast). */
+  /** Auto-scroll speed in the long strip, 1 (slow) to 10 (fast). */
   autoSpeed: number;
+  /** The volume buttons turn pages (press) and scroll (hold) while reading (app build 18 on). */
+  volumeKeys: boolean;
+  /** Volume up goes forward instead of volume down. */
+  volumeInvert: boolean;
+  /** How fast holding a volume button scrolls (or turns pages), 1 (slow) to 10 (fast). */
+  holdSpeed: number;
   /** Titles you have not set a way of reading for open as one long strip. */
   longStrip: boolean;
   /** Cut plain white or black margins off the pages (app build 17 on). */
@@ -36,7 +42,30 @@ export type ReaderPrefs = {
   autoBg: boolean;
 };
 
-export const DEFAULT_READER: ReaderPrefs = { tapZones: true, tapInvert: false, page: 'black', spreads: true, fit: 'screen', filter: 'none', autoSpeed: 2, longStrip: false, crop: false, autoBg: false };
+export const DEFAULT_READER: ReaderPrefs = {
+  tapZones: true,
+  tapInvert: false,
+  page: 'black',
+  spreads: true,
+  fit: 'screen',
+  filter: 'none',
+  autoSpeed: 3,
+  longStrip: false,
+  crop: false,
+  autoBg: false,
+  volumeKeys: true,
+  volumeInvert: false,
+  holdSpeed: 5,
+};
+
+/** Long-strip auto-scroll, points per second, for speeds 1-10. */
+export const AUTO_SCROLL_SPEEDS = [20, 30, 45, 60, 80, 105, 135, 170, 210, 260];
+/** Holding a volume button in the long strip, points per second, for speeds 1-10. */
+export const HOLD_SCROLL_SPEEDS = [150, 220, 300, 390, 490, 600, 730, 880, 1050, 1250];
+/** Holding a volume button with pages: one page every this many ms, for speeds 1-10. */
+export const HOLD_PAGE_EVERY = [1400, 1150, 950, 800, 650, 540, 450, 370, 300, 240];
+
+const level = (v: unknown, fallback: number) => (typeof v === 'number' && v >= 1 && v <= 10 ? Math.round(v) : fallback);
 
 export type BrowsePrefs = {
   languages: string[];
@@ -60,10 +89,12 @@ export type BrowsePrefs = {
   parallel: 1 | 3 | 5;
   /** Extensions update themselves (checked once a day when the app opens). */
   autoUpdateExt: boolean;
+  /** How far you read goes back to your Suwayomi, Komga and Kavita servers. */
+  syncProgress: boolean;
   reader: ReaderPrefs;
 };
 
-export const DEFAULT_BROWSE: BrowsePrefs = { languages: ['en'], adult: false, servers: [], repos: [], installed: [], smallerPages: false, checkOnOpen: true, autoDownload: false, removeAfterRead: false, wifiOnly: false, patient: false, parallel: 3, autoUpdateExt: true, reader: DEFAULT_READER };
+export const DEFAULT_BROWSE: BrowsePrefs = { languages: ['en'], adult: false, servers: [], repos: [], installed: [], smallerPages: false, checkOnOpen: true, autoDownload: false, removeAfterRead: false, wifiOnly: false, patient: false, parallel: 3, autoUpdateExt: true, syncProgress: true, reader: DEFAULT_READER };
 
 /** Languages MangaDex offers that the picker lists (code, name). */
 export const LANGUAGES: [string, string][] = [
@@ -117,6 +148,7 @@ export function parseBrowsePrefs(json: string | null): BrowsePrefs {
     patient: r.patient === true,
     parallel: r.parallel === 1 || r.parallel === 5 ? r.parallel : 3,
     autoUpdateExt: r.autoUpdateExt !== false,
+    syncProgress: r.syncProgress !== false,
     reader: parseReader(r.reader),
   };
 }
@@ -130,10 +162,13 @@ function parseReader(v: unknown): ReaderPrefs {
     spreads: r.spreads !== false,
     fit: r.fit === 'width' || r.fit === 'height' || r.fit === 'original' ? r.fit : 'screen',
     filter: r.filter === 'gray' || r.filter === 'warm' || r.filter === 'dim' ? r.filter : 'none',
-    autoSpeed: typeof r.autoSpeed === 'number' && r.autoSpeed >= 1 && r.autoSpeed <= 5 ? Math.round(r.autoSpeed) : 2,
+    autoSpeed: level(r.autoSpeed, DEFAULT_READER.autoSpeed),
     longStrip: r.longStrip === true,
     crop: r.crop === true,
     autoBg: r.autoBg === true,
+    volumeKeys: r.volumeKeys !== false,
+    volumeInvert: r.volumeInvert === true,
+    holdSpeed: level(r.holdSpeed, DEFAULT_READER.holdSpeed),
   };
 }
 

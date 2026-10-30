@@ -28,6 +28,8 @@ import { opdsSource } from './sources/opds';
 import { DEFAULT_BROWSE, normaliseServerUrl, parseBrowsePrefs, updatesFor, type BrowsePrefs, type ServerConfig, type ServerKind } from './sources/prefs';
 import { suwayomiLibrary, suwayomiSource, suwayomiSources, type GqlLibraryTitle, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
 import { planLinks, type LinkableSeries } from './mangaLink';
+import { kavitaProgress, komgaProgress, progressTarget, suwayomiProgress } from './sources/progressSync';
+import { suwayomiBase } from './sources/suwayomi';
 import { basicAuth, infoOf, type ImageRef, type MangaSource, type SourceChapter, type SourceDetails, type SourceInfo } from './sources/types';
 
 const PREFS_KEY = 'manga.browse';
@@ -156,6 +158,57 @@ export async function sourceFor(id: string, prefs: BrowsePrefs): Promise<MangaSo
 }
 
 export const cachedSource = (id: string) => cache.get(id) ?? null;
+
+/* ------------------------------------------------ progress to your servers */
+
+/** Kavita sign-in tokens by OPDS key, for this run of the app. */
+const kavitaTokens = new Map<string, string>();
+
+/**
+ * Tells the server a chapter came from how far you read (see
+ * sources/progressSync.ts). Quiet: a server that is off or refuses is skipped.
+ */
+export async function pushProgress(
+  sourceId: string | null,
+  chapter: Pick<MangaChapter, 'sourceKey' | 'pageCount'>,
+  page: number,
+  finished: boolean,
+  prefs: BrowsePrefs
+): Promise<void> {
+  if (!prefs.syncProgress) return;
+  const t = progressTarget(sourceId, chapter.sourceKey);
+  if (!t) return;
+  const s = prefs.servers.find((x) => x.id === t.serverId);
+  if (!s) return;
+  try {
+    const auth = await authFor(s);
+    if (t.kind === 'suwayomi') {
+      await sourceHttp.json(`${suwayomiBase(s.url)}/api/graphql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...auth },
+        body: JSON.stringify(suwayomiProgress(t.chapterId, page, finished)),
+      });
+    } else if (t.kind === 'komga') {
+      await sourceHttp.text(t.url, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...auth }, body: komgaProgress(page, finished) });
+    } else {
+      let token = kavitaTokens.get(t.apiKey);
+      if (!token) {
+        const res = (await sourceHttp.json(`${t.base}/api/Plugin/authenticate?apiKey=${encodeURIComponent(t.apiKey)}&pluginName=ReelVault`, { method: 'POST' })) as { token?: string };
+        if (!res?.token) return;
+        token = res.token;
+        kavitaTokens.set(t.apiKey, token);
+      }
+      await sourceHttp.text(`${t.base}/api/reader/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: kavitaProgress(t, page, chapter.pageCount || null, finished),
+      });
+    }
+  } catch (e) {
+    if (t.kind === 'kavita') kavitaTokens.delete(t.apiKey);
+    console.log(`[MANGA] progress to ${s.name}: ${String(e)}`);
+  }
+}
 
 /* --------------------------------------------------------------- servers */
 

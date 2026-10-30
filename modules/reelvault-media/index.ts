@@ -18,6 +18,21 @@ type NativeMedia = {
   pageMargins?(path: string): Promise<{ top: number; left: number; bottom: number; right: number; edge: string }>;
   /** Every page of a PDF as 0001.jpg, 0002.jpg... in `outDir`; the page count. Missing before app 1.11. */
   pdfPages?(input: string, outDir: string, maxSide: number, quality: number): Promise<number>;
+  /** The sound of a video (endMs 0 = to the end) as an .m4a file. Missing before app build 18. */
+  exportAudio?(input: string, output: string, startMs: number, endMs: number): Promise<{ size: number; durationMs: number }>;
+  /** Chapter markers stored in an MP4 / MOV file. Missing before app build 18. */
+  chapters?(input: string): Promise<{ title: string; startMs: number; endMs: number }[]>;
+  /** A Voice Boost copy (clearer, evener, louder speech) of an audio file as .m4a; its size. Missing before app build 18. */
+  voiceBoost?(input: string, output: string, jobId: string): Promise<number>;
+  addListener?(event: 'onBoostProgress', fn: (e: { jobId: string; progress: number }) => void): { remove(): void };
+  addListener?(event: 'onVolumeKey', fn: (e: { direction: 'up' | 'down' }) => void): { remove(): void };
+  /** The volume buttons report presses (onVolumeKey) instead of changing the volume. Missing before app build 18. */
+  startVolumeKeys?(): void;
+  /** Picture fingerprints (16 hex characters each, "" = unreadable) at fractions of the video. Missing before app build 18. */
+  videoPrints?(input: string, fractions: number[]): Promise<string[]>;
+  /** Scene words and text on screen, a frame every `everySec` (at most `maxFrames`). Missing before app build 18. */
+  scanFrames?(input: string, everySec: number, maxFrames: number): Promise<{ atMs: number; labels: string[]; text: string }[]>;
+  stopVolumeKeys?(): void;
 };
 
 /** null in Expo Go, on the web, and in app builds made before this module existed (before 1.9.2). */

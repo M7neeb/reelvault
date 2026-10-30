@@ -1,13 +1,13 @@
 {
   "fill": {
-    "automatic-gradient": "extended-srgb:0.03922,0.51765,1.00000,1.00000"
+    "automatic-gradient": "extended-srgb:0.08627,0.10196,0.13333,1.00000"
   },
   "groups": [
     {
       "layers": [
         {
-          "image-name": "reel.svg",
-          "name": "reel",
+          "image-name": "stack.svg",
+          "name": "stack",
           "position": {
             "scale": 1,
             "translation-in-points": [

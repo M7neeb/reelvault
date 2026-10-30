@@ -24,7 +24,8 @@ import * as Clipboard from 'expo-clipboard';
 
 /** App icons (the names match app.json's alternate icons; null = the default). */
 const APP_ICONS: { key: string | null; label: string; colors: [string, string]; image: number }[] = [
-  { key: null, label: 'ReelVault', colors: ['#0A84FF', '#5838D6'], image: require('../../../../assets/icons/classic.png') },
+  { key: null, label: 'ReelVault', colors: ['#161A22', '#05060A'], image: require('../../../../assets/images/icon.png') },
+  { key: 'Classic', label: 'Classic', colors: ['#0A84FF', '#0040DD'], image: require('../../../../assets/icons/classic.png') },
   { key: 'Midnight', label: 'Midnight', colors: ['#16161C', '#040408'], image: require('../../../../assets/icons/midnight.png') },
   { key: 'Sunset', label: 'Sunset', colors: ['#FF9F0A', '#FF375F'], image: require('../../../../assets/icons/sunset.png') },
   { key: 'Forest', label: 'Forest', colors: ['#30D158', '#00785A'], image: require('../../../../assets/icons/forest.png') },
@@ -185,7 +186,7 @@ export default function PersonaliseSheet({
       }}>
       {!!note && <Text style={styles.note}>{note}</Text>}
 
-      <Section label="Layout">
+      <Section card label="Layout">
         <View style={styles.looks}>
           {LOOKS.map((l) => {
             const on = viewOptions.look === l.key;
@@ -209,7 +210,7 @@ export default function PersonaliseSheet({
         <Text style={styles.hint}>Off: only the player and the slideshow turn. The rotation lock in Control Center still applies.</Text>
       </Section>
 
-      <Section label="Accent colour">
+      <Section card label="Accent colour">
         <View style={styles.swatches}>
           {ACCENTS.map((a) => {
             const on = (viewOptions.accent ?? '#0A84FF').toLowerCase() === a.key.toLowerCase();
@@ -229,7 +230,7 @@ export default function PersonaliseSheet({
         </View>
       </Section>
 
-      <Section label="Colours">
+      <Section card label="Colours">
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
           {COLOR_SETS.map((c) => {
             const on = viewOptions.colors === c.key;
@@ -258,7 +259,7 @@ export default function PersonaliseSheet({
         </Text>
       </Section>
 
-      <Section label="Font">
+      <Section card label="Font">
         <View style={styles.fontRow}>
           {FONTS.map((f) => {
             const on = viewOptions.font === f.key;
@@ -272,7 +273,7 @@ export default function PersonaliseSheet({
         </View>
       </Section>
 
-      <Section label="Glass">
+      <Section card label="Glass">
         <Segment
           options={[
             { key: 'regular', label: 'Normal' },
@@ -285,7 +286,7 @@ export default function PersonaliseSheet({
         <Text style={styles.hint}>The floating buttons and bars. Solid is easiest to read over busy pictures.</Text>
       </Section>
 
-      <Section label="Cards">
+      <Section card label="Cards">
         <Segment
           options={[
             { key: 'standard', label: 'Standard' },
@@ -298,10 +299,13 @@ export default function PersonaliseSheet({
         <ToggleRow label="A thin line around cards" value={viewOptions.outlined} onChange={(outlined) => setLook({ outlined })} />
       </Section>
 
-      <Section label="Control Center button">
+      <Section card label="Action button, Siri and Control Center">
         <Text style={styles.hint}>
-          Put ReelVault in Control Center (iOS 18): copy a link below, then in the Shortcuts app make a shortcut with the action "Open URLs" and paste it.
-          Open Control Center, hold an empty spot, tap "Add a Control", pick Shortcuts and choose your shortcut.
+          Copy a link below. In the Shortcuts app tap +, add the action "Open URLs", paste the link and give the shortcut a name (for example "Carry on reading").
+        </Text>
+        <Text style={styles.hint}>
+          Action button: Settings → Action Button → swipe to Shortcut → choose it. Siri: say the shortcut's name. Control Center: hold an empty spot → Add a
+          Control → Shortcuts → choose it.
         </Text>
         {QUICK_LINKS.map((q) => (
           <View key={q.kind} style={styles.quickRow}>
@@ -326,7 +330,7 @@ export default function PersonaliseSheet({
         ))}
       </Section>
 
-      <Section label="App icon">
+      <Section card label="App icon">
         <View style={styles.icons}>
           {APP_ICONS.map((i) => {
             const on = icon === i.key;
@@ -356,7 +360,7 @@ export default function PersonaliseSheet({
         <Text style={styles.hint}>iOS shows a short message when the icon changes.</Text>
       </Section>
 
-      <Section label="Rating words">
+      <Section card label="Rating words">
         <Text style={styles.hint}>Your own word for a rating, shown next to the stars (e.g. 1 = Waste of time, 5 = Mid). Leave any empty.</Text>
         <Wrap>
           <Chip label="Use suggestions" onPress={() => setLabels({ ...SUGGESTED_LABELS, ...labels })} />
@@ -382,7 +386,7 @@ export default function PersonaliseSheet({
         </View>
       </Section>
 
-      <Section label="Watching">
+      <Section card label="Watching">
         <ToggleRow label="Rows on the library's home (recently added, your best…)" value={prefs.homeRows} onChange={(v) => savePrefs({ homeRows: v })} />
         <ToggleRow label="Play the video in the middle of the grid (no sound)" value={prefs.gridPreview} onChange={(v) => savePrefs({ gridPreview: v })} />
         <ToggleRow label="Continue another time (videos of 5 min or more)" value={prefs.resumeEnabled} onChange={(v) => savePrefs({ resumeEnabled: v })} />
@@ -449,7 +453,7 @@ const makeStyles = (p: Palette) =>
     look: { alignItems: 'center', gap: 6 },
     lookLabel: { color: p.textSoft, fontSize: 12, fontWeight: '700' },
     swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    quickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+    quickRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: p.circle, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
     quickLabel: { color: p.text, fontSize: 15, fontWeight: '700' },
     quickUrl: { color: p.textSecondary, fontSize: 12 },
     quickBtn: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
@@ -460,7 +464,7 @@ const makeStyles = (p: Palette) =>
     setCard: { position: 'absolute', left: 6, right: 6, top: 8, height: 30, borderRadius: 7 },
     setDot: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)' },
     fontRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    fontCell: { width: 62, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 12, backgroundColor: p.card, borderWidth: 1.5, borderColor: 'transparent' },
+    fontCell: { width: 62, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 12, backgroundColor: p.circle, borderWidth: 1.5, borderColor: 'transparent' },
     fontOn: { borderColor: p.accent },
     fontSample: { color: p.text, fontSize: 22, fontWeight: '700' },
     fontName: { color: p.textSecondary, fontSize: 11, fontWeight: '600' },
@@ -476,7 +480,7 @@ const makeStyles = (p: Palette) =>
     iconImg: { width: '100%', height: '100%' },
     iconOn: { borderWidth: 3, borderColor: p.accent },
     iconLabel: { color: p.textSoft, fontSize: 11, fontWeight: '700' },
-    labelList: { backgroundColor: p.card, borderRadius: 14, overflow: 'hidden' },
+    labelList: { backgroundColor: p.circle, borderRadius: 14, overflow: 'hidden' },
     labelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: p.separator },
     labelNum: { color: p.rating, fontSize: 14, fontWeight: '800', width: 46, fontVariant: ['tabular-nums'] },
     labelInput: { flex: 1, color: p.text, fontSize: 15, paddingVertical: 11 },

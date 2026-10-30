@@ -114,8 +114,8 @@ test('audio: smart rewind follows the chosen amount; settings read safely', () =
   assert.equal(smartRewindMs(5 * 60_000, 2), 10_000);
   assert.equal(smartRewindMs(5 * 60_000, 0), 0);
   assert.equal(smartRewindMs(30_000, 2), 0);
-  assert.deepEqual(parseAudioPrefs(null), { rewind: 1, favSpeeds: [1, 1.2, 1.5] });
-  assert.deepEqual(parseAudioPrefs(JSON.stringify({ rewind: 0.5, favSpeeds: [1.5, 2, 9, 1.5] })), { rewind: 0.5, favSpeeds: [1.5, 2] });
+  assert.deepEqual(parseAudioPrefs(null), { rewind: 1, favSpeeds: [1, 1.2, 1.5], upNext: [], seriesAutoplay: true, boosted: [] });
+  assert.deepEqual(parseAudioPrefs(JSON.stringify({ rewind: 0.5, favSpeeds: [1.5, 2, 9, 1.5] })), { rewind: 0.5, favSpeeds: [1.5, 2], upNext: [], seriesAutoplay: true, boosted: [] });
   assert.equal(parseAudioPrefs(JSON.stringify({ rewind: 7 })).rewind, 1);
 });
 

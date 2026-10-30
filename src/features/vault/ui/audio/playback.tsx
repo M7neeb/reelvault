@@ -5,7 +5,8 @@
  * the player the app already uses). It moves from file to file in a book,
  * remembers where you are (every 10 seconds and on pause), rewinds a little
  * after a long pause, keeps your speed per item, has a sleep timer (minutes,
- * or the end of the chapter), and records how long you listened.
+ * or the end of the chapter), and records how long you listened. When an
+ * item ends, the first of Listen next plays, else the next book of its series.
  * Presentational layer: data goes through `AudioActions` (see audioTypes.ts).
  */
 
@@ -13,7 +14,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { AppState } from 'react-native';
 import { createVideoPlayer, type VideoPlayer } from 'expo-video';
 
-import { chapterIndexAt, chaptersOf, isAtEnd, locate, overallMs, smartRewindMs, totalMs } from '../../audio/audioLogic';
+import { chapterIndexAt, chaptersOf, isAtEnd, locate, overallMs, pickNext, smartRewindMs, totalMs, type AudioPrefs } from '../../audio/audioLogic';
 import type { AudioActions, AudioUiItem } from './audioTypes';
 
 export type Sleep = { endsAt: number | null; chapter: number | null } | null;
@@ -64,6 +65,7 @@ export function AudioPlaybackProvider({
   actions,
   enabled = true,
   rewind = 1,
+  prefs,
   children,
 }: {
   items: AudioUiItem[];
@@ -71,6 +73,8 @@ export function AudioPlaybackProvider({
   enabled?: boolean;
   /** Smart rewind: 0 = off, 0.5 = a little, 1 = normal, 2 = more. */
   rewind?: number;
+  /** Listen next and "next book of the series" (missing: nothing follows). */
+  prefs?: AudioPrefs;
   children: ReactNode;
 }) {
   const rewindRef = useRef(rewind);
@@ -100,6 +104,11 @@ export function AudioPlaybackProvider({
   });
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const openRef = useRef<Playback['open'] | null>(null);
 
   /** Writes how long you listened since the last flush (only when it is worth keeping). */
   const flush = () => {
@@ -134,8 +143,13 @@ export function AudioPlaybackProvider({
     return playerRef.current;
   };
 
+  /** The file to play for a track: its Voice Boost copy when that is on and made. */
+  const uriFor = (it: AudioUiItem, t: number) => (prefsRef.current?.boosted.includes(it.id) && it.boostUris?.[t]) || it.trackUris[t];
+  const loadedUri = useRef<string | null>(null);
+
   const load = (it: AudioUiItem, t: number, ms: number, autoplay: boolean) => {
-    const uri = it.trackUris[t];
+    const uri = uriFor(it, t);
+    loadedUri.current = uri ?? null;
     setTrack(t);
     setPosition(ms);
     setError(null);
@@ -223,6 +237,18 @@ export function AudioPlaybackProvider({
         // The end of the item.
         actionsRef.current.markFinished(it.id).catch(() => undefined);
         actionsRef.current.savePosition(it.id, 0, 0).catch(() => undefined);
+        // What comes next: Listen next, else the next book of the series (not after the sleep timer stopped things).
+        const pr = prefsRef.current;
+        if (pr && !live.current.sleep) {
+          const { next, upNext } = pickNext(itemsRef.current, it, pr);
+          if (upNext.length !== pr.upNext.length || upNext.some((id, n) => id !== pr.upNext[n])) {
+            actionsRef.current.setPrefs?.({ ...pr, upNext }).catch(() => undefined);
+          }
+          if (next && openRef.current) {
+            openRef.current(next, { autoplay: true });
+            return;
+          }
+        }
         setPlaying(false);
         setSleepState(null);
       }),
@@ -238,6 +264,14 @@ export function AudioPlaybackProvider({
       app.remove();
     };
   }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Voice Boost switched on or off: carry on from the same spot in the other file.
+  useEffect(() => {
+    const it = live.current.item;
+    if (!it || !enabled || loadedUri.current === null) return;
+    const want = uriFor(it, live.current.track);
+    if (want && want !== loadedUri.current) load(it, live.current.track, live.current.position, live.current.playing);
+  }, [prefs?.boosted, item?.boostUris]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Let go of the player when the screen goes away.
   useEffect(
@@ -351,6 +385,8 @@ export function AudioPlaybackProvider({
       setSleepState(null);
     },
   };
+
+  openRef.current = api.open;
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

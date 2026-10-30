@@ -4,7 +4,7 @@
  * `audio-stats`, `audio-deleted`). No files, no native modules.
  */
 
-import type { AudioItem, AudioPlay } from '../../audio/audioLogic';
+import { DEFAULT_AUDIO_PREFS, type AudioItem, type AudioPlay } from '../../audio/audioLogic';
 import type { BookJson } from '../../audio/epub';
 import type { AudioActions, AudioData, AudioUiItem } from './audioTypes';
 
@@ -209,6 +209,10 @@ export function fixtureAudioData(): AudioData {
     addPhotos: async () => 0,
     removePhoto: noop,
     storageBytes: async () => 412_000_000,
+    setPrefs: async () => undefined,
+    canBoost: () => true,
+    setVoiceBoost: async (_id, _on, onProgress) => onProgress(1),
   };
-  return { items: FIXTURE_AUDIO, deleted: DELETED.map(asUi), busy: false, status: '', duplicateAsk: null, actions };
+  const prefs = { ...DEFAULT_AUDIO_PREFS, upNext: FIXTURE_AUDIO.slice(1, 3).map((i) => i.id) };
+  return { items: FIXTURE_AUDIO, deleted: DELETED.map(asUi), busy: false, status: '', duplicateAsk: null, actions, prefs };
 }

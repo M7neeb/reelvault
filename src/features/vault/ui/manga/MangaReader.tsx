@@ -42,7 +42,7 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { READING_MODES, chapterAfter, chapterLabel, modeOf, type MangaChapter, type ReadingMode } from '../../manga/mangaLogic';
-import { DEFAULT_READER, type ReaderPrefs } from '../../manga/sources/prefs';
+import { AUTO_SCROLL_SPEEDS, DEFAULT_READER, HOLD_PAGE_EVERY, HOLD_SCROLL_SPEEDS, type ReaderPrefs } from '../../manga/sources/prefs';
 import { pageSlots, slotOfPage } from '../../manga/readerLogic';
 import type { ImageRef } from '../../manga/sources/types';
 import { tick } from '../haptics';
@@ -227,7 +227,7 @@ export default function MangaReader({
   series: MangaUiSeries;
   chapter: MangaChapter;
   fromStart?: boolean;
-  actions: Pick<MangaActions, 'loadPages' | 'saveProgress' | 'addRead' | 'update' | 'keepAwake' | 'setCoverFromImage' | 'sharePage' | 'savePage' | 'pageMargins'>;
+  actions: Pick<MangaActions, 'loadPages' | 'saveProgress' | 'addRead' | 'update' | 'keepAwake' | 'setCoverFromImage' | 'sharePage' | 'savePage' | 'pageMargins' | 'volumeKeys'>;
   /** Tap zones, page colour, two pages side by side. */
   prefs?: ReaderPrefs;
   onPrefs?: (patch: Partial<ReaderPrefs>) => void;
@@ -460,7 +460,7 @@ export default function MangaReader({
   // Auto-scroll: the strip moves down by itself; touching it stops it.
   useEffect(() => {
     if (!auto || mode !== 'webtoon') return;
-    const pxPerSec = [0, 28, 55, 95, 150, 230][prefs.autoSpeed] ?? 55;
+    const pxPerSec = AUTO_SCROLL_SPEEDS[prefs.autoSpeed - 1] ?? 60;
     let last = Date.now();
     const id = setInterval(() => {
       const now = Date.now();
@@ -471,6 +471,63 @@ export default function MangaReader({
     }, 16);
     return () => clearInterval(id);
   }, [auto, mode, prefs.autoSpeed]);
+
+  /* ------------------------------------------- the volume buttons (build 18) */
+
+  /** A held button: which way, and until when it counts as still held. */
+  const hold = useRef({ dir: 0, until: 0, lastKey: 0, lastTurn: 0, held: false });
+  const volumeTurn = useRef<(forward: boolean) => void>(() => undefined);
+  // The latest actions, so a parent that rebuilds them every render does not restart the listener.
+  const volumeKeysRef = useRef(actions.volumeKeys);
+  volumeKeysRef.current = actions.volumeKeys;
+  const hasVolumeKeys = !!actions.volumeKeys;
+  useEffect(() => {
+    if (!prefs.volumeKeys || !volumeKeysRef.current) return;
+    return volumeKeysRef.current((key) => {
+      const forward = (key === 'down') !== prefs.volumeInvert;
+      const dir = forward ? 1 : -1;
+      const now = Date.now();
+      const h = hold.current;
+      // Presses close together the same way: the button is being held.
+      const held = now - h.lastKey < 450 && h.dir === dir;
+      h.lastKey = now;
+      h.dir = dir;
+      h.held = held;
+      h.until = now + 450;
+      setChrome(false);
+      setAuto(false);
+      if (mode === 'webtoon') {
+        if (!held) {
+          offset.current = Math.max(0, offset.current + dir * H * 0.7);
+          listRef.current?.scrollToOffset({ offset: offset.current, animated: true });
+        }
+        return;
+      }
+      const every = HOLD_PAGE_EVERY[prefs.holdSpeed - 1] ?? 650;
+      if (!held || now - h.lastTurn >= every) {
+        h.lastTurn = now;
+        volumeTurn.current(forward);
+      }
+    });
+  }, [prefs.volumeKeys, prefs.volumeInvert, prefs.holdSpeed, mode, H, hasVolumeKeys]);
+
+  // Holding a button in the long strip: a smooth scroll while it is held.
+  useEffect(() => {
+    if (!prefs.volumeKeys || !hasVolumeKeys || mode !== 'webtoon') return;
+    const pxPerSec = HOLD_SCROLL_SPEEDS[prefs.holdSpeed - 1] ?? 490;
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const h = hold.current;
+      const dt = now - last;
+      last = now;
+      // The first press already jumped; scrolling runs once the button is clearly held.
+      if (!h.held || now >= h.until) return;
+      offset.current = Math.max(0, offset.current + (h.dir * pxPerSec * dt) / 1000);
+      listRef.current?.scrollToOffset({ offset: offset.current, animated: false });
+    }, 16);
+    return () => clearInterval(id);
+  }, [prefs.volumeKeys, prefs.holdSpeed, mode, hasVolumeKeys]);
 
   /* ------------------------------------------------------- moving about */
 
@@ -521,6 +578,10 @@ export default function MangaReader({
     [rtl, page, goTo, prefs.tapZones, prefs.tapInvert, slotOf, slots, count]
   );
   const toggleChrome = useCallback(() => setChrome((c) => !c), []);
+  volumeTurn.current = (forward: boolean) => {
+    const at = slotOf(page);
+    goTo(forward ? (slots[at + 1]?.[0] ?? count) : (slots[at - 1]?.[0] ?? 0));
+  };
 
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset } = e.nativeEvent;
@@ -773,8 +834,8 @@ export default function MangaReader({
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={s.autoBtn}
-                      onPress={() => onPrefs?.({ autoSpeed: (prefs.autoSpeed % 5) + 1 })}
-                      accessibilityLabel={`Auto-scroll speed ${prefs.autoSpeed} of 5`}>
+                      onPress={() => onPrefs?.({ autoSpeed: (prefs.autoSpeed % 10) + 1 })}
+                      accessibilityLabel={`Auto-scroll speed ${prefs.autoSpeed} of 10`}>
                       <Text style={s.autoText}>Speed {prefs.autoSpeed}</Text>
                     </TouchableOpacity>
                   </>
@@ -905,6 +966,34 @@ export default function MangaReader({
                         },
                       ]
                     : []),
+                  ...(actions.volumeKeys
+                    ? [
+                        {
+                          label: `Volume buttons · ${prefs.volumeKeys ? 'Turn pages' : 'Off'}`,
+                          hint: prefs.volumeKeys ? 'Press to turn a page, hold to keep scrolling' : 'On: the volume buttons turn pages and scroll',
+                          onPress: () => onPrefs({ volumeKeys: !prefs.volumeKeys }),
+                        },
+                        ...(prefs.volumeKeys
+                          ? [
+                              {
+                                label: `Volume buttons the other way · ${prefs.volumeInvert ? 'On' : 'Off'}`,
+                                hint: prefs.volumeInvert ? 'Now: volume up goes forward' : 'Now: volume down goes forward',
+                                onPress: () => onPrefs({ volumeInvert: !prefs.volumeInvert }),
+                              },
+                              {
+                                label: `Holding speed · ${prefs.holdSpeed} of 10`,
+                                hint: 'How fast holding a volume button scrolls or turns pages; tap for faster',
+                                onPress: () => onPrefs({ holdSpeed: (prefs.holdSpeed % 10) + 1 }),
+                              },
+                            ]
+                          : []),
+                      ]
+                    : []),
+                  {
+                    label: `Auto-scroll speed · ${prefs.autoSpeed} of 10`,
+                    hint: 'Long strip: tap Auto at the bottom to start, touch the page to stop; tap here for faster',
+                    onPress: () => onPrefs({ autoSpeed: (prefs.autoSpeed % 10) + 1 }),
+                  },
                   {
                     label: `Page filter · ${FILTER_LABEL[prefs.filter]}`,
                     hint: 'Tap to change: none, grey, warm (night), dimmed',

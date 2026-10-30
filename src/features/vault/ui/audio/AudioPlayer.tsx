@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View, type GestureResponderEvent } from 'react-native';
+import { Alert, ScrollView, Text, TouchableOpacity, View, type GestureResponderEvent } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -124,6 +124,7 @@ export function AudioPlayerScreen({
   const [sheetOpen, setSheetOpen] = useState<null | 'chapters' | 'speed' | 'sleep' | 'marks' | 'rate' | 'mark-label' | 'rewind'>(null);
   const [marks, setMarks] = useState<AudioBookmark[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const [boosting, setBoosting] = useState<number | null>(null);
 
   const chapters = useMemo(() => (item ? chaptersOf(item) : []), [item]);
   const chIndex = chapterIndexAt(chapters, pb.overall);
@@ -266,6 +267,25 @@ export function AudioPlayerScreen({
               <Icon name="bookmark" size={18} color={marks.length ? p.accent : p.text} />
               <Text style={styles.toolLabel}>{marks.length ? `${marks.length} ${marks.length === 1 ? 'mark' : 'marks'}` : 'Marks'}</Text>
             </TouchableOpacity>
+            {actions.setVoiceBoost && actions.canBoost?.() && (
+              <TouchableOpacity
+                style={styles.tool}
+                disabled={boosting !== null}
+                onPress={() => {
+                  tick();
+                  const on = !prefs.boosted.includes(item.id);
+                  if (on) setBoosting(0);
+                  actions.setVoiceBoost!(item.id, on, (f) => setBoosting(f))
+                    .catch((e) => Alert.alert('Voice Boost did not work', String(e?.message ?? e)))
+                    .finally(() => setBoosting(null));
+                }}
+                accessibilityLabel={prefs.boosted.includes(item.id) ? 'Voice Boost is on. Tap to turn it off' : 'Voice Boost: clearer, louder voices'}>
+                <Icon name="audio" size={18} color={prefs.boosted.includes(item.id) || boosting !== null ? p.accent : p.text} />
+                <Text style={[styles.toolLabel, (prefs.boosted.includes(item.id) || boosting !== null) && { color: p.accent }]}>
+                  {boosting !== null ? `${Math.round(boosting * 100)}%` : 'Boost'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
           {/* One-tap speeds (hold one to make it your current speed instead). */}
           <View style={styles.favRow}>
@@ -323,7 +343,14 @@ export function AudioPlayerScreen({
           options={[
             ...SPEEDS.map((s) => ({ label: `${s}×`, hint: s === pb.rate ? '✓ (this book remembers it)' : s === 1 ? 'normal' : undefined, onPress: () => pb.setRate(s) })),
             ...(actions.setPrefs
-              ? [{ label: 'Smart rewind after a pause…', hint: REWIND_CHOICES.find((c) => c.value === prefs.rewind)?.label, onPress: () => setSheetOpen('rewind') }]
+              ? [
+                  { label: 'Smart rewind after a pause…', hint: REWIND_CHOICES.find((c) => c.value === prefs.rewind)?.label, onPress: () => setSheetOpen('rewind') },
+                  {
+                    label: 'When a book of a series ends',
+                    hint: prefs.seriesAutoplay ? 'Play the next book' : 'Stop',
+                    onPress: () => void actions.setPrefs?.({ ...prefs, seriesAutoplay: !prefs.seriesAutoplay }),
+                  },
+                ]
               : []),
           ]}
           onClose={() => setSheetOpen((s) => (s === 'speed' ? null : s))}

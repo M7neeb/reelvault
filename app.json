@@ -2,7 +2,7 @@
   "expo": {
     "name": "ReelVault",
     "slug": "reelvault",
-    "version": "1.10.0",
+    "version": "1.11.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "reelvault",
@@ -15,6 +15,7 @@
         "NSLocalNetworkUsageDescription": "ReelVault receives videos and audio you send from your computer over Wi-Fi.",
         "LSSupportsOpeningDocumentsInPlace": false,
         "UIFileSharingEnabled": true,
+        "CADisableMinimumFrameDurationOnPhone": true,
         "CFBundleDocumentTypes": [
           {
             "CFBundleTypeName": "Video",
@@ -55,9 +56,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#0E1016",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 200
         }
       ],
       [

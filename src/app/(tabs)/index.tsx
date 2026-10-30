@@ -23,7 +23,7 @@ export default function VideosRoute() {
     <ThemeContext.Provider value={palette}>
     <SideSafe>
     <TabBarSpace.Provider value={insets.bottom + TAB_BAR_HEIGHT}>
-    <AudioPlaybackProvider items={audio.items} actions={audio.actions} rewind={audio.prefs?.rewind ?? 1}>
+    <AudioPlaybackProvider items={audio.items} actions={audio.actions} rewind={audio.prefs?.rewind ?? 1} prefs={audio.prefs}>
       <VaultScreen
         audio={audio}
         manga={manga}
@@ -32,6 +32,7 @@ export default function VideosRoute() {
         tagMap={vault.tagMap}
         deletedItems={vault.deletedItems}
         duplicateGroups={vault.duplicateGroups}
+        prints={vault.prints}
         smartFilters={vault.smartFilters}
         albums={vault.albums}
         folders={vault.folders}

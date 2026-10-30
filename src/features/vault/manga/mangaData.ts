@@ -48,6 +48,7 @@ import {
   removeServer,
   saveBrowsePrefs,
   uninstallExtension,
+  pushProgress,
 } from './mangaSources';
 import { DEFAULT_BROWSE, type BrowsePrefs } from './sources/prefs';
 import {
@@ -127,6 +128,16 @@ export function useMangaData(): MangaData {
   const setPrefs = useCallback((p: BrowsePrefs) => {
     prefsRef.current = p;
     setPrefsState(p);
+  }, []);
+  /** When each chapter's progress last went to its server. */
+  const pushedAt = useRef(new Map<string, number>());
+  /** Chapters marked read or unread by hand: their servers hear about it (one at a time, in the background). */
+  const sendRead = useCallback((chapterIds: string[], read: boolean) => {
+    const want = new Set(chapterIds);
+    const jobs = allRef.current.flatMap((s) => s.chapters.filter((c) => want.has(c.id)).map((c) => ({ s, c })));
+    void (async () => {
+      for (const { s, c } of jobs.slice(0, 500)) await pushProgress(s.sourceId, c, read ? Math.max(0, c.pageCount - 1) : 0, read, prefsRef.current);
+    })();
   }, []);
   useEffect(() => {
     loadBrowsePrefs()
@@ -345,6 +356,7 @@ export function useMangaData(): MangaData {
       setRead: async (chapterIds, read) => {
         await setChaptersRead(chapterIds, read, Date.now());
         await refresh();
+        sendRead(chapterIds, read);
       },
       markPreviousRead: async (seriesId, chapterId) => {
         const s = byId(seriesId);
@@ -357,10 +369,24 @@ export function useMangaData(): MangaData {
           Date.now()
         );
         await refresh();
+        sendRead(
+          s.chapters.slice(0, i).map((c) => c.id),
+          true
+        );
       },
       saveProgress: async (seriesId, chapterId, page, finished) => {
         const at = Date.now();
         await saveProgress(seriesId, chapterId, page, finished, at);
+        // Your servers hear about it too: at once when a chapter is finished, otherwise at most every 8 seconds.
+        {
+          const s = allRef.current.find((x) => x.id === seriesId);
+          const c = s?.chapters.find((x) => x.id === chapterId);
+          const last = pushedAt.current.get(chapterId) ?? 0;
+          if (s && c && (finished || at - last > 8000)) {
+            pushedAt.current.set(chapterId, at);
+            void pushProgress(s.sourceId, c, page, finished, prefsRef.current);
+          }
+        }
         // Only this series changes: no full reload while reading.
         setAll((list) =>
           list.map((s) =>
@@ -389,6 +415,19 @@ export function useMangaData(): MangaData {
       addRead,
       loadPages: (series, chapter) => pagesOf(series, chapter, prefsRef.current),
       keepAwake: (on) => keepAwake('manga-reader', on),
+      ...(typeof ReelVaultMedia?.startVolumeKeys === 'function'
+        ? {
+            volumeKeys: (onKey: (direction: 'up' | 'down') => void) => {
+              const native = ReelVaultMedia!;
+              const sub = native.addListener?.('onVolumeKey', (e) => onKey(e.direction));
+              native.startVolumeKeys!();
+              return () => {
+                sub?.remove();
+                native.stopVolumeKeys?.();
+              };
+            },
+          }
+        : {}),
       refresh: async (seriesId) => {
         const ids = await refreshSeries(seriesId, prefsRef.current);
         await refresh();

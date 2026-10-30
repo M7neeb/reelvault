@@ -139,6 +139,22 @@ export function isTrimmed(plan: EditPlan, durationMs: number | null): boolean {
   return plan.startMs > 0 || (plan.endMs !== null && (durationMs === null || plan.endMs < durationMs));
 }
 
+/**
+ * Cutting the same number of seconds off the start (and the end) of many
+ * videos. null when the video is too short to keep at least a second, or
+ * when nothing would be cut. `exact` re-encodes so the cut lands on the very
+ * frame; otherwise it is instant and lossless but starts at the nearest
+ * key frame (up to a second or two early).
+ */
+export function trimPlan(durationMs: number | null, startSec: number, endSec: number, exact: boolean): EditPlan | null {
+  const startMs = Math.max(0, Math.round(startSec * 1000));
+  const cutEnd = Math.max(0, Math.round(endSec * 1000));
+  if (!startMs && !cutEnd) return null;
+  if (cutEnd && durationMs === null) return null;
+  if (durationMs !== null && durationMs - startMs - cutEnd < 1000) return null;
+  return { ...EMPTY_PLAN, startMs, endMs: cutEnd && durationMs !== null ? durationMs - cutEnd : null, lossless: !exact };
+}
+
 /** What the result will look like. */
 export function outputOf(plan: EditPlan, src: SourceInfo): { width: number | null; height: number | null; fps: number | null; durationMs: number | null } {
   let width = src.width;

@@ -9,7 +9,7 @@
 /** A picture somewhere on the network, with the headers it needs (a login, a referer). */
 export type ImageRef = { uri: string; headers?: Record<string, string> };
 
-export type HttpInit = { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string };
+export type HttpInit = { method?: 'GET' | 'POST' | 'PATCH'; headers?: Record<string, string>; body?: string };
 
 export type Http = {
   json: (url: string, init?: HttpInit) => Promise<unknown>;

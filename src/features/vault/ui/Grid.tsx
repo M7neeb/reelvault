@@ -101,7 +101,8 @@ export default function Grid({
   const step = Math.max(200, Math.round(viewport.h / 2));
 
   // Group titles only make sense for the normal library views.
-  const groupBy = mode === 'normal' ? viewOptions.groupBy : 'none';
+  // In your own order, date headings would pull moved videos back to their date.
+  const groupBy = mode === 'normal' && viewOptions.sort !== 'custom' ? viewOptions.groupBy : 'none';
   const sections = useMemo(() => groupItems(items, groupBy, seriesOf), [items, groupBy, seriesOf]);
 
   const layout = useMemo(

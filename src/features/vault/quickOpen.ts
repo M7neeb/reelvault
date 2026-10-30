@@ -1,27 +1,33 @@
 /**
- * Quick links for a Control Center button (iOS 18: Control Center → add a
- * control → Shortcuts → a shortcut that opens one of these):
+ * Quick links for the Action button, Siri and Control Center (a shortcut in
+ * the Shortcuts app that opens one of these):
  *
  * - reelvault://favourite  plays a random favourite (rated 8 or more)
  * - reelvault://memory     plays today's memory (On this day, or the top one)
  * - reelvault://random     plays any video
+ * - reelvault://watch      carries on the video you stopped last
+ * - reelvault://listen     carries on the audiobook you listened to last
+ * - reelvault://read       carries on the manga you read last
  *
  * The router hands the address here (see app/+native-intent.tsx); the vault
  * screen picks it up. Pure: no React, no native modules.
  */
 
-export type QuickKind = 'favourite' | 'memory' | 'random';
+export type QuickKind = 'favourite' | 'memory' | 'random' | 'watch' | 'listen' | 'read';
 
 export const QUICK_LINKS: { kind: QuickKind; url: string; label: string; hint: string }[] = [
   { kind: 'favourite', url: 'reelvault://favourite', label: 'A random favourite', hint: 'Plays one of the videos you rated 8 or more' },
   { kind: 'memory', url: 'reelvault://memory', label: "Today's memory", hint: 'Plays On this day, or the top memory for you' },
   { kind: 'random', url: 'reelvault://random', label: 'Any video', hint: 'Plays a video picked at random' },
+  { kind: 'watch', url: 'reelvault://watch', label: 'Carry on watching', hint: 'The video you stopped last, where you stopped' },
+  { kind: 'listen', url: 'reelvault://listen', label: 'Carry on listening', hint: 'The audiobook you listened to last' },
+  { kind: 'read', url: 'reelvault://read', label: 'Carry on reading', hint: 'The manga you read last, at your page' },
 ];
 
 /** The quick link an address asks for, if any ("reelvault://favourite", "/favourite", "reelvault:///memory?x=1"). */
 export function quickKind(path: string | null | undefined): QuickKind | null {
   if (!path) return null;
-  const m = /^(?:reelvault:\/*|\/)?(favourite|favorite|memory|random)\/?(?:[?#].*)?$/i.exec(path.trim());
+  const m = /^(?:reelvault:\/*|\/)?(favourite|favorite|memory|random|watch|listen|read)\/?(?:[?#].*)?$/i.exec(path.trim());
   if (!m) return null;
   const k = m[1].toLowerCase();
   return k === 'favorite' ? 'favourite' : (k as QuickKind);

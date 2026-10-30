@@ -13,6 +13,8 @@ export type AudioUiItem = AudioItem & {
   coverSource: ThumbSource | null;
   /** The file of each track, ready to play. */
   trackUris: string[];
+  /** The Voice Boost copy of each track (null while it is not made yet); only for items with Voice Boost on. */
+  boostUris?: (string | null)[];
 };
 
 export type AudioBookmark = { id: number; itemId: string; track: number; atMs: number; label: string | null; createdAt: number };
@@ -66,6 +68,10 @@ export type AudioActions = {
   openExtra?: (uri: string) => Promise<void>;
   removeExtra?: (id: string, name: string) => Promise<void>;
   setPrefs?: (p: AudioPrefs) => Promise<void>;
+  /** Voice Boost works in this app build (18 and later). */
+  canBoost?: () => boolean;
+  /** Turns Voice Boost on (making the boosted copies first, with progress 0..1) or off. */
+  setVoiceBoost?: (id: string, on: boolean, onProgress: (f: number) => void) => Promise<void>;
 };
 
 export type AudioExtraUi = { name: string; uri: string; size: number; kind: 'pdf' | 'image' | 'book' | 'other' };
