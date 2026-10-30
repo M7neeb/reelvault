@@ -33,7 +33,8 @@ export type MangaActions = {
   importFolder: () => Promise<void>;
   update: (ids: string[], patch: MangaEdit) => Promise<void>;
   addTag: (ids: string[], name: string) => Promise<void>;
-  removeTag: (id: string, name: string) => Promise<void>;
+  /** One title, or many at once. */
+  removeTag: (ids: string | string[], name: string) => Promise<void>;
   /** To Recently Deleted. */
   trash: (ids: string[]) => Promise<void>;
   restore: (ids: string[]) => Promise<void>;

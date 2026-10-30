@@ -350,8 +350,8 @@ export function useMangaData(): MangaData {
         for (const id of ids) await addMangaTag(id, name);
         await refresh();
       },
-      removeTag: async (id, name) => {
-        await removeMangaTag(id, name);
+      removeTag: async (ids, name) => {
+        for (const id of typeof ids === 'string' ? [ids] : ids) await removeMangaTag(id, name);
         await refresh();
       },
       trash: async (ids) => {
