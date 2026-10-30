@@ -143,6 +143,7 @@ function ViewerPage({
   link = null,
   onLinkChanged,
   resumeAt = null,
+  startAt = null,
   prefs = DEFAULT_VAULT_PREFS,
   onPrefs,
   onClose,
@@ -182,7 +183,7 @@ function ViewerPage({
   };
 
   const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (pl) => {
-    pl.loop = opts.loop;
+    pl.loop = opts.endLoop;
     // AirPlay sends the video itself to the TV, not only the sound.
     pl.allowsExternalPlayback = true;
     pl.playbackRate = opts.speed;
@@ -193,11 +194,11 @@ function ViewerPage({
     pl.timeUpdateEventInterval = 0.2;
   });
   useEffect(() => {
-    player.loop = opts.loop;
+    player.loop = opts.endLoop;
     player.playbackRate = opts.speed;
     player.staysActiveInBackground = opts.background;
     player.showNowPlayingNotification = opts.background;
-  }, [player, opts.loop, opts.speed, opts.background]);
+  }, [player, opts.endLoop, opts.speed, opts.background]);
 
   const videoRef = useRef<VideoView>(null);
   /** Pinch out to fill the screen (cropping the edges), pinch in to see it whole. */
@@ -329,6 +330,20 @@ function ViewerPage({
   };
   useEffect(loadMarks, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Chapter markers stored in the file itself.
+  const [chapters, setChapters] = useState<{ title: string; startMs: number }[]>([]);
+  useEffect(() => {
+    let live = true;
+    setChapters([]);
+    actions
+      .loadChapters(item)
+      .then((c) => live && setChapters(c))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Record how much of the video was watched (content time; seeks are not counted).
   const watched = useRef({ ms: 0, last: -1, openedAt: Date.now() });
   useEffect(() => {
@@ -345,6 +360,23 @@ function ViewerPage({
       void actions.recordPlay(item.id, w.openedAt, w.ms).catch(() => undefined);
     };
   }, [player, item.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Opened at a moment found by search: start right there (instead of where you stopped).
+  useEffect(() => {
+    if (!enableVideo || startAt === null) return;
+    resumeDone.current = true;
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      player.currentTime = Math.max(0, startAt / 1000 - 1);
+    };
+    if (player.status === 'readyToPlay') go();
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') go();
+    });
+    return () => sub.remove();
+  }, [player, startAt, enableVideo]);
 
   // Pick a saved video up again, 2.5 minutes before where you stopped.
   useEffect(() => {
@@ -366,7 +398,7 @@ function ViewerPage({
   // Skip intro: an album can skip the start of its videos (not when picking up where you stopped).
   const skipSec = Math.max(0, ...albumIdsAtOpen.current.map((id) => prefs.skipIntro?.[String(id)] ?? 0));
   useEffect(() => {
-    if (!enableVideo || skipSec <= 0 || (prefs.resumeEnabled && resumeAt !== null)) return;
+    if (!enableVideo || skipSec <= 0 || startAt !== null || (prefs.resumeEnabled && resumeAt !== null)) return;
     let done = false;
     const go = () => {
       if (done) return;
@@ -642,8 +674,8 @@ function ViewerPage({
   }
   function toggleLoop() {
     tick();
-    setOpt({ loop: !opts.loop });
-    setToast(opts.loop ? 'Loop off' : 'Loops this video');
+    setOpt({ endLoop: !opts.endLoop });
+    setToast(opts.endLoop ? 'Loop off' : 'Loops this video');
   }
   function startPip() {
     tick();
@@ -1064,7 +1096,7 @@ function ViewerPage({
                   {'  /  '}
                   {opts.remaining ? `−${fmtDuration(Math.max(0, totalSec - elapsed) * 1000) ?? '0:00'}` : (fmtDuration(totalSec * 1000) ?? '--:--')}
                   {opts.speed !== 1 ? `   ${opts.speed}×` : ''}
-                  {opts.loop ? '   ↻' : ''}
+                  {opts.endLoop ? '   ↻' : ''}
                 </Text>
               </TouchableOpacity>
               )}
@@ -1443,6 +1475,20 @@ function ViewerPage({
                     void actions.onExtractFrame(item, progress * totalSec * 1000);
                   }}
                 />
+                {actions.canSaveSound() && (
+                  <MenuRow
+                    label="Save Sound to Audio"
+                    hint="Listen without the picture"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      setNote('Saving the sound…');
+                      actions
+                        .onSaveSound(item)
+                        .then((added) => setNote(added ? 'Sound saved: find it in Audio' : 'That sound is already in Audio'))
+                        .catch((e) => setNote(`That did not work: ${String(e?.message ?? e)}`));
+                    }}
+                  />
+                )}
                 <MenuRow
                   label="Use This Frame as Cover"
                   hint={fmtDuration(elapsed * 1000) ?? '0:00'}
@@ -1551,13 +1597,15 @@ function ViewerPage({
               <Text style={styles.menuTitle}>Player</Text>
               <ScrollView style={styles.menuScroll}>
                 <MenuRow label="Speed" hint={`${opts.speed}×`} onPress={cycleSpeed} />
-                <MenuRow label="Loop This Video" hint={opts.loop ? 'On' : 'Off'} onPress={toggleLoop} />
                 <MenuRow
                   label="When It Ends"
-                  hint={opts.autoplayNext ? 'Play the next one' : 'Stop'}
+                  hint={opts.endLoop ? 'Loop' : opts.autoplayNext ? 'Play the next one' : 'Stop'}
                   onPress={() => {
                     tick();
-                    setOpt({ autoplayNext: !opts.autoplayNext });
+                    // Loop → Play the next one → Stop → Loop
+                    if (opts.endLoop) setOpt({ endLoop: false, autoplayNext: true });
+                    else if (opts.autoplayNext) setOpt({ endLoop: false, autoplayNext: false });
+                    else setOpt({ endLoop: true, autoplayNext: false });
                   }}
                 />
                 <MenuRow
@@ -1580,6 +1628,18 @@ function ViewerPage({
                     onLongPress={() => {
                       setPlayerMenu(false);
                       setMarkMenu(m);
+                    }}
+                  />
+                ))}
+                {chapters.length > 0 && <Text style={styles.menuTitle}>Chapters</Text>}
+                {chapters.map((c, i) => (
+                  <MenuRow
+                    key={`ch${i}`}
+                    label={`   ${c.title}`}
+                    hint={fmtClock(c.startMs)}
+                    onPress={() => {
+                      setPlayerMenu(false);
+                      seek(Math.min(1, c.startMs / 1000 / Math.max(1, totalSec)));
                     }}
                   />
                 ))}
@@ -1886,6 +1946,8 @@ type ViewerProps = {
   onLinkChanged?: () => void;
   /** A saved "continue another time" point (ms), if there is one. */
   resumeAt?: number | null;
+  /** Start at this moment (ms), e.g. one found by search inside videos. */
+  startAt?: number | null;
   prefs?: VaultPrefs;
   /** Save changed settings (the player's speed, loop, Up Next…). */
   onPrefs?: (p: VaultPrefs) => void;

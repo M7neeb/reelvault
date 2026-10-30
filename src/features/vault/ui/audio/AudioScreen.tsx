@@ -4,8 +4,9 @@
  * then filters (listening, not started, finished, favourites, read-along
  * books, your keywords), search, sorting, and a list with covers, progress
  * and ratings. Hold an item to select several: rate, set a status, add a
- * keyword, move to Private, or delete (Recently Deleted keeps them for the
- * days you chose). Presentational only (see the note at the top of types.ts).
+ * keyword, add to Listen next, move to Private, or delete (Recently Deleted
+ * keeps them for the days you chose). Listen next and your series (books
+ * sharing the Series field, in order) have their own rows. Presentational only (see the note at the top of types.ts).
  */
 
 import { useMemo, useState } from 'react';
@@ -13,7 +14,7 @@ import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View, Alert } 
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AUDIO_SORTS, AUDIO_STATUSES, continueListening, displayTitle, fmtLength, fmtRating, matchesAudio, progressOf, sortAudio, totalMs, type AudioFilter, type AudioSort, type AudioStatus } from '../../audio/audioLogic';
+import { AUDIO_SORTS, AUDIO_STATUSES, continueListening, displayTitle, fmtLength, fmtRating, matchesAudio, progressOf, seriesBooks, seriesNumber, seriesOf, sortAudio, totalMs, type AudioFilter, type AudioPrefs, type AudioSort, type AudioStatus } from '../../audio/audioLogic';
 import { useTabBarSpace } from '../chrome';
 import { tick } from '../haptics';
 import Icon from '../Icon';
@@ -51,6 +52,7 @@ export default function AudioScreen({
   onWifi,
   bottomSpace = 0,
   initialDeleted = false,
+  prefs,
 }: {
   items: AudioUiItem[];
   deleted: AudioUiItem[];
@@ -70,6 +72,8 @@ export default function AudioScreen({
   /** Room kept at the bottom for the mini player. */
   bottomSpace?: number;
   initialDeleted?: boolean;
+  /** Listen next lives in the audio settings. */
+  prefs?: AudioPrefs;
 }) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
@@ -84,6 +88,8 @@ export default function AudioScreen({
   const [rating, setRating] = useState(false);
   const [tagPrompt, setTagPrompt] = useState(false);
   const [deletedTarget, setDeletedTarget] = useState<AudioUiItem | null>(null);
+  const [series, setSeries] = useState<string | null>(null);
+  const [queueTarget, setQueueTarget] = useState<AudioUiItem | null>(null);
 
   const visible = useMemo(() => items.filter((i) => showPrivate || !i.isPrivate), [items, showPrivate]);
   const privateCount = items.length - visible.length;
@@ -107,7 +113,20 @@ export default function AudioScreen({
   );
   const active = chips.find((c) => c.key === chip) ?? chips[0];
   const source = inDeleted ? deleted.filter((i) => showPrivate || !i.isPrivate) : visible;
-  const list = useMemo(() => sortAudio(source.filter((i) => matchesAudio(i, { ...active.filter, query })), sort), [source, active, query, sort]);
+  const list = useMemo(
+    () => (series && !inDeleted ? seriesBooks(source, series).filter((i) => matchesAudio(i, { query })) : sortAudio(source.filter((i) => matchesAudio(i, { ...active.filter, query })), sort)),
+    [source, active, query, sort, series, inDeleted]
+  );
+  const allSeries = useMemo(() => (query || chip !== 'all' || inDeleted || series ? [] : seriesOf(visible)), [visible, query, chip, inDeleted, series]);
+  const upNext = useMemo(() => {
+    if (query || chip !== 'all' || inDeleted || series || !prefs?.upNext.length) return [];
+    const byId = new Map(visible.map((i) => [i.id, i]));
+    return prefs.upNext.map((id) => byId.get(id)).filter((i): i is AudioUiItem => !!i);
+  }, [visible, prefs, query, chip, inDeleted, series]);
+  const queueIds = prefs?.upNext ?? [];
+  const setQueue = (next: string[]) => {
+    if (prefs && actions.setPrefs) actions.setPrefs({ ...prefs, upNext: next }).catch(failed);
+  };
   const counts = useMemo(() => Object.fromEntries(chips.map((c) => [c.key, visible.filter((i) => matchesAudio(i, c.filter)).length])), [chips, visible]);
   const resume = useMemo(() => (query || chip !== 'all' || inDeleted ? [] : continueListening(visible)), [visible, query, chip, inDeleted]);
   const libraryMs = visible.reduce((a, i) => a + totalMs(i), 0);
@@ -129,6 +148,7 @@ export default function AudioScreen({
   const moreOptions: OptionItem[] = [
     { label: 'Sort', hint: AUDIO_SORTS.find((s) => s.key === sort)?.label, onPress: () => setTimeout(() => setMenu('sort'), 250) },
     { label: 'Select', onPress: () => setSelected(new Set()) },
+    ...(queueIds.length ? [{ label: 'Clear Listen next', hint: `${queueIds.length}`, onPress: () => setQueue([]) }] : []),
     { label: inDeleted ? 'Back to the library' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
     { label: 'Stats and Wrapped', onPress: onDashboard },
@@ -210,7 +230,85 @@ export default function AudioScreen({
         </View>
       )}
 
-      {!inDeleted && visible.length > 0 && (
+      {upNext.length > 0 && (
+        <View style={{ marginTop: 14 }}>
+          <Text style={styles.section}>Listen next</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SIDE, gap: 12 }}>
+            {upNext.map((i, n) => (
+              <TouchableOpacity
+                key={i.id}
+                style={styles.queued}
+                onPress={() => onOpen(i)}
+                onLongPress={() => {
+                  tick();
+                  setQueueTarget(i);
+                }}
+                accessibilityLabel={`Listen next ${n + 1}: ${displayTitle(i)}. Hold to move or remove`}>
+                <AudioCover item={i} size={96} radius={14} />
+                <Text style={styles.queueNum}>{n + 1}</Text>
+                <Text style={styles.resumeTitle} numberOfLines={2}>
+                  {displayTitle(i)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {allSeries.length > 0 && (
+        <View style={{ marginTop: 14 }}>
+          <Text style={styles.section}>Series</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SIDE, gap: 12 }}>
+            {allSeries.map((s) => (
+              <TouchableOpacity
+                key={s.name}
+                style={styles.seriesCard}
+                onPress={() => {
+                  tick();
+                  setSeries(s.name);
+                }}
+                accessibilityLabel={`${s.name}: ${s.books.length} books, ${s.finished} finished`}>
+                <View style={styles.seriesCovers}>
+                  {s.books.slice(0, 3).map((b, n) => (
+                    <View key={b.id} style={[styles.seriesCover, { left: n * 22, zIndex: 3 - n }]}>
+                      <AudioCover item={b} size={72} radius={10} />
+                    </View>
+                  ))}
+                </View>
+                <Text style={styles.resumeTitle} numberOfLines={1}>
+                  {s.name}
+                </Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {s.finished === s.books.length ? `All ${s.books.length} finished` : `${s.finished} of ${s.books.length} finished`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {series && !inDeleted && (
+        <View style={styles.seriesHead}>
+          <Text style={[styles.section, { flex: 1, marginBottom: 0 }]} numberOfLines={1}>
+            {series}
+          </Text>
+          {prefs && actions.setPrefs && (
+            <TouchableOpacity
+              style={styles.chip}
+              onPress={() => {
+                const rest = list.filter((b) => b.status !== 'finished').map((b) => b.id);
+                setQueue([...queueIds.filter((id) => !rest.includes(id)), ...rest]);
+              }}>
+              <Text style={styles.chipText}>Listen next</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.chip} onPress={() => setSeries(null)} accessibilityLabel="Back to the whole library">
+            <Icon name="close" size={12} color={p.textSoft} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!inDeleted && !series && visible.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {chips.map((c) => {
             const on = c.key === chip;
@@ -230,7 +328,7 @@ export default function AudioScreen({
           })}
         </ScrollView>
       )}
-      {list.length > 0 && (
+      {list.length > 0 && !series && (
         <TouchableOpacity style={styles.sortRow} onPress={() => setMenu('sort')}>
           <Text style={styles.sortText}>{AUDIO_SORTS.find((s) => s.key === sort)?.label}</Text>
           <Icon name="down" size={11} color={p.textSecondary} />
@@ -298,8 +396,10 @@ export default function AudioScreen({
               <View style={{ flex: 1, gap: 3 }}>
                 <View style={styles.rowHead}>
                   <Text style={[styles.rowTitle, now && { color: p.accent }]} numberOfLines={1}>
+                    {series && seriesNumber(i) !== null ? `${seriesNumber(i)}. ` : ''}
                     {displayTitle(i)}
                   </Text>
+                  {queueIds.includes(i.id) && <Icon name="list" size={13} color={p.accent} />}
                   {i.rating > 0 && <Text style={styles.rating}>★ {fmtRating(i.rating)}</Text>}
                 </View>
                 <Text style={styles.meta} numberOfLines={1}>
@@ -342,6 +442,20 @@ export default function AudioScreen({
           <TouchableOpacity disabled={!ids.length} onPress={() => setTagPrompt(true)} style={styles.selectBtn}>
             <Text style={styles.selectBtnText}>#</Text>
           </TouchableOpacity>
+          {prefs && actions.setPrefs && (
+            <TouchableOpacity
+              disabled={!ids.length}
+              onPress={() => {
+                // In the order they appear in the list.
+                const order = list.filter((i) => ids.includes(i.id)).map((i) => i.id);
+                setQueue([...queueIds.filter((id) => !order.includes(id)), ...order]);
+                setSelected(null);
+              }}
+              style={styles.selectBtn}
+              accessibilityLabel="Add to Listen next">
+              <Icon name="list" size={14} color={p.text} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             disabled={!ids.length}
             onPress={() => {
@@ -398,6 +512,24 @@ export default function AudioScreen({
           }}
         />
       )}
+      {queueTarget && (
+        <OptionsSheet
+          title={displayTitle(queueTarget)}
+          options={[
+            { label: 'Play now', onPress: () => onOpen(queueTarget) },
+            {
+              label: 'Play first',
+              onPress: () => setQueue([queueTarget.id, ...queueIds.filter((id) => id !== queueTarget.id)]),
+            },
+            {
+              label: 'Play last',
+              onPress: () => setQueue([...queueIds.filter((id) => id !== queueTarget.id), queueTarget.id]),
+            },
+            { label: 'Remove from Listen next', danger: true, onPress: () => setQueue(queueIds.filter((id) => id !== queueTarget.id)) },
+          ]}
+          onClose={() => setQueueTarget(null)}
+        />
+      )}
       {rating && (
         <RatingPicker
           title={`Rate ${ids.length}`}
@@ -440,6 +572,12 @@ const makeStyles = (p: Palette) =>
     resumeBar: { height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginTop: 4 },
     resumeFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     resumeTitle: { color: p.text, fontSize: 14, fontWeight: '700' },
+    queued: { width: 96, gap: 5 },
+    queueNum: { position: 'absolute', top: 6, left: 6, minWidth: 22, height: 22, borderRadius: 11, overflow: 'hidden', backgroundColor: p.accent, color: '#fff', fontSize: 12, fontWeight: '800', textAlign: 'center', lineHeight: 22 },
+    seriesCard: { width: 140, gap: 5 },
+    seriesCovers: { height: 72, width: 140 },
+    seriesCover: { position: 'absolute', top: 0 },
+    seriesHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: SIDE, marginTop: 14 },
     nowBadge: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
     chips: { gap: 8, paddingHorizontal: SIDE, paddingTop: 14 },
     chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },

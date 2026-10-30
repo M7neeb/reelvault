@@ -87,10 +87,14 @@ import {
 } from './types';
 import { MapModal } from './MapModal';
 import { SmallerSheet } from './smaller';
+import { TrimManySheet } from './trimMany';
 import ViewerModal from './ViewerModal';
 import CloudSheet from './CloudSheet';
 import { onQuick, pickFavourite, type QuickKind } from '../quickOpen';
 import { onJump, type JumpRequest } from '../jump';
+import { inCustomOrder, moveIds, reorderWithin, type MoveHow } from './customOrder';
+import { resumeSavedAt } from '../watching';
+import { confirmByPictures, groupByPictures, mergeGroups } from '../sceneLogic';
 import { afterModals } from './screen';
 import VideoInsightsModal, { type InsightsTab } from './InsightsUI';
 import OverviewScreen from './OverviewScreen';
@@ -140,12 +144,15 @@ type PasscodeRequest = {
   onCreate?: (code: string) => Promise<void>;
 };
 
+const NO_PRINTS = new Map<string, string[]>();
+
 function VaultScreenBody({
   items,
   allTags,
   tagMap,
   deletedItems,
   duplicateGroups,
+  prints = NO_PRINTS,
   smartFilters,
   albums,
   folders,
@@ -243,6 +250,7 @@ function VaultScreenBody({
   const [viewOptionsOpen, setViewOptionsOpen] = useState(dev?.viewOptionsOpen ?? false);
   const [bulkOpen, setBulkOpen] = useState(dev?.bulkOpen ?? false);
   const [settingsOpen, setSettingsOpen] = useState(dev?.settingsOpen ?? false);
+  const [trimFor, setTrimFor] = useState<VaultItem[] | null>(null);
   const [smallerFor, setSmallerFor] = useState<VaultItem[] | null>(
     dev?.smallerOpen && dev.selectedIds?.length ? items.filter((v) => (dev.selectedIds ?? []).includes(v.id)) : null
   );
@@ -407,8 +415,28 @@ function VaultScreenBody({
       setInsights('memories');
       return;
     }
+    if (quick === 'listen' || quick === 'read') {
+      const last =
+        quick === 'listen'
+          ? [...(audio?.items ?? [])].filter((a) => !a.isPrivate && a.lastPlayedAt && a.status !== 'finished').sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))[0]
+          : [...(manga?.items ?? [])].filter((m) => !m.isPrivate && !m.deletedAt && m.lastReadAt).sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0))[0];
+      if (!last && !(quick === 'listen' ? (audio?.items ?? []) : (manga?.items ?? [])).length) return;
+      setQuick(null);
+      if (!last) return;
+      setJump(quick === 'listen' ? { kind: 'audio', id: last.id, play: true } : { kind: 'manga', id: last.id, read: true });
+      return;
+    }
     if (!publicItems.length) return;
-    const v = quick === 'favourite' ? pickFavourite(publicItems) : publicItems[Math.floor(Math.random() * publicItems.length)];
+    const lastStopped = () => {
+      const ids = new Set([...resume.keys()]);
+      return [...publicItems].filter((x) => ids.has(x.id)).sort((a, b) => (resumeSavedAt(b.id) ?? 0) - (resumeSavedAt(a.id) ?? 0))[0] ?? null;
+    };
+    const v =
+      quick === 'favourite'
+        ? pickFavourite(publicItems)
+        : quick === 'watch'
+          ? lastStopped()
+          : publicItems[Math.floor(Math.random() * publicItems.length)];
     setQuick(null);
     if (v) setPlaying(v);
   }, [quick, publicItems]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -416,6 +444,8 @@ function VaultScreenBody({
   // Something picked in the Search tab: play the video, or open the audio item / manga in its section.
   const [jump, setJump] = useState<JumpRequest | null>(null);
   const [sectionJump, setSectionJump] = useState<JumpRequest | null>(null);
+  /** A moment found by search inside videos: the video starts there. */
+  const [startAt, setStartAt] = useState<number | null>(null);
   useEffect(() => onJump(setJump), []);
   useEffect(() => {
     if (!jump) return;
@@ -426,6 +456,7 @@ function VaultScreenBody({
       setJump(null);
       if (!v) return;
       if (prefs.videosMode === 'audio' || prefs.videosMode === 'manga') switchMode('watch');
+      setStartAt(jump.atMs ?? null);
       setPlaying(v);
       return;
     }
@@ -456,7 +487,10 @@ function VaultScreenBody({
     () => duplicateGroups.map((g) => g.filter((id) => publicIds.has(id))).filter((g) => g.length > 1),
     [duplicateGroups, publicIds]
   );
-  const similarGroups = useMemo(() => groupSimilar(publicItems), [publicItems]);
+  const similarGroups = useMemo(
+    () => (prints.size ? mergeGroups(confirmByPictures(groupSimilar(publicItems), prints), groupByPictures(publicItems, prints)) : groupSimilar(publicItems)),
+    [publicItems, prints]
+  );
 
   const tagCounts = useMemo(() => {
     const out: Record<string, number> = {};
@@ -550,11 +584,32 @@ function VaultScreenBody({
   // Most / least / last watched are sorted here, from your plays (duplicates and Recently Deleted keep their order).
   const shown = useMemo(
     () =>
-      WATCH_SORTS.includes(viewOptions.sort) && !['deleted', 'duplicates', 'similar'].includes(filter.kind)
-        ? sortByWatching(shownRaw, allPlays, viewOptions.sort as WatchSort)
-        : shownRaw,
-    [shownRaw, allPlays, viewOptions.sort, filter.kind]
+      ['deleted', 'duplicates', 'similar'].includes(filter.kind)
+        ? shownRaw
+        : viewOptions.sort === 'custom'
+          ? inCustomOrder(shownRaw, prefs.customOrder)
+          : WATCH_SORTS.includes(viewOptions.sort)
+            ? sortByWatching(shownRaw, allPlays, viewOptions.sort as WatchSort)
+            : shownRaw,
+    [shownRaw, allPlays, viewOptions.sort, filter.kind, prefs.customOrder]
   );
+
+  /**
+   * Moves the selected videos in "My order" (switching to it first: the order
+   * you see becomes the starting point). Moves inside an album or filter leave
+   * the other videos where they are.
+   */
+  function moveSelected(how: MoveHow) {
+    const ids = selected;
+    if (!ids.length) return;
+    tick();
+    const all = inCustomOrder(publicItems, prefs.customOrder).map((v) => v.id);
+    const visible = shown.map((v) => v.id);
+    const full = viewOptions.sort === 'custom' ? all : reorderWithin(all, visible);
+    const next = reorderWithin(full, moveIds(visible, ids, how));
+    actions.setPrefs({ ...prefs, customOrder: next }).catch(fail('ORDER'));
+    if (viewOptions.sort !== 'custom') setViewOptions({ ...viewOptions, sort: 'custom', groupBy: 'none' });
+  }
 
   // "Haven't watched in a year" and the random pick.
   const forgotten = useMemo(
@@ -981,11 +1036,19 @@ function VaultScreenBody({
     if (list.length === 2) {
       opts.push({ label: 'Compare and Pick', onPress: () => setCompare([list[0], list[1]]) });
     }
+    if (list.length && !['deleted', 'duplicates', 'similar'].includes(filter.kind)) {
+      opts.push({ label: 'Move to the top', hint: 'My order', onPress: () => moveSelected('top') });
+      opts.push({ label: 'Move up one place', hint: 'My order', onPress: () => moveSelected('up') });
+      opts.push({ label: 'Move down one place', hint: 'My order', onPress: () => moveSelected('down') });
+      opts.push({ label: 'Move to the bottom', hint: 'My order', onPress: () => moveSelected('bottom') });
+      if (list.length > 1) opts.push({ label: 'Put them together', hint: 'Next to the first one', onPress: () => moveSelected('together') });
+    }
     if (list.length) {
       opts.push({ label: 'Slideshow', onPress: () => setSlideshow({ items: list, start: 0 }) });
       opts.push({ label: 'Adjust date & time…', onPress: () => setDateFor(list.map((v) => v.id)) });
       opts.push({ label: 'Save to Photos', hint: 'Copies', onPress: () => actions.onSaveToPhotos(list).catch(fail('PHOTOS')) });
       opts.push({ label: 'Make Smaller…', onPress: () => setSmallerFor(list) });
+      opts.push({ label: 'Trim Start & End…', hint: 'Same seconds for each', onPress: () => setTrimFor(list) });
     }
     if (list.length && activeAlbum) {
       opts.push({
@@ -1586,6 +1649,16 @@ function VaultScreenBody({
         />
       )}
 
+      {trimFor && (
+        <TrimManySheet
+          items={trimFor}
+          available={actions.canMakeSmaller()}
+          onEdit={actions.onEditVideo}
+          onCancel={actions.onCancelMakeSmaller}
+          onClose={() => setTrimFor(null)}
+        />
+      )}
+
       {smallerFor && (
         <SmallerSheet
           items={smallerFor}
@@ -1841,11 +1914,13 @@ function VaultScreenBody({
           link={links.get(playing.id) ?? null}
           onLinkChanged={reloadLinks}
           resumeAt={resume.get(playing.id) ?? null}
+          startAt={startAt}
           prefs={prefs}
           onPrefs={(np) => actions.setPrefs(np).catch(fail('PREFS'))}
           onClose={() => {
             setPlaying(null);
             setPlayList(null);
+            setStartAt(null);
             loadPlayCounts();
           }}
         />

@@ -13,6 +13,10 @@ test('quick links are read in every shape the router hands over', () => {
   assert.equal(quickKind('reelvault://simkl/callback'), null);
   assert.equal(quickKind('file:///x/favourite.mov'), null);
   assert.equal(quickKind(''), null);
+  assert.equal(quickKind('reelvault://watch'), 'watch');
+  assert.equal(quickKind('reelvault://listen'), 'listen');
+  assert.equal(quickKind('/read'), 'read');
+  assert.equal(quickKind('reelvault://reader'), null);
 });
 
 test('a favourite: rated 8 or more, else your best', () => {

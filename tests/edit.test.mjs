@@ -10,6 +10,7 @@ import {
   isTrimmed,
   nativeOptions,
   needsReencode,
+  trimPlan,
   outputOf,
   planForQuality,
 } from '../src/features/vault/edit.ts';
@@ -94,4 +95,16 @@ test('Make Smaller strength: a share of the current bitrate', () => {
   assert.equal(opts.passthrough, false);
   assert.equal(nativeOptions({ ...EMPTY_PLAN, squeeze: 0.55 }).passthrough, false);
   assert.equal(nativeOptions(EMPTY_PLAN).bitrateShare, 0);
+});
+
+test('trim many: the same seconds off the start (and end) of each video', () => {
+  assert.deepEqual(trimPlan(60_000, 5, 0, false), { ...EMPTY_PLAN, startMs: 5000, endMs: null, lossless: true });
+  assert.deepEqual(trimPlan(60_000, 5, 10, true), { ...EMPTY_PLAN, startMs: 5000, endMs: 50_000, lossless: false });
+  // Too short to keep a second: left alone.
+  assert.equal(trimPlan(5_500, 5, 0, false), null);
+  // Nothing to cut.
+  assert.equal(trimPlan(60_000, 0, 0, false), null);
+  // Unknown length: only the start can be cut.
+  assert.deepEqual(trimPlan(null, 3, 0, false), { ...EMPTY_PLAN, startMs: 3000, endMs: null, lossless: true });
+  assert.equal(trimPlan(null, 3, 2, false), null);
 });

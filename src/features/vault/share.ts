@@ -7,7 +7,11 @@
 import { Share } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
+
+import { ReelVaultMedia } from '../../../modules/reelvault-media';
+import { audioChanged } from './audio/audioEvents';
+import { importAudio } from './audio/audioImport';
 
 import { insertVideo } from './repo';
 import { coverFileName, thumbsDir, videosDir } from './storage';
@@ -28,6 +32,47 @@ export async function extractFrame(video: Video, timeMs: number): Promise<void> 
   } catch {
     // already gone
   }
+}
+
+/** Whether this app build can save a video's sound (build 18 and later). */
+export const canSaveSound = (): boolean => !!ReelVaultMedia?.exportAudio;
+
+/** A file name made from the video's title or file name. */
+export function soundName(video: Pick<Video, 'title' | 'filename'>): string {
+  const base = (video.title?.trim() || video.filename.replace(/\.[^.]+$/, ''))
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${base || 'Sound'}.m4a`;
+}
+
+/** The video's sound as a new item in the Audio section; false when it was already there. */
+export async function saveSoundToAudio(video: Video): Promise<boolean> {
+  if (!ReelVaultMedia?.exportAudio) throw new Error('This needs the newest app build');
+  const name = soundName(video);
+  const out = new File(Paths.cache, `${Crypto.randomUUID()}-${name}`);
+  try {
+    const r = await ReelVaultMedia.exportAudio(video.uri, out.uri, 0, 0);
+    const summary = await importAudio([{ uri: out.uri, name, size: r.size }]);
+    if (summary.failed.length) throw new Error(summary.failed[0].reason);
+    audioChanged();
+    return summary.imported > 0;
+  } finally {
+    try {
+      if (out.exists) out.delete();
+    } catch {
+      // already moved into the Audio section
+    }
+  }
+}
+
+export type VideoChapter = { title: string; startMs: number };
+
+/** Chapter markers stored in the file (MP4 / MOV); empty when there are none or on older builds. */
+export async function videoChapters(video: Video): Promise<VideoChapter[]> {
+  if (!ReelVaultMedia?.chapters) return [];
+  const list = await ReelVaultMedia.chapters(video.uri).catch(() => []);
+  return list.filter((c) => Number.isFinite(c.startMs)).map((c) => ({ title: c.title, startMs: Math.max(0, c.startMs) }));
 }
 
 function extOf(name: string): string {

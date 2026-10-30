@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { onAudioChanged } from './audioEvents';
 import { Alert, Share } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -38,7 +40,7 @@ import {
   trashAudio,
   updateAudio,
 } from './audioStore';
-import { audioRoot, BOOK_JSON, fileIn, fileUri, folderBytes, itemDir, openSink, openSource, readBookJson, readTextIn, removeFolder } from './audioFiles';
+import { audioRoot, boostRel, BOOK_JSON, fileIn, fileUri, folderBytes, itemDir, openSink, openSource, readBookJson, readTextIn, removeFolder } from './audioFiles';
 import { AUDIO_PICKER_TYPES, audioKindOf } from './formats';
 import { zipWriter } from './zip';
 import { strToU8 } from 'fflate';
@@ -47,11 +49,17 @@ import type { DuplicateAsk } from '../ui/types';
 import type { AudioItem } from './audioLogic';
 import { onIncomingAudio } from '../incoming';
 
-function asUi(i: AudioItem): AudioUiItem {
+function asUi(i: AudioItem, boosted?: Set<string>): AudioUiItem {
   return {
     ...i,
     coverSource: i.cover ? fileUri(i.folder, i.cover) : null,
     trackUris: i.tracks.map((t) => fileUri(i.folder, t.file)),
+    boostUris: boosted?.has(i.id)
+      ? i.tracks.map((t) => {
+          const f = fileIn(i.folder, boostRel(t.file));
+          return f.exists ? f.uri : null;
+        })
+      : undefined,
   };
 }
 
@@ -110,6 +118,8 @@ export function useAudioData(): AudioData {
   }, []);
   const allRef = useRef<AudioItem[]>([]);
   allRef.current = all;
+  const prefsRef = useRef<AudioPrefs>(prefs);
+  prefsRef.current = prefs;
 
   const refresh = useCallback(async () => {
     try {
@@ -118,6 +128,9 @@ export function useAudioData(): AudioData {
       console.log(`[AUDIO] load failed: ${String(e)}`);
     }
   }, []);
+
+  // Audio added from elsewhere (the video player's "Save Sound to Audio").
+  useEffect(() => onAudioChanged(() => void refresh()), [refresh]);
 
   // On start: load, empty what has been in Recently Deleted too long, then tidy up.
   useEffect(() => {
@@ -444,14 +457,48 @@ export function useAudioData(): AudioData {
         await refresh();
       },
       setPrefs: async (next) => {
+        prefsRef.current = next;
         setPrefsState(next);
         await setSetting(AUDIO_PREFS_KEY, JSON.stringify(next));
+      },
+      canBoost: () => !!ReelVaultMedia?.voiceBoost,
+      setVoiceBoost: async (id, on, onProgress) => {
+        const save = async (boosted: string[]) => {
+          const next = { ...prefsRef.current, boosted };
+          prefsRef.current = next;
+          setPrefsState(next);
+          await setSetting(AUDIO_PREFS_KEY, JSON.stringify(next));
+        };
+        if (!on) return save(prefsRef.current.boosted.filter((x) => x !== id));
+        const native = ReelVaultMedia;
+        if (!native?.voiceBoost) throw new Error('Voice Boost needs the newest app build (18)');
+        const item = allRef.current.find((x) => x.id === id);
+        if (!item) throw new Error('That item is gone');
+        const todo = item.tracks.filter((t) => !fileIn(item.folder, boostRel(t.file)).exists);
+        const jobId = `boost-${id}`;
+        let done = 0;
+        const sub = native.addListener?.('onBoostProgress', (e) => {
+          if (e.jobId === jobId) onProgress((done + Math.min(1, e.progress)) / Math.max(1, todo.length));
+        });
+        try {
+          for (const t of todo) {
+            onProgress(done / Math.max(1, todo.length));
+            const out = fileIn(item.folder, boostRel(t.file));
+            await native.voiceBoost(fileUri(item.folder, t.file), out.uri, jobId);
+            done++;
+          }
+        } finally {
+          sub?.remove();
+        }
+        onProgress(1);
+        await save([...prefsRef.current.boosted.filter((x) => x !== id), id]);
       },
     }),
     [refresh, run]
   );
 
-  const items = useMemo(() => all.filter((i) => !i.deletedAt).map(asUi), [all]);
-  const deleted = useMemo(() => all.filter((i) => i.deletedAt).map(asUi), [all]);
+  const boostedSet = useMemo(() => new Set(prefs.boosted), [prefs.boosted]);
+  const items = useMemo(() => all.filter((i) => !i.deletedAt).map((i) => asUi(i, boostedSet)), [all, boostedSet]);
+  const deleted = useMemo(() => all.filter((i) => i.deletedAt).map((i) => asUi(i)), [all]);
   return { items, deleted, busy, status, duplicateAsk, actions, prefs };
 }

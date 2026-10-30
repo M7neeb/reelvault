@@ -283,7 +283,7 @@ export const ruleIsEmpty = (rule: SmartRule): boolean => describeRule(rule) === 
 
 /* ------------------------------------------------------------- view options */
 
-const SORT_KEYS: VaultSort[] = ['recent', 'oldest', 'rating', 'name', 'size', 'duration', 'mostWatched', 'leastWatched', 'lastWatched'];
+const SORT_KEYS: VaultSort[] = ['recent', 'oldest', 'rating', 'name', 'size', 'duration', 'mostWatched', 'leastWatched', 'lastWatched', 'custom'];
 const LAYOUT_KEYS: LayoutStyle[] = ['grid', 'natural', 'waterfall', 'mosaic'];
 const SIZE_KEYS: ThumbSize[] = ['small', 'medium', 'large', 'xlarge', 'fit'];
 const INFO_KEYS: ThumbInfo[] = [

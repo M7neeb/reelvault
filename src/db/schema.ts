@@ -562,4 +562,25 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_manga_downloads_added ON manga_downloads(added_at);
     `,
   },
+  {
+    version: 14,
+    sql: `
+      -- Picture fingerprints of each video, for Similar (JSON list of 16-hex hashes).
+      CREATE TABLE IF NOT EXISTS video_prints (
+        video_id TEXT PRIMARY KEY,
+        prints   TEXT NOT NULL,
+        made_at  INTEGER NOT NULL
+      );
+
+      -- What the phone saw in a video's frames: scene words and text on screen, for search.
+      CREATE TABLE IF NOT EXISTS video_scenes (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id TEXT NOT NULL,
+        at_ms    INTEGER NOT NULL,
+        labels   TEXT NOT NULL,
+        words    TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_video_scenes_video ON video_scenes(video_id);
+    `,
+  },
 ];

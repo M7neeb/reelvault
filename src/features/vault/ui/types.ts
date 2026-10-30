@@ -15,7 +15,7 @@ import type { CompressQuality } from '../smaller';
 
 export type { CompressQuality, EditPlan };
 
-export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration' | 'mostWatched' | 'leastWatched' | 'lastWatched';
+export type VaultSort = 'recent' | 'oldest' | 'rating' | 'name' | 'size' | 'duration' | 'mostWatched' | 'leastWatched' | 'lastWatched' | 'custom';
 
 /** Sorts worked out from your plays (the rest come sorted from the database). */
 export const WATCH_SORTS: VaultSort[] = ['mostWatched', 'leastWatched', 'lastWatched'];
@@ -362,6 +362,7 @@ export const SORTS: { key: VaultSort; label: string }[] = [
   { key: 'mostWatched', label: 'Most watched' },
   { key: 'leastWatched', label: 'Least watched' },
   { key: 'lastWatched', label: 'Last watched' },
+  { key: 'custom', label: 'My order' },
 ];
 
 export type PasscodeKind = '4' | '6' | 'numeric' | 'alphanumeric';
@@ -447,6 +448,12 @@ export type VaultActions = {
   onShare: (item: VaultItem) => Promise<void>;
   /** Save the frame at `timeMs` as an image (share sheet). */
   onExtractFrame: (item: VaultItem, timeMs: number) => Promise<void>;
+  /** Whether "Save Sound to Audio" works in this app build (18 and later). */
+  canSaveSound: () => boolean;
+  /** The video's sound as a new item in the Audio section; false when it was already there. */
+  onSaveSound: (item: VaultItem) => Promise<boolean>;
+  /** Chapter markers stored in the video file (empty when none). */
+  loadChapters: (item: VaultItem) => Promise<{ title: string; startMs: number }[]>;
   /** A second copy of the video inside ReelVault. */
   onDuplicate: (item: VaultItem) => Promise<void>;
   /** Covers: the frame at `timeMs`, a picked photo (false = cancelled), or back to the import frame. */
@@ -655,13 +662,15 @@ export type VaultPrefs = {
   gridPreview: boolean;
   /** Skip the start of every video in an album: album id → seconds. */
   skipIntro: Record<string, number>;
+  /** "My order": video ids as you arranged them (see customOrder.ts). */
+  customOrder: string[];
 };
 
 export type PlayerOptions = {
   /** When a video ends, play the next one in the list (after a short countdown). */
   autoplayNext: boolean;
-  /** Start the video again when it ends. */
-  loop: boolean;
+  /** Start the video again when it ends, like HashPhotos (the default). */
+  endLoop: boolean;
   /** Playback speed (1 = normal). */
   speed: number;
   /** A soft glow of the video's own colours around it. */
@@ -683,7 +692,7 @@ export const PLAYER_STARTS: { key: PlayerStart; label: string }[] = [
 
 export const PLAYER_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
-export const DEFAULT_PLAYER: PlayerOptions = { autoplayNext: true, loop: false, speed: 1, ambient: true, remaining: false, background: true, start: 'normal' };
+export const DEFAULT_PLAYER: PlayerOptions = { autoplayNext: false, endLoop: true, speed: 1, ambient: true, remaining: false, background: true, start: 'normal' };
 
 export type SlideshowOptions = {
   order: 'shown' | 'shuffle' | 'oldest' | 'best';
@@ -723,6 +732,7 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   freezes: { banked: 1, used: [], lastEarnedWeek: null },
   gridPreview: false,
   skipIntro: {},
+  customOrder: [],
 };
 
 /** What the Overview needs besides the library: removed videos' info, and series. */
@@ -756,6 +766,8 @@ export type VaultScreenProps = {
   deletedItems: VaultItem[];
   /** Ids of videos with the same content, oldest import first in each group. */
   duplicateGroups: string[][];
+  /** Picture fingerprints by video id (app build 18 on): Similar compares the pictures. */
+  prints?: Map<string, string[]>;
   smartFilters: SmartFilter[];
   albums: UiAlbum[];
   folders: UiFolder[];

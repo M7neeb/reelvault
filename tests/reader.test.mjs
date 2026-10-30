@@ -32,10 +32,13 @@ test('reader settings: defaults, saved values, nonsense ignored', () => {
     spreads: false,
     fit: 'screen',
     filter: 'none',
-    autoSpeed: 2,
+    autoSpeed: 3,
     longStrip: false,
     crop: false,
     autoBg: false,
+    volumeKeys: true,
+    volumeInvert: false,
+    holdSpeed: 5,
   });
   assert.equal(parseBrowsePrefs(JSON.stringify({ reader: { page: 'pink' } })).reader.page, 'black');
 });
@@ -46,11 +49,20 @@ test('reader settings: fit, filter, auto-scroll speed and long strip', () => {
   assert.equal(r.filter, 'warm');
   assert.equal(r.autoSpeed, 4);
   assert.equal(r.longStrip, true);
-  const bad = parseBrowsePrefs(JSON.stringify({ reader: { fit: 'huge', filter: 'sepia', autoSpeed: 9, longStrip: 'yes' } })).reader;
+  const bad = parseBrowsePrefs(JSON.stringify({ reader: { fit: 'huge', filter: 'sepia', autoSpeed: 11, longStrip: 'yes', holdSpeed: 0 } })).reader;
   assert.equal(bad.fit, 'screen');
   assert.equal(bad.filter, 'none');
-  assert.equal(bad.autoSpeed, 2);
+  assert.equal(bad.autoSpeed, 3);
   assert.equal(bad.longStrip, false);
+  assert.equal(bad.holdSpeed, 5);
+});
+
+test('reader settings: volume buttons and the ten speeds', () => {
+  const r = parseBrowsePrefs(JSON.stringify({ reader: { volumeKeys: false, volumeInvert: true, holdSpeed: 9, autoSpeed: 10 } })).reader;
+  assert.equal(r.volumeKeys, false);
+  assert.equal(r.volumeInvert, true);
+  assert.equal(r.holdSpeed, 9);
+  assert.equal(r.autoSpeed, 10);
 });
 
 test('a double page stands alone and the pairing carries on after it', () => {

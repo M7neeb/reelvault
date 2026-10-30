@@ -463,6 +463,16 @@ export default function PreviewRoute() {
       onDeleteFolder: noop,
       onShare: noop,
       onExtractFrame: noop,
+      canSaveSound: () => true,
+      onSaveSound: async () => true,
+      loadChapters: async (item) =>
+        (item.durationMs ?? 0) > 120_000
+          ? [
+              { title: 'Opening', startMs: 0 },
+              { title: 'The middle part', startMs: Math.round((item.durationMs ?? 0) / 3) },
+              { title: 'Ending', startMs: Math.round(((item.durationMs ?? 0) * 2) / 3) },
+            ]
+          : [],
       onDuplicate: noop,
       onImportLink: () => {},
       readClipboardLink: async () => 'https://example.com/clips/beach.mp4',

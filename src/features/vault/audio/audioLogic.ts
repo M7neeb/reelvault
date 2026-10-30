@@ -167,8 +167,17 @@ export function smartRewindMs(pausedForMs: number, scale = 1): number {
 }
 
 /** Your audio settings: how far smart rewind goes back, and your one-tap speeds. */
-export type AudioPrefs = { rewind: 0 | 0.5 | 1 | 2; favSpeeds: number[] };
-export const DEFAULT_AUDIO_PREFS: AudioPrefs = { rewind: 1, favSpeeds: [1, 1.2, 1.5] };
+export type AudioPrefs = {
+  rewind: 0 | 0.5 | 1 | 2;
+  favSpeeds: number[];
+  /** "Listen next": item ids, played in this order when the current one ends. */
+  upNext: string[];
+  /** When a book of a series ends (and Listen next is empty), the next book of the series starts. */
+  seriesAutoplay: boolean;
+  /** Items played with Voice Boost (clearer, louder narration). */
+  boosted: string[];
+};
+export const DEFAULT_AUDIO_PREFS: AudioPrefs = { rewind: 1, favSpeeds: [1, 1.2, 1.5], upNext: [], seriesAutoplay: true, boosted: [] };
 export const REWIND_CHOICES: { value: AudioPrefs['rewind']; label: string; hint: string }[] = [
   { value: 0, label: 'Off', hint: 'Carries on exactly where it stopped' },
   { value: 0.5, label: 'A little', hint: '2-15 s back' },
@@ -183,7 +192,14 @@ export function parseAudioPrefs(json: string | null): AudioPrefs {
     const favs = Array.isArray(r?.favSpeeds)
       ? [...new Set<number>(r.favSpeeds.filter((x: unknown) => typeof x === 'number' && (SPEEDS as readonly number[]).includes(x)))].slice(0, 4)
       : [];
-    return { rewind, favSpeeds: favs.length ? favs : DEFAULT_AUDIO_PREFS.favSpeeds };
+    const ids = (x: unknown) => (Array.isArray(x) ? [...new Set(x.filter((v): v is string => typeof v === 'string' && v.length > 0))] : []);
+    return {
+      rewind,
+      favSpeeds: favs.length ? favs : DEFAULT_AUDIO_PREFS.favSpeeds,
+      upNext: ids(r?.upNext).slice(0, 200),
+      seriesAutoplay: typeof r?.seriesAutoplay === 'boolean' ? r.seriesAutoplay : DEFAULT_AUDIO_PREFS.seriesAutoplay,
+      boosted: ids(r?.boosted),
+    };
   } catch {
     return DEFAULT_AUDIO_PREFS;
   }
@@ -392,4 +408,79 @@ export function audioStats(items: AudioItem[], plays: AudioPlay[], now: number):
     hours,
     averageRating: rated.length ? Math.round((rated.reduce((a, i) => a + i.rating, 0) / rated.length) * 10) / 10 : null,
   };
+}
+
+/**
+ * The number of a book in its series, from its title or file name:
+ * "Book 2", "Band 3", "Vol. 4", "Part 5", "Folge 6", "#7", "(8)" at the end or
+ * "09 - Title" at the start. null when there is none.
+ */
+export function seriesNumber(i: Pick<AudioItem, 'title' | 'filename'>): number | null {
+  for (const text of [i.title ?? '', i.filename.replace(/\.[a-z0-9]{2,4}$/i, '')]) {
+    const m =
+      text.match(/(?:\bbook|\bband|\bvol(?:ume)?|\bpart|\bteil|\bfolge|\bepisode|\bbuch|#)\s*\.?\s*(\d{1,3}(?:\.\d)?)\b/i) ??
+      text.match(/\((\d{1,3})\)\s*$/) ??
+      text.match(/^\s*(\d{1,3})\s*[-._:)]\s+\S/);
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+const seriesKey = (name: string | null | undefined) => (name ?? '').trim().toLowerCase();
+
+/** The books of one series (the Series field), in reading order: by number, then title. */
+export function seriesBooks<T extends AudioItem>(list: T[], series: string): T[] {
+  const k = seriesKey(series);
+  if (!k) return [];
+  return list
+    .filter((i) => !i.deletedAt && seriesKey(i.album) === k)
+    .sort((a, b) => {
+      const x = seriesNumber(a);
+      const y = seriesNumber(b);
+      if (x !== null && y !== null && x !== y) return x - y;
+      if (x !== null && y === null) return -1;
+      if (x === null && y !== null) return 1;
+      return displayTitle(a).localeCompare(displayTitle(b), undefined, { numeric: true, sensitivity: 'base' });
+    });
+}
+
+export type AudioSeries<T> = { name: string; books: T[]; finished: number; next: T | null };
+
+/** Every series with two or more books, the one you listened to last first. */
+export function seriesOf<T extends AudioItem>(list: T[]): AudioSeries<T>[] {
+  const names = new Map<string, string>();
+  for (const i of list) {
+    const k = seriesKey(i.album);
+    if (k && !i.deletedAt && !names.has(k)) names.set(k, i.album!.trim());
+  }
+  const out: AudioSeries<T>[] = [];
+  for (const name of names.values()) {
+    const books = seriesBooks(list, name);
+    if (books.length < 2) continue;
+    const finished = books.filter((b) => b.status === 'finished').length;
+    out.push({ name, books, finished, next: books.find((b) => b.status !== 'finished') ?? null });
+  }
+  const last = (x: AudioSeries<T>) => Math.max(0, ...x.books.map((b) => b.lastPlayedAt ?? 0));
+  return out.sort((a, b) => last(b) - last(a) || a.name.localeCompare(b.name));
+}
+
+/** The book after this one in its series that you have not finished, or null. */
+export function nextInSeries<T extends AudioItem>(list: T[], item: AudioItem): T | null {
+  if (!seriesKey(item.album)) return null;
+  const books = seriesBooks(list, item.album!);
+  const at = books.findIndex((b) => b.id === item.id);
+  if (at < 0) return null;
+  return books.slice(at + 1).find((b) => b.status !== 'finished') ?? null;
+}
+
+/**
+ * What plays when `finished` ends: the first of Listen next that still exists,
+ * otherwise (if you want it) the next book of its series. `upNext` is what
+ * stays in the queue afterwards.
+ */
+export function pickNext<T extends AudioItem>(list: T[], finished: AudioItem, prefs: Pick<AudioPrefs, 'upNext' | 'seriesAutoplay'>): { next: T | null; upNext: string[] } {
+  const live = new Map(list.filter((i) => !i.deletedAt).map((i) => [i.id, i]));
+  const queue = prefs.upNext.filter((id) => id !== finished.id && live.has(id));
+  if (queue.length) return { next: live.get(queue[0])!, upNext: queue.slice(1) };
+  return { next: prefs.seriesAutoplay ? nextInSeries(list, finished) : null, upNext: queue };
 }

@@ -51,6 +51,8 @@ export type MangaActions = {
   loadPages: (series: Pick<MangaSeries, 'sourceId'>, chapter: MangaChapter) => Promise<ImageRef[]>;
   /** Keeps the screen on while the reader is open. */
   keepAwake?: (on: boolean) => void;
+  /** While on, the volume buttons call `onKey` instead of changing the volume (app build 18 on). Returns the switch-off. */
+  volumeKeys?: (onKey: (direction: 'up' | 'down') => void) => () => void;
   /** Asks a series' source for new chapters; how many were added. */
   refresh: (seriesId: string) => Promise<number>;
   /** Every series from a source; how many new chapters, and the titles that failed. */
@@ -116,7 +118,7 @@ export type BrowseActions = {
   setLanguages: (codes: string[]) => Promise<void>;
   setAdult: (on: boolean) => Promise<void>;
   /** Download and update options (smaller pages, check when the app opens, download new chapters). */
-  setOption: (key: 'smallerPages' | 'checkOnOpen' | 'autoDownload' | 'removeAfterRead' | 'wifiOnly' | 'patient' | 'autoUpdateExt', on: boolean) => Promise<void>;
+  setOption: (key: 'smallerPages' | 'checkOnOpen' | 'autoDownload' | 'removeAfterRead' | 'wifiOnly' | 'patient' | 'autoUpdateExt' | 'syncProgress', on: boolean) => Promise<void>;
   /** Pages downloaded at the same time. */
   setParallel?: (n: 1 | 3 | 5) => Promise<void>;
   /** The reader's own settings (tap zones, page colour, two pages side by side). */

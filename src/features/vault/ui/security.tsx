@@ -11,7 +11,8 @@ import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal } from './screen';
 
 import { QUALITIES } from '../smaller';
-import { Chip, Section, SheetFrame, ToggleRow, Wrap } from './sheets';
+import { Row, Rows, SheetFrame } from './sheets';
+import { OptionsSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { PASSCODE_KINDS, type CompressQuality, type PasscodeKind, type SecurityState } from './types';
 
@@ -264,117 +265,103 @@ export function SettingsSheet({
       .catch(() => setLog([]));
   }, [loadPasscodeLog]);
 
+  const [pick, setPick] = useState<null | 'passcode' | 'quality'>(null);
+  const qualityLabel = importQuality === null ? 'Off' : (QUALITIES.find((q) => q.key === importQuality)?.label ?? 'Off');
+  const wrong = log?.filter((x) => x.kind === 'wrong').length ?? 0;
+  const fake = log?.filter((x) => x.kind === 'fake').length ?? 0;
+  const faceFails = log?.filter((x) => x.kind === 'faceid-failed').length ?? 0;
+
   return (
     <SheetFrame title="Settings" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
       {onPersonalise && (
-        <Section label="Personalise">
-          <Chip label="Layout, accent colour, app icon, rating words…" onPress={onPersonalise} />
-        </Section>
+        <Rows>
+          <Row icon="paint" tint="#FF9F0A" title="Personalise" sub="Layout, accent colour, app icon, rating words" onPress={onPersonalise} />
+        </Rows>
       )}
-      <Section label="Private album">
-        {on ? (
-          <>
-            <Text style={styles.body}>
-              Passcode on ({PASSCODE_KINDS.find((k) => k.key === security?.passcodeKind)?.label.toLowerCase()}).
-            </Text>
-            <ToggleRow label="Unlock with Face ID" value={!!security?.faceId} onChange={onFaceId} />
-            <Wrap>
-              <Chip label="Change passcode" onPress={onChangePasscode} />
-              <Chip label="Turn passcode off" danger onPress={onTurnOffPasscode} />
-            </Wrap>
-            <Text style={styles.subLabel}>Fake passcode</Text>
-            <Text style={styles.hint}>
-              A second passcode that opens an empty Private album - for when someone makes you unlock it.
-            </Text>
-            <Wrap>
-              {security?.hasFakePasscode ? (
-                <Chip label="Remove fake passcode" danger onPress={onRemoveFake} />
-              ) : (
-                <Chip label="Set fake passcode" onPress={onSetFake} />
-              )}
-            </Wrap>
-          </>
-        ) : (
-          <>
-            <Text style={styles.body}>
-              Private opens with Face ID or the iPhone's passcode. Add a ReelVault passcode for its own lock and a fake
-              passcode.
-            </Text>
-            <Wrap>
-              {PASSCODE_KINDS.map((k) => (
-                <Chip key={k.key} label={k.label} on={kind === k.key} onPress={() => setKind(k.key)} />
-              ))}
-            </Wrap>
-            <Chip label="Turn passcode on" onPress={() => onTurnOnPasscode(kind)} />
-          </>
+
+      <Rows
+        label="Private album"
+        footer={
+          on
+            ? 'A fake passcode opens an empty Private album - for when someone makes you unlock it.'
+            : "Private opens with Face ID or the iPhone's passcode. A ReelVault passcode gives it its own lock, and a fake one."
+        }>
+        <Row
+          icon="lock"
+          tint="#30D158"
+          title="ReelVault passcode"
+          value={on ? PASSCODE_KINDS.find((k) => k.key === security?.passcodeKind)?.label : undefined}
+          toggle={{ value: on, onChange: (v) => (v ? setPick('passcode') : onTurnOffPasscode()) }}
+        />
+        {on && <Row icon="shield" tint="#0A84FF" title="Unlock with Face ID" toggle={{ value: !!security?.faceId, onChange: onFaceId }} />}
+        {on && <Row icon="edit" tint="#8E8E93" title="Change passcode" onPress={onChangePasscode} />}
+        {on && (
+          <Row
+            icon="eyeOff"
+            tint="#BF5AF2"
+            title="Fake passcode"
+            value={security?.hasFakePasscode ? 'On - tap to remove' : 'Off'}
+            onPress={security?.hasFakePasscode ? onRemoveFake : onSetFake}
+          />
         )}
-      </Section>
+      </Rows>
 
       {log !== null && (
-        <Section label="Who tried to get in">
-          {log.length === 0 ? (
-            <Text style={styles.hint}>No wrong passcodes so far. Every wrong or fake passcode typed at Private shows up here, with the time.</Text>
-          ) : (
-            <>
-              <Text style={styles.body}>
-                {log.filter((x) => x.kind === 'wrong').length} wrong · {log.filter((x) => x.kind === 'fake').length} fake passcode
-                {log.filter((x) => x.kind === 'faceid-failed').length ? ` · ${log.filter((x) => x.kind === 'faceid-failed').length} Face ID failed` : ''}
-              </Text>
-              {(showAll ? log : log.slice(0, 6)).map((x, i) => (
-                <View key={`${x.at}-${i}`} style={styles.logRow}>
-                  <View style={[styles.logDot, { backgroundColor: x.kind === 'fake' ? '#FF9F0A' : '#FF453A' }]} />
-                  <Text style={styles.logText}>{x.kind === 'wrong' ? 'Wrong passcode' : x.kind === 'fake' ? 'Fake passcode used' : 'Face ID failed'}</Text>
-                  <Text style={styles.logTime}>{new Date(x.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Text>
-                </View>
-              ))}
-              <Wrap>
-                {log.length > 6 && <Chip label={showAll ? 'Show fewer' : `Show all ${log.length}`} onPress={() => setShowAll((v) => !v)} />}
-                {onClearPasscodeLog && (
-                  <Chip
-                    label="Clear the list"
-                    danger
-                    onPress={() => {
-                      void onClearPasscodeLog().then(() => setLog([]));
-                    }}
-                  />
-                )}
-              </Wrap>
-            </>
-          )}
-        </Section>
+        <Rows label="Who tried to get in" footer={log.length ? undefined : 'Every wrong or fake passcode typed at Private shows up here, with the time.'}>
+          <Row
+            icon="eye"
+            tint={log.length ? '#FF453A' : '#8E8E93'}
+            title={log.length ? `${wrong} wrong · ${fake} fake${faceFails ? ` · ${faceFails} Face ID failed` : ''}` : 'Nobody so far'}
+          />
+          {(showAll ? log : log.slice(0, 5)).map((x, i) => (
+            <View key={`${x.at}-${i}`} style={styles.logRow}>
+              <View style={[styles.logDot, { backgroundColor: x.kind === 'fake' ? '#FF9F0A' : '#FF453A' }]} />
+              <Text style={styles.logText}>{x.kind === 'wrong' ? 'Wrong passcode' : x.kind === 'fake' ? 'Fake passcode used' : 'Face ID failed'}</Text>
+              <Text style={styles.logTime}>{new Date(x.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Text>
+            </View>
+          ))}
+          {log.length > 5 && <Row title={showAll ? 'Show fewer' : `Show all ${log.length}`} onPress={() => setShowAll((v) => !v)} />}
+          {log.length > 0 && onClearPasscodeLog && <Row title="Clear the list" danger onPress={() => void onClearPasscodeLog().then(() => setLog([]))} />}
+        </Rows>
       )}
 
-      <Section label="Import">
-        <Chip label="Import a whole folder from Files…" onPress={onImportFolder} />
-        <Text style={styles.hint}>Copies every video in the folder and its sub-folders; the originals stay where they are.</Text>
-        <Text style={styles.subLabel}>Make imported videos smaller</Text>
-        <Wrap>
-          <Chip label="Off" on={importQuality === null} onPress={() => onImportQuality(null)} />
-          {QUALITIES.map((q) => (
-            <Chip key={q.key} label={q.label} on={importQuality === q.key} onPress={() => onImportQuality(q.key)} />
-          ))}
-        </Wrap>
-        <Text style={styles.hint}>
-          {canMakeSmaller
-            ? 'Each video is re-encoded right after it comes in, before the next one, so the space is freed as the import goes. Videos that would not get at least 10% smaller stay as they are.'
-            : 'Needs the new app version (1.1) - until then imports keep their full size.'}
-        </Text>
-      </Section>
+      <Rows
+        label="Import"
+        footer={
+          canMakeSmaller
+            ? 'Make Smaller re-encodes each video right after it comes in, so the space is freed as the import goes. Videos that would not get at least 10% smaller stay as they are.'
+            : 'Making imports smaller needs the app version with the video encoder (1.1 or later).'
+        }>
+        <Row icon="import" tint="#0A84FF" title="Import a whole folder" sub="Every video in it and its sub-folders" onPress={onImportFolder} />
+        <Row icon="storage" tint="#64D2FF" title="Make imported videos smaller" value={qualityLabel} onPress={() => setPick('quality')} />
+      </Rows>
 
-      <Section label="Backup">
-        <Wrap>
-          <Chip label="Export all my info" onPress={onExportBackup} />
-          <Chip label="Restore from a file" onPress={onImportBackup} />
-          {onExportSpreadsheet && <Chip label="Export a spreadsheet (CSV)" onPress={onExportSpreadsheet} />}
-        </Wrap>
-        <Text style={styles.hint}>
-          Everything you added, as one small file to save in Files or on your PC: ratings, titles, captions, keywords,
-          albums, flags, status, smart filters, series, your watch history, bookmarks, where to continue, Simkl links and
-          your settings (goals, memories, badges, pins, the player). It does not contain the videos, and leaves out
-          private ones. Restoring adds to what is here and never deletes anything; videos are matched even if renamed.
-        </Text>
-        {backups && <AutoBackups backups={backups} />}
-      </Section>
+      <Rows
+        label="Backup"
+        footer="Your info as one small file for Files or your PC: ratings, titles, keywords, albums, history, bookmarks, Simkl links and settings - not the videos, and no private ones. Restoring adds to what is here and never deletes anything.">
+        <Row icon="share" tint="#30D158" title="Export all my info" onPress={onExportBackup} />
+        <Row icon="history" tint="#FF9F0A" title="Restore from a file" onPress={onImportBackup} />
+        {onExportSpreadsheet && <Row icon="list" tint="#5E5CE6" title="Export a spreadsheet (CSV)" onPress={onExportSpreadsheet} />}
+      </Rows>
+      {backups && <AutoBackups backups={backups} />}
+
+      {pick === 'passcode' && (
+        <OptionsSheet
+          title="What kind of passcode?"
+          options={PASSCODE_KINDS.map((k) => ({ label: k.label, onPress: () => onTurnOnPasscode(k.key) }))}
+          onClose={() => setPick(null)}
+        />
+      )}
+      {pick === 'quality' && (
+        <OptionsSheet
+          title="Make imported videos smaller"
+          options={[
+            { label: 'Off', hint: importQuality === null ? '✓ Keep full size' : 'Keep full size', onPress: () => onImportQuality(null) },
+            ...QUALITIES.map((q) => ({ label: q.label, hint: importQuality === q.key ? '✓' : undefined, onPress: () => onImportQuality(q.key) })),
+          ]}
+          onClose={() => setPick(null)}
+        />
+      )}
     </SheetFrame>
   );
 }
@@ -385,10 +372,10 @@ const makeStyles = (p: Palette) =>
     subLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', paddingTop: 8 },
     backupRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: p.card, borderRadius: 12, padding: 10 },
     backupDay: { color: p.text, fontSize: 15, fontWeight: '700' },
-    backupBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.elevated },
+    backupBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.circle },
     backupBtnText: { color: p.link, fontSize: 13, fontWeight: '800' },
     hint: { color: p.textSecondary, fontSize: 12 },
-    logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
+    logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 14 },
     logDot: { width: 8, height: 8, borderRadius: 4 },
     logText: { color: p.text, fontSize: 14, flex: 1 },
     logTime: { color: p.textSecondary, fontSize: 12, fontVariant: ['tabular-nums'] },
@@ -440,18 +427,19 @@ function AutoBackups({ backups }: { backups: NonNullable<Parameters<typeof Setti
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const day = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   return (
-    <View style={{ gap: 8, marginTop: 6 }}>
-      <Text style={styles.subLabel}>Automatic weekly backups</Text>
-      {list === null ? null : list.length === 0 ? (
-        <Text style={styles.hint}>None yet. The first one is made a few seconds after the app opens.</Text>
-      ) : (
-        list.map((b) => (
-          <View key={b.uri} style={styles.backupRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.backupDay}>{day(b.at)}</Text>
-              <Text style={styles.hint}>{Math.max(1, Math.round(b.size / 1024))} KB</Text>
-            </View>
-            {confirm === b.uri ? (
+    <Rows
+      label="Automatic weekly backups"
+      footer={`${note ? `${note} ` : ''}Made once a week, the last four kept. On a PC the Apple Devices app shows them under Files › ReelVault › Backups.`}>
+      {list !== null && list.length === 0 && <Row title="None yet" sub="The first one is made a few seconds after the app opens." />}
+      {(list ?? []).map((b) => (
+        <Row
+          key={b.uri}
+          icon="clock"
+          tint="#8E8E93"
+          title={day(b.at)}
+          sub={`${Math.max(1, Math.round(b.size / 1024))} KB`}
+          right={
+            confirm === b.uri ? (
               <TouchableOpacity
                 style={[styles.backupBtn, { backgroundColor: p.accent }]}
                 onPress={() => {
@@ -462,18 +450,20 @@ function AutoBackups({ backups }: { backups: NonNullable<Parameters<typeof Setti
                     .then((r) => setNote(r ? `Restored info for ${r.matched} of ${r.total} videos${r.plays ? `, with ${r.plays} plays of history` : ''}.` : 'Nothing restored.'))
                     .catch((e) => setNote(`That did not work: ${String(e)}`));
                 }}>
-                <Text style={[styles.backupBtnText, { color: '#fff' }]}>Tap again to restore</Text>
+                <Text style={[styles.backupBtnText, { color: '#fff' }]}>Tap again</Text>
               </TouchableOpacity>
             ) : (
               <TouchableOpacity style={styles.backupBtn} onPress={() => setConfirm(b.uri)}>
                 <Text style={styles.backupBtnText}>Restore</Text>
               </TouchableOpacity>
-            )}
-          </View>
-        ))
-      )}
-      <Chip
-        label="Back up now"
+            )
+          }
+        />
+      ))}
+      <Row
+        icon="sync"
+        tint="#0A84FF"
+        title="Back up now"
         onPress={() => {
           setNote('Backing up…');
           backups
@@ -485,10 +475,6 @@ function AutoBackups({ backups }: { backups: NonNullable<Parameters<typeof Setti
             .catch((e) => setNote(`That did not work: ${String(e)}`));
         }}
       />
-      {!!note && <Text style={[styles.hint, { color: p.text }]}>{note}</Text>}
-      <Text style={styles.hint}>
-        Made once a week, the last four kept. They live inside ReelVault; on a PC, the Apple Devices app shows them under Files › ReelVault › Backups, so you can copy them off the phone.
-      </Text>
-    </View>
+    </Rows>
   );
 }

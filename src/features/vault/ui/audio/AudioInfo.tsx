@@ -1,6 +1,6 @@
 /**
  * An audio item's details: edit its title, author, narrator, series, genre,
- * year and your notes; rate it (with decimals), set its status, add or
+ * year, description and your notes; rate it (with decimals), set its status, add or
  * remove keywords; see what it is (files, length, size on the phone, when
  * added and last played); play from the start, mark it finished, share it
  * (a book is rebuilt as an .epub), change the cover, move it to Private, or
@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { AUDIO_STATUSES, displayTitle, fmtLength, fmtRating, progressOf, totalMs } from '../../audio/audioLogic';
+import { AUDIO_STATUSES, displayTitle, fmtLength, fmtRating, nextInSeries, progressOf, seriesBooks, totalMs, type AudioPrefs } from '../../audio/audioLogic';
 import { fmtDateTime, fmtSize } from '../format';
 import { success, tick } from '../haptics';
 import Icon from '../Icon';
@@ -30,10 +30,27 @@ const FIELDS: Field[] = [
   { key: 'album', label: 'Series', placeholder: 'Series or album' },
   { key: 'genre', label: 'Genre', placeholder: 'Genre' },
   { key: 'year', label: 'Year', placeholder: 'Year', numeric: true },
+  { key: 'description', label: 'Description', placeholder: 'What it is about', multiline: true },
   { key: 'notes', label: 'Notes', placeholder: 'Your notes', multiline: true },
 ];
 
-export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: { item: AudioUiItem; actions: AudioActions; onPlayFromStart: () => void; onClose: () => void }) {
+export default function AudioInfo({
+  item,
+  actions,
+  prefs,
+  library = [],
+  onPlayFromStart,
+  onClose,
+}: {
+  item: AudioUiItem;
+  actions: AudioActions;
+  /** Listen next lives in the audio settings. */
+  prefs?: AudioPrefs;
+  /** The whole library, for the item's place in its series. */
+  library?: AudioUiItem[];
+  onPlayFromStart: () => void;
+  onClose: () => void;
+}) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const [extras, setExtras] = useState<AudioExtraUi[]>([]);
@@ -58,6 +75,13 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
     actions.update([item.id], { [f.key]: value } as AudioEdit).catch(() => undefined);
   };
   const pr = progressOf(item);
+  const inQueue = !!prefs?.upNext.includes(item.id);
+  const books = item.album ? seriesBooks(library, item.album) : [];
+  const place = books.findIndex((b) => b.id === item.id);
+  const after = nextInSeries(library, item);
+  const setQueue = (next: string[]) => {
+    if (prefs && actions.setPrefs) actions.setPrefs({ ...prefs, upNext: next }).catch(showFailure);
+  };
   const facts = [
     item.kind === 'book' ? (item.tracks.length ? 'EPUB 3 book with read-along' : 'EPUB book') : item.tracks.length > 1 ? `${item.tracks.length} audio files` : (item.filename.split('.').pop() ?? '').toUpperCase(),
     fmtLength(totalMs(item)),
@@ -172,14 +196,29 @@ export default function AudioInfo({ item, actions, onPlayFromStart, onClose }: {
           />
         </View>
       ))}
-      {!!item.description && (
+
+      {books.length > 1 && place >= 0 && (
         <View style={styles.field}>
-          <Text style={styles.label}>About</Text>
-          <Text style={styles.about}>{item.description}</Text>
+          <Text style={styles.label}>Series</Text>
+          <Text style={styles.facts}>
+            Book {place + 1} of {books.length} in {item.album}
+            {after ? ` · next: ${displayTitle(after)}` : ''}
+          </Text>
         </View>
       )}
 
       <View style={styles.actions}>
+        {prefs && actions.setPrefs && (
+          <TouchableOpacity
+            style={styles.action}
+            onPress={() => {
+              success();
+              setQueue(inQueue ? prefs.upNext.filter((id) => id !== item.id) : [...prefs.upNext, item.id]);
+            }}>
+            <Icon name="list" size={15} color={p.text} />
+            <Text style={styles.actionText}>{inQueue ? `Remove from Listen next (${prefs.upNext.indexOf(item.id) + 1} of ${prefs.upNext.length})` : 'Add to Listen next'}</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.action}
           onPress={() => {
@@ -276,7 +315,6 @@ const makeStyles = (p: Palette) =>
     label: { color: p.textSecondary, fontSize: 12, fontWeight: '700' },
     input: { color: p.text, fontSize: 16, backgroundColor: p.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
     inputMulti: { minHeight: 80, textAlignVertical: 'top' },
-    about: { color: p.textSoft, fontSize: 14, lineHeight: 20 },
     actions: { gap: 2, marginTop: 14 },
     action: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: p.separator },
     actionText: { color: p.text, fontSize: 16 },

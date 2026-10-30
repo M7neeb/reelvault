@@ -86,6 +86,7 @@ export default function AudioSection({
         onWifi={onWifi}
         bottomSpace={pb.item ? 72 : 0}
         initialDeleted={dev?.deleted}
+        prefs={data.prefs}
       />
       {pb.item && !full && <MiniPlayer bottom={tabSpace + 8} onExpand={() => setFull(true)} />}
       {full && pb.item && <AudioPlayerScreen actions={data.actions} prefs={data.prefs} onInfo={(i) => setInfoId(i.id)} onClose={() => setFull(false)} />}
@@ -93,6 +94,8 @@ export default function AudioSection({
         <AudioInfo
           item={info}
           actions={data.actions}
+          prefs={data.prefs}
+          library={data.items}
           onPlayFromStart={() => {
             pb.open(info, { track: 0, ms: 0, autoplay: true });
             setFull(true);

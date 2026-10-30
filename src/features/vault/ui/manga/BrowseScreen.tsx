@@ -182,6 +182,13 @@ export default function BrowseScreen({
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Send reading progress to your servers</Text>
+            <Text style={styles.rowMeta}>Suwayomi, Komga and Kavita show the page you reached in ReelVault</Text>
+          </View>
+          <Switch value={prefs.syncProgress} onValueChange={(v) => actions.setOption('syncProgress', v).catch(() => undefined)} />
+        </View>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Remove downloads after reading</Text>
             <Text style={styles.rowMeta}>Read chapters give their space back (they stay readable online)</Text>
           </View>

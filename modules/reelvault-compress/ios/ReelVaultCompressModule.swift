@@ -1,6 +1,7 @@
 import AVFoundation
 import ExpoModulesCore
 import UIKit
+import VideoToolbox
 
 /// What the editor asks for. Crop values are fractions of the displayed frame.
 struct EditOptions: Record {
@@ -189,7 +190,7 @@ public class ReelVaultCompressModule: Module {
 
     /// What this build's encoder can do; older builds have no such function.
     Function("features") { () -> [String] in
-      ["bitrateShare"]
+      ["bitrateShare", "hdr"]
     }
 
     Function("cancel") { (jobId: String) in
@@ -254,6 +255,27 @@ public class ReelVaultCompressModule: Module {
     instruction.layerInstructions = [layer]
     composition.instructions = [instruction]
     return composition
+  }
+
+  /// The writer's color settings for an HDR video (HLG, as the iPhone camera
+  /// films it, or PQ / HDR10), or nil for an ordinary one.
+  private static func hdrColors(_ track: AVAssetTrack) -> [String: Any]? {
+    guard let desc = track.formatDescriptions.first else { return nil }
+    let format = desc as! CMFormatDescription
+    let transfer = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String
+    let function: String
+    if transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String) {
+      function = AVVideoTransferFunction_ITU_R_2100_HLG
+    } else if transfer == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String) {
+      function = AVVideoTransferFunction_SMPTE_ST_2084_PQ
+    } else {
+      return nil
+    }
+    return [
+      AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+      AVVideoTransferFunctionKey: function,
+      AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+    ]
   }
 
   /// The sound track that plays by default (the first enabled one).
@@ -388,10 +410,12 @@ public class ReelVaultCompressModule: Module {
     let minGap = CMTime(seconds: 1 / fps * 0.9, preferredTimescale: 600_000)
 
     // Sound is kept when it can be read; a file whose sound can't be decoded still gets its picture.
-    var made = try makeReader(plan, withAudio: true)
+    // HDR (iPhone 12 and later film it): read and write 10-bit with the same colors, so it stays HDR.
+    let hdr = hdrColors(track)
+    var made = try makeReader(plan, withAudio: true, tenBit: hdr != nil)
     if !made.reader.startReading() {
       if made.audio == nil { throw made.reader.error ?? CompressError(message: "The video could not be read") }
-      made = try makeReader(plan, withAudio: false)
+      made = try makeReader(plan, withAudio: false, tenBit: hdr != nil)
       guard made.reader.startReading() else {
         throw made.reader.error ?? CompressError(message: "The video could not be read")
       }
@@ -452,20 +476,27 @@ public class ReelVaultCompressModule: Module {
     }
 
     func videoSettings(_ codec: AVVideoCodecType, _ rate: Double) -> [String: Any] {
-      [
+      var compression: [String: Any] = [
+        AVVideoAverageBitRateKey: Int(rate),
+        AVVideoExpectedSourceFrameRateKey: Int(fps.rounded()),
+        AVVideoMaxKeyFrameIntervalKey: max(1, Int((fps * 2).rounded())),
+      ]
+      var out: [String: Any] = [
         AVVideoCodecKey: codec,
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
         AVVideoScalingModeKey: AVVideoScalingModeResizeAspect,
-        AVVideoCompressionPropertiesKey: [
-          AVVideoAverageBitRateKey: Int(rate),
-          AVVideoExpectedSourceFrameRateKey: Int(fps.rounded()),
-          AVVideoMaxKeyFrameIntervalKey: max(1, Int((fps * 2).rounded())),
-        ],
       ]
+      if let hdr = hdr, codec == .hevc {
+        compression[AVVideoProfileLevelKey] = kVTProfileLevel_HEVC_Main10_AutoLevel as String
+        out[AVVideoColorPropertiesKey] = hdr
+      }
+      out[AVVideoCompressionPropertiesKey] = compression
+      return out
     }
     var settings = videoSettings(.hevc, bitrate)
-    if !writer.canApply(outputSettings: settings, forMediaType: .video) {
+    // H.264 can't hold HDR: only for an SDR video on an iPhone without HEVC.
+    if hdr == nil && !writer.canApply(outputSettings: settings, forMediaType: .video) {
       settings = videoSettings(.h264, bitrate * 1.4)
     }
     guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
@@ -579,13 +610,16 @@ public class ReelVaultCompressModule: Module {
   /// cropping) and, if asked, the sound mixed to 44.1 kHz stereo.
   private static func makeReader(
     _ plan: BackupPlan,
-    withAudio: Bool
+    withAudio: Bool,
+    tenBit: Bool
   ) throws -> (reader: AVAssetReader, video: AVAssetReaderOutput, audio: AVAssetReaderOutput?) {
     let reader = try AVAssetReader(asset: plan.asset)
     reader.timeRange = plan.timeRange
 
     let pixels: [String: Any] = [
-      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+      kCVPixelBufferPixelFormatTypeKey as String: tenBit
+        ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+        : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
     ]
     let videoOut: AVAssetReaderOutput
     if plan.shape.fullFrame {
