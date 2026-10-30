@@ -201,3 +201,19 @@ test('download size left: same title average, else overall', async () => {
   assert.equal(downloadSizeLeft(series, [{ seriesId: 'a', chapterId: 'a3' }, { seriesId: 'c', chapterId: 'c1' }]), Math.round(20e6 + 100e6 / 3));
   assert.equal(downloadSizeLeft([{ id: 'c', chapters: [ch('c1', 0, false)] }], [{ seriesId: 'c', chapterId: 'c1' }]), null);
 });
+
+test('download queue by title: small first, next few from where you are', async () => {
+  const { queueByTitle, queueWithFirst, beyondNext, chaptersFromHere } = await import('../src/features/vault/manga/mangaLogic.ts');
+  const ch = (id, readAt = null, lastPage = 0) => ({ id, size: 0, pageCount: 10, downloaded: false, readAt, lastPage });
+  const big = { id: 'big', title: 'Big', chapters: [ch('b1', 1), ch('b2', 1), ch('b3', null, 4), ch('b4'), ch('b5'), ch('b6')] };
+  const small = { id: 'small', title: 'Small', chapters: [ch('s1')] };
+  const waiting = [...['b3', 'b4', 'b5', 'b6'].map((c) => ({ seriesId: 'big', chapterId: c })), { seriesId: 'small', chapterId: 's1' }];
+  const titles = queueByTitle([big, small], waiting);
+  assert.deepEqual(titles.map((t) => [t.seriesId, t.chapterIds.length, t.chapterCount, t.reading]), [['big', 4, 6, true], ['small', 1, 1, false]]);
+  assert.deepEqual(queueWithFirst(waiting, ['small']), ['s1', 'b3', 'b4', 'b5', 'b6']);
+  // Part-way through b3: the next two are b3 and b4.
+  assert.deepEqual(chaptersFromHere(big, 2), ['b3', 'b4']);
+  assert.deepEqual(beyondNext([big, small], waiting, ['big'], 2), ['b5', 'b6']);
+  // Not started: from the first chapter.
+  assert.deepEqual(chaptersFromHere(small, 3), ['s1']);
+});

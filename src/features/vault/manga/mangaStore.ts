@@ -304,6 +304,19 @@ export async function listDownloads(): Promise<DownloadRow[]> {
   return rows.map((r) => ({ chapterId: r.chapter_id, seriesId: r.series_id, state: r.state === 'failed' ? 'failed' : 'queued', error: r.error, attempts: r.attempts, addedAt: r.added_at }));
 }
 
+/** The first waiting download (one row, not the whole queue). */
+export async function nextDownload(): Promise<DownloadRow | null> {
+  const db = await getDb();
+  const r = await db.getFirstAsync<{ chapter_id: string; series_id: string; error: string | null; attempts: number; added_at: number }>("SELECT * FROM manga_downloads WHERE state = 'queued' ORDER BY added_at LIMIT 1;");
+  return r ? { chapterId: r.chapter_id, seriesId: r.series_id, state: 'queued', error: r.error, attempts: r.attempts, addedAt: r.added_at } : null;
+}
+
+/** The chapter is still in the queue (not cancelled). */
+export async function isQueued(chapterId: string): Promise<boolean> {
+  const db = await getDb();
+  return !!(await db.getFirstAsync('SELECT 1 FROM manga_downloads WHERE chapter_id = ?;', [chapterId]));
+}
+
 export async function finishDownload(chapterId: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM manga_downloads WHERE chapter_id = ?;', [chapterId]);
@@ -318,6 +331,14 @@ export async function cancelDownloads(chapterIds: string[] | null): Promise<void
   const db = await getDb();
   if (!chapterIds) await db.runAsync('DELETE FROM manga_downloads;');
   else for (const id of chapterIds) await db.runAsync('DELETE FROM manga_downloads WHERE chapter_id = ?;', [id]);
+}
+
+/** Puts the waiting downloads in this order (the ones not named keep their place after them). */
+export async function orderDownloads(chapterIds: string[]): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const [i, id] of chapterIds.entries()) await db.runAsync('UPDATE manga_downloads SET added_at = ? WHERE chapter_id = ?;', [i + 1, id]);
+  });
 }
 
 export async function retryDownloads(): Promise<void> {

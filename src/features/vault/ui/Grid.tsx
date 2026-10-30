@@ -11,7 +11,7 @@
  * Presentational only - no native modules (see the rule in types.ts).
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ScrollView as RNScrollView, Text, TouchableOpacity, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
@@ -188,7 +188,16 @@ export default function Grid({
     }
   }
 
-  const now = Date.now();
+  // "Days left" in Recently Deleted: once per list change is plenty (a new value every render redrew every tile).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => Date.now(), [items]);
+  // The same functions every render, so tiles that did not change skip redrawing.
+  const pressRef = useRef(onPressTile);
+  pressRef.current = onPressTile;
+  const longRef = useRef(onLongPressTile);
+  longRef.current = onLongPressTile;
+  const press = useCallback((v: VaultItem) => pressRef.current(v), []);
+  const longPress = useCallback((v: VaultItem) => longRef.current?.(v), []);
 
   return (
     <GestureDetector gesture={gestures}>
@@ -245,8 +254,8 @@ export default function Grid({
                 live={liveId === item.id && !!item.uri && (item.durationMs ?? 1) > 0}
                 now={now}
                 styles={styles}
-                onPress={onPressTile}
-                onLongPress={onLongPressTile}
+                onPress={press}
+                onLongPress={onLongPressTile ? longPress : undefined}
               />
             ) : null;
           })}
@@ -280,7 +289,7 @@ function TilePreview({ uri, durationMs }: { uri: string; durationMs: number | nu
   );
 }
 
-function TileView({
+const TileView = memo(function TileView({
   tile,
   item,
   viewOptions,
@@ -386,7 +395,7 @@ function TileView({
       )}
     </TouchableOpacity>
   );
-}
+});
 
 const makeStyles = (p: Palette) =>
   sheet({

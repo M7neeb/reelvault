@@ -79,6 +79,8 @@ export type MangaActions = {
   removeDownloads: (seriesId: string, which: 'all' | string[]) => Promise<void>;
   cancelDownloads: (chapterIds: string[] | null) => Promise<void>;
   retryDownloads: () => Promise<void>;
+  /** Puts the waiting downloads in this order (chapter ids). */
+  orderDownloads: (chapterIds: string[]) => Promise<void>;
   pauseDownloads: (paused: boolean) => void;
   /** Saves downloaded chapters as .cbz files in Files › ReelVault › Exports; a message for the screen. */
   exportCbz: (seriesId: string, which: 'all' | string[]) => Promise<string>;

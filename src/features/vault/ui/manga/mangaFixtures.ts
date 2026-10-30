@@ -161,6 +161,7 @@ export function fixtureMangaData(): MangaData {
     removeDownloads: none,
     cancelDownloads: none,
     retryDownloads: none,
+    orderDownloads: none,
     pauseDownloads: () => undefined,
     exportCbz: async () => 'Saved 12 .cbz files to Files › On My iPhone › ReelVault › Exports › Lighthouse Keeper.',
     shareCbz: none,
@@ -173,6 +174,7 @@ export function fixtureMangaData(): MangaData {
   const downloads = {
     queue: [
       ...reading.chapters.slice(12, 16).map((c) => ({ chapterId: c.id, seriesId: reading.id, state: 'queued' as const, error: null })),
+      ...items.slice(1, 4).flatMap((s, i) => s.chapters.slice(0, [30, 1, 6][i]).map((c) => ({ chapterId: c.id, seriesId: s.id, state: 'queued' as const, error: null }))),
       { chapterId: items[2].chapters[30].id, seriesId: items[2].id, state: 'failed' as const, error: 'Could not reach api.mangadex.org. Check the address and that it is on.' },
     ],
     current: { chapterId: reading.chapters[12].id, seriesId: reading.id, done: 7, total: 18 },
