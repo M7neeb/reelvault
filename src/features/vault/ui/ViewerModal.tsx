@@ -878,6 +878,7 @@ function ViewerPage({
                 {enableVideo ? (
                   <VideoView
                     ref={videoRef}
+                    pointerEvents="none"
                     player={player}
                     style={[styles.video, { backgroundColor: 'transparent' }]}
                     contentFit={fillScreen ? 'cover' : 'contain'}
@@ -901,6 +902,8 @@ function ViewerPage({
                 )}
                 {next && <Image source={next.thumbSource} style={[styles.neighbour, { left: W + PAGE_GAP, width: W }]} contentFit="contain" />}
               </Animated.View>
+              {/* iOS's video view keeps touches for itself: this see-through layer on top takes them, so tap, double tap, hold and swipes reach the gestures. */}
+              <View style={fill} collapsable={false} />
             </View>
           </GestureDetector>
           {ended && !locked && (

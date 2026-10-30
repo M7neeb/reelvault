@@ -7,26 +7,31 @@
  * them for the days you chose). Presentational only (see types.ts).
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions, Alert } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  MANGA_SORTS,
+  DEFAULT_LIBRARY_VIEW,
   MANGA_STATUSES,
   chapterLabel,
   continueReading,
+  downloadedCount,
   fmtRating,
   matchesManga,
   nextChapter,
+  parseLibraryView,
   progressOf,
-  sortManga,
+  sourceLabel,
   unreadCount,
+  viewLibrary,
+  type LibraryView,
   type MangaFilter,
-  type MangaSort,
   type MangaStatus,
 } from '../../manga/mangaLogic';
+import { getSetting, setSetting } from '../../library';
+import LibrarySheet from './LibrarySheet';
 import { useTabBarSpace } from '../chrome';
 import { tick } from '../haptics';
 import { confirmAction } from '../confirm';
@@ -37,11 +42,13 @@ import { ModeSwitch, type VideosMode } from '../overviewParts';
 import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
+import Fade from '../Fade';
 import MangaCover from './MangaCover';
 import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
 
-const SIDE = 16;
-const GAP = 12;
+const VIEW_KEY = 'manga.libraryView';
+const SIDE = 12;
+const GAP = 10;
 
 type Chip = { key: string; label: string; filter: MangaFilter };
 
@@ -93,15 +100,29 @@ export default function MangaScreen({
   const p = usePalette();
   const tabSpace = useTabBarSpace();
   const { width } = useWindowDimensions();
-  const cols = width >= 700 ? 5 : 3;
+  // Filter · Sort · Display, kept between visits.
+  const [view, setView] = useState<LibraryView>(DEFAULT_LIBRARY_VIEW);
+  useEffect(() => {
+    getSetting(VIEW_KEY)
+      .then((raw) => setView(parseLibraryView(raw)))
+      .catch(() => undefined);
+  }, []);
+  const changeView = (v: LibraryView) => {
+    setView(v);
+    setSetting(VIEW_KEY, JSON.stringify(v)).catch(() => undefined);
+  };
+  const [viewOpen, setViewOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Big covers, two to a row by default (twice as many on wide screens), like Tachimanga.
+  const cols = view.layout === 'list' ? 1 : width >= 700 ? view.perRow * 2 : view.perRow;
   const tileW = Math.floor((width - SIDE * 2 - GAP * (cols - 1)) / cols);
+  const small = cols >= 4;
 
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState('all');
-  const [sort, setSort] = useState<MangaSort>('recentRead');
   const [inDeleted, setInDeleted] = useState(initialDeleted);
   const [selected, setSelected] = useState<Set<string> | null>(null);
-  const [menu, setMenu] = useState<null | 'add' | 'more' | 'sort' | 'status' | 'deleted-one' | 'download-all'>(null);
+  const [menu, setMenu] = useState<null | 'add' | 'more' | 'status' | 'deleted-one' | 'download-all'>(null);
   const [rating, setRating] = useState(false);
   const [tagPrompt, setTagPrompt] = useState(false);
   const [deletedTarget, setDeletedTarget] = useState<MangaUiSeries | null>(null);
@@ -115,7 +136,7 @@ export default function MangaScreen({
   }, [visible]);
   const chips: Chip[] = useMemo(
     () => [
-      { key: 'all', label: 'All', filter: {} },
+      { key: 'all', label: 'Library', filter: {} },
       ...MANGA_STATUSES.map((s) => ({ key: s.key, label: s.label, filter: { status: s.key } as MangaFilter })),
       { key: 'unread', label: 'Unread', filter: { unread: true } },
       { key: 'fav', label: 'Favourites', filter: { favourites: true } },
@@ -127,11 +148,11 @@ export default function MangaScreen({
   );
   const active = chips.find((c) => c.key === chip) ?? chips[0];
   const source = inDeleted ? deleted.filter((s) => showPrivate || !s.isPrivate) : visible;
-  const list = useMemo(() => sortManga(source.filter((s) => matchesManga(s, { ...active.filter, query })), sort), [source, active, query, sort]);
+  const list = useMemo(() => viewLibrary(source.filter((s) => matchesManga(s, { ...active.filter, query })), view), [source, active, query, view]);
+  const sourceNames = useMemo(() => [...new Set(visible.map((s) => sourceLabel(s.sourceId)))].sort(), [visible]);
+  const filtering = view.filter.unread || view.filter.downloaded || view.filter.completed || view.filter.sources.length > 0;
   const counts = useMemo(() => Object.fromEntries(chips.map((c) => [c.key, visible.filter((s) => matchesManga(s, c.filter)).length])), [chips, visible]);
-  const resume = useMemo(() => (query || chip !== 'all' || inDeleted ? [] : continueReading(visible)), [visible, query, chip, inDeleted]);
-  const chapterTotal = visible.reduce((a, s) => a + s.chapters.length, 0);
-  const unreadTotal = visible.reduce((a, s) => a + unreadCount(s), 0);
+  const resume = useMemo(() => (!view.continueRow || query || chip !== 'all' || inDeleted ? [] : continueReading(visible)), [visible, query, chip, inDeleted, view.continueRow]);
 
   const ids = selected ? [...selected] : [];
   const toggle = (id: string) =>
@@ -149,7 +170,7 @@ export default function MangaScreen({
     { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
   ];
   const moreOptions: OptionItem[] = [
-    { label: 'Sort', hint: MANGA_SORTS.find((s) => s.key === sort)?.label, onPress: () => setTimeout(() => setMenu('sort'), 250) },
+    { label: 'Add manga', hint: 'Files, a folder or a Tachimanga backup', onPress: () => setTimeout(() => setMenu('add'), 250) },
     ...(items.some((s) => s.sourceId) ? [{ label: 'Check for new chapters', hint: 'Every title from a source', onPress: () => actions.refreshAll().catch(failed) }] : []),
     { label: 'Browse sources', hint: 'MangaDex, your servers, extensions', onPress: onBrowse },
     ...(items.some((s) => s.sourceId) ? [{ label: 'Updates', hint: 'New chapters, newest first', onPress: () => onFeed('updates') }] : []),
@@ -165,13 +186,31 @@ export default function MangaScreen({
 
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
+      {/* Tachimanga's header: the title, Filter, and a pill with Search and More. */}
       <View style={styles.titleRow}>
-        <Text style={styles.title}>{inDeleted ? 'Recently Deleted' : 'Manga'}</Text>
-        <View style={styles.buttons}>
-          {!inDeleted && <IconButton icon="stats" label="Reading stats" onPress={onDashboard} />}
-          {!inDeleted && <IconButton icon="globe" label="Browse sources" onPress={onBrowse} />}
-          {!inDeleted && <IconButton icon="plus" label="Add manga or comics" onPress={() => setMenu('add')} />}
-          <IconButton icon="more" label="More" onPress={() => setMenu('more')} />
+        <Text style={styles.title} numberOfLines={1}>
+          {inDeleted ? 'Deleted' : 'Manga'}
+        </Text>
+        {!inDeleted && (
+          <TouchableOpacity style={[styles.round, filtering && styles.roundOn]} onPress={() => setViewOpen(true)} accessibilityLabel="Filter, sort and display">
+            <Icon name="options" size={20} color={filtering ? p.accent : p.text} />
+          </TouchableOpacity>
+        )}
+        <View style={styles.pill}>
+          {(visible.length > 0 || inDeleted) && (
+            <TouchableOpacity
+              style={styles.pillBtn}
+              onPress={() => {
+                if (searchOpen) setQuery('');
+                setSearchOpen((o) => !o);
+              }}
+              accessibilityLabel="Search">
+              <Icon name={searchOpen ? 'close' : 'search'} size={20} color={p.text} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.pillBtn} onPress={() => setMenu('more')} accessibilityLabel="More">
+            <Icon name="more" size={20} color={p.text} />
+          </TouchableOpacity>
         </View>
       </View>
       {!inDeleted && (
@@ -190,23 +229,21 @@ export default function MangaScreen({
           <Icon name={downloads.paused ? 'pause' : 'import'} size={14} color={p.accent} />
           <Text style={styles.dlText} numberOfLines={1}>
             {downloads.paused
-              ? `Downloads paused · ${downloads.queue.length} waiting`
+              ? `Downloads paused · ${downloads.queue.filter((q) => q.state === 'queued').length} waiting`
               : downloads.current
                 ? `Downloading · page ${downloads.current.done} of ${downloads.current.total} · ${downloads.queue.filter((q) => q.state === 'queued').length} chapters left`
-                : `${downloads.queue.filter((q) => q.state === 'failed').length} downloads failed · tap to retry`}
+                : downloads.queue.some((q) => q.state === 'queued')
+                  ? `Starting the next chapter…`
+                  : downloads.queue.some((q) => q.state === 'failed')
+                    ? `${downloads.queue.filter((q) => q.state === 'failed').length} downloads failed · tap to retry`
+                    : `${downloads.queue.filter((q) => q.state === 'held').length} chapters on hold · tap to choose`}
           </Text>
           <Icon name="forward" size={12} color={p.textMuted} />
         </TouchableOpacity>
       )}
-      {!inDeleted && visible.length > 0 && (
-        <Text style={styles.summary}>
-          {visible.length} {visible.length === 1 ? 'series' : 'series'} · {chapterTotal} {chapterTotal === 1 ? 'chapter' : 'chapters'}
-          {unreadTotal ? ` · ${unreadTotal} unread` : ''}
-        </Text>
-      )}
       {inDeleted && <Text style={styles.summary}>Series here are removed for good after the days you chose in Settings. Tap one to restore it.</Text>}
 
-      {(visible.length > 0 || inDeleted) && (
+      {(searchOpen || !!query) && (
         <View style={styles.search}>
           <Icon name="search" size={15} color={p.textSecondary} />
           <TextInput
@@ -217,6 +254,7 @@ export default function MangaScreen({
             style={styles.searchInput}
             clearButtonMode="while-editing"
             returnKeyType="search"
+            autoFocus
           />
         </View>
       )}
@@ -254,31 +292,27 @@ export default function MangaScreen({
         </View>
       )}
 
+      {/* Categories as one rounded bar of tabs (your statuses and keywords), like Tachimanga's. */}
       {!inDeleted && visible.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {chips.map((c) => {
-            const on = c.key === chip;
-            if (c.key !== 'all' && !counts[c.key] && !on) return null;
-            return (
-              <TouchableOpacity
-                key={c.key}
-                style={[styles.chip, on && styles.chipOn]}
-                onPress={() => {
-                  tick();
-                  setChip(c.key);
-                }}>
-                <Text style={[styles.chipText, on && styles.chipTextOn]}>{c.label}</Text>
-                <Text style={[styles.chipCount, on && styles.chipTextOn]}>{counts[c.key] ?? 0}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      )}
-      {list.length > 0 && (
-        <TouchableOpacity style={styles.sortRow} onPress={() => setMenu('sort')}>
-          <Text style={styles.sortText}>{MANGA_SORTS.find((s) => s.key === sort)?.label}</Text>
-          <Icon name="down" size={11} color={p.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.tabsWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+            {chips.map((c) => {
+              const on = c.key === chip;
+              if (c.key !== 'all' && !counts[c.key] && !on) return null;
+              return (
+                <TouchableOpacity
+                  key={c.key}
+                  style={[styles.tab, on && styles.tabOn]}
+                  onPress={() => {
+                    tick();
+                    setChip(c.key);
+                  }}>
+                  <Text style={[styles.tabText, on && styles.tabTextOn]}>{c.label.replace(/^# /, '')}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -315,46 +349,89 @@ export default function MangaScreen({
         keyExtractor={(s) => s.id}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
-        columnWrapperStyle={{ gap: GAP, paddingHorizontal: SIDE }}
-        contentContainerStyle={{ paddingBottom: tabSpace + 24, gap: 16 }}
+        columnWrapperStyle={cols > 1 ? { gap: GAP, paddingHorizontal: SIDE } : undefined}
+        contentContainerStyle={{ paddingBottom: tabSpace + 24, gap: view.layout === 'list' ? 0 : small ? 8 : 12 }}
         keyboardDismissMode="on-drag"
         renderItem={({ item: s }) => {
           const sel = selected?.has(s.id) ?? false;
           const unread = unreadCount(s);
-          return (
-            <TouchableOpacity
-              style={{ width: tileW }}
-              onPress={() => {
-                if (selected) return toggle(s.id);
-                if (inDeleted) {
-                  setDeletedTarget(s);
-                  setMenu('deleted-one');
-                  return;
-                }
-                onOpen(s);
-              }}
-              onLongPress={() => {
-                tick();
-                if (inDeleted) return;
-                if (!selected) setSelected(new Set([s.id]));
-                else toggle(s.id);
-              }}
-              accessibilityLabel={`${s.title}${unread ? `, ${unread} unread` : ''}`}>
-              <View>
-                <MangaCover series={s} width={tileW} style={sel ? styles.tileSel : undefined} />
-                {s.rating > 0 && (
-                  <View style={styles.ratingBadge}>
-                    <Text style={styles.ratingBadgeText}>★ {fmtRating(s.rating)}</Text>
-                  </View>
-                )}
-                {unread > 0 && (
-                  <View style={styles.unreadBadge}>
+          const onPhone = view.badges.downloaded ? downloadedCount(s) : 0;
+          const press = () => {
+            if (selected) return toggle(s.id);
+            if (inDeleted) {
+              setDeletedTarget(s);
+              setMenu('deleted-one');
+              return;
+            }
+            onOpen(s);
+          };
+          const longPress = () => {
+            tick();
+            if (inDeleted) return;
+            if (!selected) setSelected(new Set([s.id]));
+            else toggle(s.id);
+          };
+          const label = `${s.title}${unread ? `, ${unread} unread` : ''}`;
+
+          if (view.layout === 'list')
+            return (
+              <TouchableOpacity style={[styles.row, sel && styles.tileSel]} onPress={press} onLongPress={longPress} accessibilityLabel={label}>
+                <MangaCover series={s} width={52} radius={8} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={2}>
+                    {s.title}
+                  </Text>
+                  <Text style={styles.rowMeta} numberOfLines={1}>
+                    {[
+                      `${s.chapters.length} ${s.chapters.length === 1 ? 'chapter' : 'chapters'}`,
+                      onPhone ? `${onPhone} on the phone` : null,
+                      view.badges.rating && s.rating > 0 ? `★ ${fmtRating(s.rating)}` : null,
+                      s.status ? MANGA_STATUSES.find((x) => x.key === s.status)?.label : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </View>
+                {selected ? (
+                  <View style={[styles.check, { position: 'relative', top: 0, right: 0 }, sel && styles.checkOn]}>{sel && <Icon name="check" size={12} color="#fff" weight="bold" />}</View>
+                ) : view.badges.unread && unread > 0 ? (
+                  <View style={styles.rowBadge}>
                     <Text style={styles.unreadText}>{unread}</Text>
                   </View>
-                )}
-                {s.status === 'completed' && unread === 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Icon name="check" size={11} color="#fff" weight="bold" />
+                ) : null}
+              </TouchableOpacity>
+            );
+
+          return (
+            <TouchableOpacity style={{ width: tileW }} onPress={press} onLongPress={longPress} accessibilityLabel={label}>
+              <View style={sel ? styles.tileSel : undefined}>
+                <MangaCover series={s} width={tileW} radius={small ? 10 : 14} bare />
+                {/* The title on the cover, over a dark fade (Tachimanga's look). */}
+                <Fade color="0,0,0" from={0} to={0.85} style={[styles.tileFade, small && { borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }]} />
+                <View style={[styles.tileCaption, small && { left: 7, right: 7, bottom: 6 }]} pointerEvents="none">
+                  <Text style={[styles.tileTitle, small && { fontSize: 12, lineHeight: 15 }, cols === 1 && { fontSize: 22, lineHeight: 27 }]} numberOfLines={2}>
+                    {s.title}
+                  </Text>
+                </View>
+                <View style={styles.badgeRow} pointerEvents="none">
+                  {view.badges.unread && unread > 0 ? (
+                    <View style={styles.badgeUnread}>
+                      <Text style={styles.unreadText}>{unread}</Text>
+                    </View>
+                  ) : view.badges.unread && s.status === 'completed' ? (
+                    <View style={styles.badgeUnread}>
+                      <Icon name="check" size={11} color="#06290f" weight="bold" />
+                    </View>
+                  ) : null}
+                  {onPhone > 0 && (
+                    <View style={styles.badgeDl}>
+                      <Text style={styles.dlText2}>{onPhone}</Text>
+                    </View>
+                  )}
+                </View>
+                {view.badges.rating && s.rating > 0 && !selected && !small && (
+                  <View style={styles.ratingBadge}>
+                    <Text style={styles.ratingBadgeText}>★ {fmtRating(s.rating)}</Text>
                   </View>
                 )}
                 {selected && (
@@ -366,12 +443,6 @@ export default function MangaScreen({
                   </View>
                 )}
               </View>
-              <Text style={styles.tileTitle} numberOfLines={2}>
-                {s.title}
-              </Text>
-              <Text style={styles.tileMeta} numberOfLines={1}>
-                {s.status ? MANGA_STATUSES.find((x) => x.key === s.status)?.label : `${s.chapters.length} ${s.chapters.length === 1 ? 'chapter' : 'chapters'}`}
-              </Text>
             </TouchableOpacity>
           );
         }}
@@ -420,6 +491,7 @@ export default function MangaScreen({
         </Animated.View>
       )}
 
+      {viewOpen && <LibrarySheet view={view} sources={sourceNames} onChange={changeView} onClose={() => setViewOpen(false)} />}
       {menu === 'add' && <OptionsSheet title="Add to Manga" options={addOptions} onClose={() => setMenu(null)} />}
       {menu === 'more' && <OptionsSheet title="Manga" options={moreOptions} onClose={() => setMenu((m) => (m === 'more' ? null : m))} />}
       {menu === 'download-all' && (
@@ -432,13 +504,6 @@ export default function MangaScreen({
               onPress: () => actions.downloadLibrary().then(() => onDownloads()),
             },
           ]}
-          onClose={() => setMenu(null)}
-        />
-      )}
-      {menu === 'sort' && (
-        <OptionsSheet
-          title="Sort by"
-          options={MANGA_SORTS.map((s) => ({ label: s.label, hint: s.key === sort ? '✓' : undefined, onPress: () => setSort(s.key) }))}
           onClose={() => setMenu(null)}
         />
       )}
@@ -494,9 +559,12 @@ export default function MangaScreen({
 const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
-    titleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SIDE, paddingTop: 6 },
-    title: { flex: 1, color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },
-    buttons: { flexDirection: 'row', gap: 8 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: SIDE + 4, paddingTop: 6 },
+    title: { flex: 1, color: p.text, fontSize: 36, fontWeight: '900', letterSpacing: -0.8 },
+    round: { width: 48, height: 48, borderRadius: 24, backgroundColor: p.card, borderWidth: 1, borderColor: p.border, alignItems: 'center', justifyContent: 'center' },
+    roundOn: { backgroundColor: p.accentSoft, borderColor: p.accent },
+    pill: { flexDirection: 'row', height: 48, borderRadius: 24, backgroundColor: p.card, borderWidth: 1, borderColor: p.border, alignItems: 'center', paddingHorizontal: 6 },
+    pillBtn: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
     status: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
     summary: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
@@ -511,23 +579,31 @@ const makeStyles = (p: Palette) =>
     resumeFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     resumeTitle: { color: p.text, fontSize: 14, fontWeight: '700' },
     meta: { color: p.textSecondary, fontSize: 12 },
-    chips: { gap: 8, paddingHorizontal: SIDE, paddingTop: 16 },
-    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-    chipOn: { backgroundColor: p.text },
-    chipText: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
-    chipCount: { color: p.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
-    chipTextOn: { color: p.bg },
-    sortRow: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: SIDE, paddingTop: 14, paddingBottom: 8, alignSelf: 'flex-start' },
-    sortText: { color: p.textSecondary, fontSize: 13, fontWeight: '700' },
+    tabsWrap: { marginHorizontal: SIDE, marginTop: 14, marginBottom: 12, backgroundColor: p.card, borderRadius: 999, borderWidth: 1, borderColor: p.border, overflow: 'hidden' },
+    tabs: { padding: 5, gap: 2 },
+    tab: { borderRadius: 999, paddingHorizontal: 18, paddingVertical: 10 },
+    tabOn: { backgroundColor: p.elevated },
+    tabText: { color: p.textSecondary, fontSize: 17, fontWeight: '700' },
+    tabTextOn: { color: p.text },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: SIDE + 4, paddingVertical: 8 },
+    rowTitle: { color: p.text, fontSize: 16, fontWeight: '800' },
+    rowMeta: { color: p.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 2 },
+    rowBadge: { minWidth: 26, height: 24, borderRadius: 8, paddingHorizontal: 7, backgroundColor: '#8BD88E', alignItems: 'center', justifyContent: 'center' },
+    dlBadge: { position: 'absolute', top: 8, minWidth: 26, height: 26, borderRadius: 9, paddingHorizontal: 7, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
+    dlText2: { color: '#fff', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'] },
     tileSel: { opacity: 0.6 },
-    tileTitle: { color: p.text, fontSize: 13, fontWeight: '700', marginTop: 6, lineHeight: 17 },
-    tileMeta: { color: p.textSecondary, fontSize: 12, marginTop: 1 },
-    ratingBadge: { position: 'absolute', top: 6, left: 6, backgroundColor: 'rgba(0,0,0,0.62)', borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2 },
-    ratingBadgeText: { color: '#F5A623', fontSize: 11, fontWeight: '800' },
-    unreadBadge: { position: 'absolute', top: 6, right: 6, minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
-    unreadText: { color: '#fff', fontSize: 11, fontWeight: '900', fontVariant: ['tabular-nums'] },
-    lockBadge: { position: 'absolute', bottom: 6, left: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-    check: { position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
+    tileFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '42%', borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
+    tileCaption: { position: 'absolute', left: 12, right: 12, bottom: 11 },
+    tileTitle: { color: '#fff', fontSize: 16, fontWeight: '800', lineHeight: 20, letterSpacing: -0.2, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 4 },
+    ratingBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.62)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
+    ratingBadgeText: { color: '#F5A623', fontSize: 12, fontWeight: '800' },
+    badgeRow: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', borderRadius: 9, overflow: 'hidden' },
+    badgeUnread: { minWidth: 26, height: 26, paddingHorizontal: 7, backgroundColor: '#8BD88E', alignItems: 'center', justifyContent: 'center' },
+    badgeDl: { minWidth: 26, height: 26, paddingHorizontal: 7, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
+    unreadBadge: { position: 'absolute', top: 8, left: 8, minWidth: 26, height: 26, borderRadius: 9, paddingHorizontal: 7, backgroundColor: '#8BD88E', alignItems: 'center', justifyContent: 'center' },
+    unreadText: { color: '#06290f', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'] },
+    lockBadge: { position: 'absolute', top: 40, right: 8, width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
+    check: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },
     selectBar: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 18, padding: 8, borderWidth: 1, borderColor: p.border },
     selectCount: { flex: 1, color: p.text, fontSize: 14, fontWeight: '700', paddingLeft: 6 },

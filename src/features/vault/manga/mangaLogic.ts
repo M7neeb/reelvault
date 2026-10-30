@@ -304,12 +304,9 @@ export function chapterLabel(c: Pick<MangaChapter, 'number' | 'volume' | 'title'
 export const isRead = (c: Pick<MangaChapter, 'readAt'>) => c.readAt !== null;
 export const unreadCount = (s: Pick<MangaSeries, 'chapters'>) => s.chapters.filter((c) => !isRead(c)).length;
 
-/** The mode a series opens in: yours, or what suits its kind. */
+/** The mode a series opens in: the one you chose in the reader, else one long strip, scrolling down. */
 export function modeOf(s: Pick<MangaSeries, 'readingMode' | 'kind'>): ReadingMode {
-  if (s.readingMode) return s.readingMode;
-  if (s.kind === 'manhwa') return 'webtoon';
-  if (s.kind === 'comic') return 'ltr';
-  return 'rtl';
+  return s.readingMode ?? 'webtoon';
 }
 
 /** Where to pick up: a chapter you are part-way through, else the first unread one after the last you read. */
@@ -372,7 +369,7 @@ export function matchesManga(s: MangaSeries, f: MangaFilter): boolean {
   return true;
 }
 
-export type MangaSort = 'recentRead' | 'recentAdded' | 'title' | 'rating' | 'unread' | 'chapters';
+export type MangaSort = 'recentRead' | 'recentAdded' | 'title' | 'rating' | 'unread' | 'chapters' | 'latest';
 
 export const MANGA_SORTS: { key: MangaSort; label: string }[] = [
   { key: 'recentRead', label: 'Last read' },
@@ -381,6 +378,7 @@ export const MANGA_SORTS: { key: MangaSort; label: string }[] = [
   { key: 'rating', label: 'Your rating' },
   { key: 'unread', label: 'Most unread' },
   { key: 'chapters', label: 'Most chapters' },
+  { key: 'latest', label: 'Latest chapter' },
 ];
 
 export function sortManga<T extends MangaSeries>(list: T[], sort: MangaSort): T[] {
@@ -399,7 +397,86 @@ export function sortManga<T extends MangaSeries>(list: T[], sort: MangaSort): T[
       return out.sort((a, b) => unreadCount(b) - unreadCount(a) || byTitle(a, b));
     case 'chapters':
       return out.sort((a, b) => b.chapters.length - a.chapters.length || byTitle(a, b));
+    case 'latest':
+      return out.sort((a, b) => latestChapterAt(b) - latestChapterAt(a) || byTitle(a, b));
   }
+}
+
+/** When its newest chapter came out (or was added). */
+export const latestChapterAt = (s: Pick<MangaSeries, 'chapters'>) => s.chapters.reduce((m, c) => Math.max(m, c.uploadedAt ?? c.addedAt), 0);
+
+/* --------------------------------------------- the library's look (Filter · Sort · Display) */
+
+export type LibraryView = {
+  sort: MangaSort;
+  /** The other way round from the sort's usual order. */
+  reverse: boolean;
+  filter: { unread: boolean; downloaded: boolean; completed: boolean; sources: string[] };
+  layout: 'grid' | 'list';
+  /** Covers per row in the grid (phone upright). */
+  perRow: number;
+  badges: { unread: boolean; downloaded: boolean; rating: boolean };
+  continueRow: boolean;
+};
+
+export const DEFAULT_LIBRARY_VIEW: LibraryView = {
+  sort: 'recentRead',
+  reverse: false,
+  filter: { unread: false, downloaded: false, completed: false, sources: [] },
+  layout: 'grid',
+  perRow: 2,
+  badges: { unread: true, downloaded: false, rating: true },
+  continueRow: true,
+};
+
+/** A saved view, with anything missing or broken set back to the default. */
+export function parseLibraryView(raw: string | null): LibraryView {
+  const d = DEFAULT_LIBRARY_VIEW;
+  let v: Partial<LibraryView> = {};
+  try {
+    v = raw ? JSON.parse(raw) : {};
+  } catch {
+    v = {};
+  }
+  const f = (v.filter ?? {}) as Partial<LibraryView['filter']>;
+  const b = (v.badges ?? {}) as Partial<LibraryView['badges']>;
+  return {
+    sort: MANGA_SORTS.some((x) => x.key === v.sort) ? v.sort! : d.sort,
+    reverse: v.reverse === true,
+    filter: { unread: f.unread === true, downloaded: f.downloaded === true, completed: f.completed === true, sources: Array.isArray(f.sources) ? f.sources.filter((x) => typeof x === 'string') : [] },
+    layout: v.layout === 'list' ? 'list' : 'grid',
+    perRow: typeof v.perRow === 'number' && v.perRow >= 1 && v.perRow <= 5 ? Math.round(v.perRow) : d.perRow,
+    badges: { unread: b.unread !== false, downloaded: b.downloaded === true, rating: b.rating !== false },
+    continueRow: v.continueRow !== false,
+  };
+}
+
+/** Chapters of a title that are on the phone. */
+export const downloadedCount = (s: Pick<MangaSeries, 'chapters'>) => s.chapters.filter((c) => c.folder && c.pages.length).length;
+
+/** Where a title comes from, as a name for the Sources filter. */
+export function sourceLabel(sourceId: string | null): string {
+  if (!sourceId) return 'Your files';
+  if (sourceId === 'mangadex') return 'MangaDex';
+  if (/^server:[^:]+:library$/.test(sourceId)) return 'Your server';
+  if (sourceId.startsWith('server:')) return 'Server extensions';
+  if (sourceId.startsWith('tachi:')) return sourceId.split(':').slice(2).join(':') || 'Backup';
+  if (sourceId.startsWith('ext:')) return sourceId.slice(4).replace(/[-_.]/g, ' ');
+  return sourceId;
+}
+
+/** The library as the Filter · Sort · Display sheet says. */
+export function viewLibrary<T extends MangaSeries>(list: T[], v: LibraryView): T[] {
+  const f = v.filter;
+  const kept = list.filter(
+    (s) =>
+      (!f.unread || unreadCount(s) > 0) &&
+      (!f.downloaded || downloadedCount(s) > 0) &&
+      (!f.completed || s.pubStatus === 'completed' || s.status === 'completed') &&
+      (!f.sources.length || f.sources.includes(sourceLabel(s.sourceId)))
+  );
+  const sorted = sortManga(kept, v.sort);
+  return v.reverse ? sorted.reverse() : sorted;
 }
 
 export const fmtRating = (r: number) => (Number.isInteger(r) ? String(r) : r.toFixed(1));
@@ -488,7 +565,7 @@ export function comicInfoXml(s: Pick<MangaSeries, 'title' | 'author' | 'artist' 
     ['ScanlationGroup', c.scanlator],
     ['PageCount', c.pageCount || null],
     ['Year', c.uploadedAt ? new Date(c.uploadedAt).getFullYear() : null],
-    ['Manga', modeOf(s) === 'rtl' ? 'YesAndRightToLeft' : s.kind === 'comic' ? 'No' : 'Yes'],
+    ['Manga', s.kind === 'comic' ? 'No' : s.readingMode === 'rtl' || (!s.readingMode && (s.kind ?? 'manga') === 'manga') ? 'YesAndRightToLeft' : 'Yes'],
   ];
   const body = fields
     .filter(([, v]) => v !== null && v !== undefined && v !== '')

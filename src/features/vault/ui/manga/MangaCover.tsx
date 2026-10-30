@@ -23,11 +23,14 @@ export default function MangaCover({
   width,
   radius = 10,
   style,
+  bare,
 }: {
   series: Pick<MangaUiSeries, 'coverSource' | 'title'>;
   width: number;
   radius?: number;
   style?: StyleProp<ViewStyle>;
+  /** No title on the stand-in cover (the caller writes it over the cover). */
+  bare?: boolean;
 }) {
   const styles = useStyles(makeStyles);
   const height = Math.round(width * 1.5);
@@ -45,9 +48,11 @@ export default function MangaCover({
       <View style={styles.icon}>
         <Icon name="book" size={Math.max(12, width * 0.16)} color="rgba(255,255,255,0.8)" />
       </View>
-      <Text style={[styles.title, { fontSize: Math.max(10, width * 0.13) }]} numberOfLines={4}>
-        {series.title}
-      </Text>
+      {!bare && (
+        <Text style={[styles.title, { fontSize: Math.max(10, width * 0.13) }]} numberOfLines={4}>
+          {series.title}
+        </Text>
+      )}
     </View>
   );
 }

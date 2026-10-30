@@ -160,9 +160,10 @@ test('filters and sorts', () => {
 });
 
 test('how a series reads: yours, else from its kind', () => {
-  assert.equal(modeOf({ readingMode: null, kind: null }), 'rtl');
+  // Long strip unless you chose otherwise in the reader.
+  assert.equal(modeOf({ readingMode: null, kind: null }), 'webtoon');
   assert.equal(modeOf({ readingMode: null, kind: 'manhwa' }), 'webtoon');
-  assert.equal(modeOf({ readingMode: null, kind: 'comic' }), 'ltr');
+  assert.equal(modeOf({ readingMode: null, kind: 'comic' }), 'webtoon');
   assert.equal(modeOf({ readingMode: 'vertical', kind: 'comic' }), 'vertical');
 });
 
@@ -216,4 +217,27 @@ test('download queue by title: small first, next few from where you are', async 
   assert.deepEqual(beyondNext([big, small], waiting, ['big'], 2), ['b5', 'b6']);
   // Not started: from the first chapter.
   assert.deepEqual(chaptersFromHere(small, 3), ['s1']);
+});
+
+test('library view: filters, sort both ways, saved view repaired', async () => {
+  const { viewLibrary, parseLibraryView, sourceLabel, DEFAULT_LIBRARY_VIEW } = await import('../src/features/vault/manga/mangaLogic.ts');
+  const ch = (id, o = {}) => ({ id, readAt: null, folder: null, pages: [], uploadedAt: null, addedAt: 1, ...o });
+  const base = { tags: [], rating: 0, status: null, pubStatus: null, lastReadAt: null, importedAt: 1, sourceId: null, kind: null, author: null, artist: null, altTitle: null, notes: null, description: null };
+  const a = { ...base, id: 'a', title: 'Alpha', chapters: [ch('a1', { readAt: 5 })], sourceId: 'server:x:library' };
+  const b = { ...base, id: 'b', title: 'Beta', chapters: [ch('b1', { folder: 'f', pages: ['1.jpg'], uploadedAt: 9 }), ch('b2')], pubStatus: 'completed' };
+  const v = (o) => ({ ...DEFAULT_LIBRARY_VIEW, sort: 'title', ...o, filter: { ...DEFAULT_LIBRARY_VIEW.filter, ...(o.filter ?? {}) } });
+  assert.deepEqual(viewLibrary([b, a], v({})).map((s) => s.id), ['a', 'b']);
+  assert.deepEqual(viewLibrary([b, a], v({ reverse: true })).map((s) => s.id), ['b', 'a']);
+  assert.deepEqual(viewLibrary([a, b], v({ filter: { unread: true } })).map((s) => s.id), ['b']);
+  assert.deepEqual(viewLibrary([a, b], v({ filter: { downloaded: true } })).map((s) => s.id), ['b']);
+  assert.deepEqual(viewLibrary([a, b], v({ filter: { completed: true } })).map((s) => s.id), ['b']);
+  assert.deepEqual(viewLibrary([a, b], v({ filter: { sources: ['Your server'] } })).map((s) => s.id), ['a']);
+  assert.deepEqual(viewLibrary([a, b], v({ sort: 'latest' })).map((s) => s.id), ['b', 'a']);
+  assert.equal(sourceLabel('tachi:123:Mangakakalot.fun (EN)'), 'Mangakakalot.fun (EN)');
+  const bad = parseLibraryView('{"perRow": 9, "sort": "nope", "layout": "list", "badges": {"unread": false}}');
+  assert.equal(bad.perRow, 2);
+  assert.equal(bad.sort, 'recentRead');
+  assert.equal(bad.layout, 'list');
+  assert.equal(bad.badges.unread, false);
+  assert.deepEqual(parseLibraryView('broken'), DEFAULT_LIBRARY_VIEW);
 });

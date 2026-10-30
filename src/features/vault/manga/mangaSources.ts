@@ -354,6 +354,37 @@ async function saveCover(seriesId: string, folder: string, cover: ImageRef | nul
   }
 }
 
+/**
+ * Titles from a source that still have no cover (a backup's cover the site
+ * would not hand out): fetched again, from your Suwayomi server first (it
+ * keeps covers itself), else from the source. Quiet; how many were found.
+ */
+export async function fillMissingCovers(series: MangaSeries[], prefs: BrowsePrefs): Promise<number> {
+  let found = 0;
+  for (const s of series) {
+    if (s.cover || s.deletedAt || !s.sourceId || !s.sourceKey || tachiSourceOf(s.sourceId)) continue;
+    try {
+      let ref: ImageRef | null = null;
+      const m = s.sourceId.match(/^server:([^:]+):library$/);
+      const server = m ? prefs.servers.find((x) => x.id === m[1] && x.kind === 'suwayomi') : undefined;
+      if (server && SERVER_KEY.test(s.sourceKey)) ref = { uri: `${suwayomiBase(server.url)}/api/v1/manga/${s.sourceKey}/thumbnail`, headers: await authFor(server) };
+      let cover = await saveCover(s.id, s.folder, ref);
+      if (!cover) {
+        const src = await sourceFor(s.sourceId, prefs);
+        const d = src ? await src.details(s.sourceKey).catch(() => null) : null;
+        cover = await saveCover(s.id, s.folder, d?.cover ?? null);
+      }
+      if (cover) {
+        await updateSeries([s.id], { cover });
+        found++;
+      }
+    } catch (e) {
+      console.log(`[MANGA] cover for ${s.title}: ${String(e)}`);
+    }
+  }
+  return found;
+}
+
 /** Saves a cover from an address (AniList) and makes it the title's cover. */
 export async function saveCoverFrom(seriesId: string, folder: string, url: string): Promise<void> {
   const cover = await saveCover(seriesId, folder, { uri: url });

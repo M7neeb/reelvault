@@ -542,7 +542,7 @@ function StoryMedia({
         </Animated.View>
       )}
       {enableVideo ? (
-        <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
+        <VideoView pointerEvents="none" player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
       ) : item ? (
         <Animated.View key={current} entering={FadeIn.duration(DUR.slow)} exiting={FadeOut.duration(DUR.base)} style={[StyleSheet.absoluteFill, zoomStyle]}>
           <Image source={item.thumbSource} style={StyleSheet.absoluteFill} contentFit={fit} />

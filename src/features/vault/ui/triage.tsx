@@ -46,7 +46,7 @@ function Clip({ item, enableVideo }: { item: VaultItem; enableVideo: boolean }) 
     <View style={StyleSheet.absoluteFill}>
       <Backdrop source={item.thumbSource} dim={0.35} />
       {enableVideo ? (
-        <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
+        <VideoView pointerEvents="none" player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
       ) : (
         <Image source={item.thumbSource} style={StyleSheet.absoluteFill} contentFit={fit} />
       )}

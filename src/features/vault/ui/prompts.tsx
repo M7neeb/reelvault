@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal } from './screen';
 
 import { tick } from './haptics';
@@ -28,6 +29,7 @@ export function OptionsSheet({
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const [visible, setVisible] = useState(true);
   const after = useRef<(() => void) | null>(null);
   const done = useRef(false);
@@ -56,12 +58,14 @@ export function OptionsSheet({
   );
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => close()} onDismiss={finish}>
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={() => close()} />
-        <View style={styles.card}>
+        {/* A long list scrolls instead of running off the top of the screen. */}
+        <View style={[styles.card, { flexShrink: 1 }]}>
           <Text style={styles.title} numberOfLines={1}>
             {title}
           </Text>
+          <ScrollView bounces={false} style={{ flexShrink: 1 }}>
           {options.map((o) => (
             <TouchableOpacity
               key={o.label}
@@ -74,6 +78,7 @@ export function OptionsSheet({
               {!!o.hint && <Text style={[styles.rowHint, o.hint === '✓' && styles.rowCheck, long(o) && styles.rowHintStacked]}>{o.hint}</Text>}
             </TouchableOpacity>
           ))}
+          </ScrollView>
         </View>
         <TouchableOpacity style={styles.cancelCard} onPress={() => close()}>
           <Text style={styles.cancelText}>Cancel</Text>

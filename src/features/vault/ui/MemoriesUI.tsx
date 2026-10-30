@@ -615,7 +615,7 @@ function ClipMedia({ clip, item, thumb, enableVideo, muted, paused, mood, seed }
       )}
       {enableVideo && (
         <Animated.View style={[StyleSheet.absoluteFill, zoom]}>
-          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
+          <VideoView pointerEvents="none" player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />
         </Animated.View>
       )}
       {clip && (!enableVideo || !ready) && (
@@ -681,7 +681,7 @@ function HalfClip({ item, thumb, startMs, top, height, width, enableVideo, pause
   return (
     <View style={{ position: 'absolute', left: 0, right: 0, top, height, overflow: 'hidden' }}>
       <Backdrop source={thumb} dim={0.25} />
-      {enableVideo && <VideoView player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />}
+      {enableVideo && <VideoView pointerEvents="none" player={player} style={StyleSheet.absoluteFill} contentFit={fit} nativeControls={false} />}
       {(!enableVideo || !ready) && (
         <Animated.View entering={FadeIn.duration(400)} style={StyleSheet.absoluteFill}>
           <KenBurns source={thumb} ms={9000} seed={top ? 2 : 1} />

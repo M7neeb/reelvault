@@ -29,7 +29,7 @@ function ComparePane({ item, enableVideo, label }: { item: VaultItem; enableVide
   return (
     <View style={styles.pane}>
       {enableVideo ? (
-        <VideoView player={player} style={styles.full} contentFit="contain" nativeControls={false} />
+        <VideoView pointerEvents="none" player={player} style={styles.full} contentFit="contain" nativeControls={false} />
       ) : (
         <Image source={item.thumbSource} style={styles.full} contentFit="contain" />
       )}
