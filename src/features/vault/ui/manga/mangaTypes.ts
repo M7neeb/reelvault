@@ -81,6 +81,8 @@ export type MangaActions = {
   retryDownloads: () => Promise<void>;
   /** Puts the waiting downloads in this order (chapter ids). */
   orderDownloads: (chapterIds: string[]) => Promise<void>;
+  /** Puts waiting chapters on hold (kept in the list, not downloaded) or lets them download again. */
+  holdDownloads: (chapterIds: string[], hold: boolean) => Promise<void>;
   pauseDownloads: (paused: boolean) => void;
   /** Saves downloaded chapters as .cbz files in Files › ReelVault › Exports; a message for the screen. */
   exportCbz: (seriesId: string, which: 'all' | string[]) => Promise<string>;
@@ -95,7 +97,7 @@ export type MangaActions = {
   loadReads: () => Promise<MangaRead[]>;
 };
 
-export type DownloadItem = { chapterId: string; seriesId: string; state: 'queued' | 'failed'; error: string | null };
+export type DownloadItem = { chapterId: string; seriesId: string; state: 'queued' | 'failed' | 'held'; error: string | null };
 export type DownloadState = {
   queue: DownloadItem[];
   current: { chapterId: string; seriesId: string; done: number; total: number } | null;

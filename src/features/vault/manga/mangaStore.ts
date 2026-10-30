@@ -286,7 +286,8 @@ export async function setSeriesSource(id: string, sourceId: string | null, sourc
 
 /* ------------------------------------------------------------ downloads */
 
-export type DownloadRow = { chapterId: string; seriesId: string; state: 'queued' | 'failed'; error: string | null; attempts: number; addedAt: number };
+/** `held`: on hold, waits in the list but is not downloaded until you let it. */
+export type DownloadRow = { chapterId: string; seriesId: string; state: 'queued' | 'failed' | 'held'; error: string | null; attempts: number; addedAt: number };
 
 export async function queueDownloads(rows: { chapterId: string; seriesId: string }[], at: number): Promise<void> {
   const db = await getDb();
@@ -301,7 +302,7 @@ export async function queueDownloads(rows: { chapterId: string; seriesId: string
 export async function listDownloads(): Promise<DownloadRow[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ chapter_id: string; series_id: string; state: string; error: string | null; attempts: number; added_at: number }>('SELECT * FROM manga_downloads ORDER BY added_at;');
-  return rows.map((r) => ({ chapterId: r.chapter_id, seriesId: r.series_id, state: r.state === 'failed' ? 'failed' : 'queued', error: r.error, attempts: r.attempts, addedAt: r.added_at }));
+  return rows.map((r) => ({ chapterId: r.chapter_id, seriesId: r.series_id, state: r.state === 'failed' || r.state === 'held' ? r.state : 'queued', error: r.error, attempts: r.attempts, addedAt: r.added_at }));
 }
 
 /** The first waiting download (one row, not the whole queue). */
@@ -338,6 +339,14 @@ export async function orderDownloads(chapterIds: string[]): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
     for (const [i, id] of chapterIds.entries()) await db.runAsync('UPDATE manga_downloads SET added_at = ? WHERE chapter_id = ?;', [i + 1, id]);
+  });
+}
+
+/** Puts waiting downloads on hold (`true`) or lets them download again (`false`). */
+export async function holdDownloads(chapterIds: string[], hold: boolean): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const id of chapterIds) await db.runAsync(hold ? "UPDATE manga_downloads SET state = 'held' WHERE chapter_id = ? AND state = 'queued';" : "UPDATE manga_downloads SET state = 'queued' WHERE chapter_id = ? AND state = 'held';", [id]);
   });
 }
 

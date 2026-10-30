@@ -49,6 +49,7 @@ import {
   saveBrowsePrefs,
   uninstallExtension,
   pushProgress,
+  fillMissingCovers,
 } from './mangaSources';
 import { DEFAULT_BROWSE, type BrowsePrefs } from './sources/prefs';
 import {
@@ -63,6 +64,7 @@ import {
   queueDownloads,
   retryDownloads,
   orderDownloads,
+  holdDownloads,
   deleteChapterRows,
   deleteSeriesRows,
   expiredSeries,
@@ -208,6 +210,13 @@ export function useMangaData(): MangaData {
         console.log(`[MANGA] purge failed: ${String(e)}`);
       }
       setTimeout(() => tidyManga().catch((e) => console.log(`[MANGA] tidy: ${String(e)}`)), 25_000);
+      // Covers that did not come with a backup: from your server or the source, quietly.
+      setTimeout(() => {
+        (async () => {
+          const n = await fillMissingCovers(allRef.current, prefsRef.current);
+          if (n) await refresh();
+        })().catch((e) => console.log(`[MANGA] covers: ${String(e)}`));
+      }, 30_000);
       // New chapters: asked when the app opens (at most every 6 hours), quietly.
       setTimeout(() => {
         checkForNew(false).catch((e) => console.log(`[MANGA] check: ${String(e)}`));
@@ -551,6 +560,12 @@ export function useMangaData(): MangaData {
         await cancelDownloads(ids);
         forgetDownloads(ids);
         await loadDownloads();
+      },
+      holdDownloads: async (ids, hold) => {
+        await holdDownloads(ids, hold);
+        if (hold) forgetDownloads(ids);
+        await loadDownloads();
+        if (!hold) kickDownloads();
       },
       orderDownloads: async (ids) => {
         await orderDownloads(ids);

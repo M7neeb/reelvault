@@ -30,12 +30,13 @@ import { success, tick } from '../haptics';
 import Icon from '../Icon';
 import { OptionsSheet, PromptSheet } from '../prompts';
 import RatingPicker from '../RatingPicker';
-import { sheet, usePalette, useStyles, withAccent, type Palette } from '../theme';
+import { rgbOf, sheet, usePalette, useStyles, withAccent, type Palette } from '../theme';
 import { tachiSourceOf } from '../../manga/mangaBackup';
 import LinkSheet from './LinkSheet';
 import LogReadingSheet from './LogReading';
 import AniListSheet from './AniListSheet';
 import type { AniListActions, AniListState } from '../../manga/anilistData';
+import Fade from '../Fade';
 import MangaCover from './MangaCover';
 import type { BrowseActions, DownloadState, MangaActions, MangaEdit, MangaUiSeries } from './mangaTypes';
 import { showFailure } from '../oops';
@@ -103,6 +104,7 @@ export default function MangaDetail({
   const [newestFirst, setNewestFirst] = useState(false);
   /** Which chapters the list shows. */
   const [show, setShow] = useState<'all' | 'unread' | 'phone'>('all');
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
   const [logging, setLogging] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -165,20 +167,32 @@ export default function MangaDetail({
           onScroll={({ nativeEvent: e }) => {
             if (limit < chapters.length && e.contentOffset.y + e.layoutMeasurement.height > e.contentSize.height - 1200) setLimit((l) => l + CHAPTER_STEP);
           }}>
+          {/* Header: the cover blurred behind, fading into the page. */}
           <View style={styles.hero}>
-            {series.coverSource ? <Image source={series.coverSource} style={styles.heroBg} contentFit="cover" blurRadius={40} /> : null}
+            {series.coverSource ? <Image source={series.coverSource} style={styles.heroBg} contentFit="cover" blurRadius={30} /> : null}
             <View style={styles.heroShade} />
+            <Fade color={rgbOf(p.bg)} from={0} to={1} style={styles.heroFade} />
             <View style={[styles.heroBar, { paddingTop: insets.top + 6 }]}>
               <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Back">
-                <Icon name="back" size={16} color="#fff" weight="bold" />
+                <Icon name="back" size={18} color="#fff" weight="bold" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.circle} onPress={() => setMenu('more')} accessibilityLabel="More">
-                <Icon name="more" size={16} color="#fff" weight="bold" />
-              </TouchableOpacity>
+              <View style={styles.pill}>
+                {fromSource && online.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.pillBtn}
+                    onPress={() => say(actions.download(series.id, 'unread'), (n: number) => (n ? `${n} ${n === 1 ? 'chapter' : 'chapters'} added to Downloads` : 'Every unread chapter is on the phone or waiting'))}
+                    accessibilityLabel="Download unread chapters">
+                    <Icon name="import" size={18} color="#fff" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.pillBtn} onPress={() => setMenu('more')} accessibilityLabel="More">
+                  <Icon name="more" size={18} color="#fff" weight="bold" />
+                </TouchableOpacity>
+              </View>
             </View>
             <View style={styles.heroRow}>
               <TouchableOpacity onPress={() => actions.setCoverFromPhoto(series.id).catch(showFailure)} accessibilityLabel="Change the cover">
-                <MangaCover series={series} width={118} radius={12} />
+                <MangaCover series={series} width={128} radius={14} />
               </TouchableOpacity>
               <View style={styles.heroText}>
                 <Text style={styles.heroTitle} numberOfLines={4}>
@@ -186,21 +200,51 @@ export default function MangaDetail({
                 </Text>
                 {!!(series.author || series.artist) && (
                   <Text style={styles.heroSub} numberOfLines={2}>
-                    {[series.author, series.artist && series.artist !== series.author ? series.artist : null].filter(Boolean).join(' · ')}
+                    {[series.author, series.artist && series.artist !== series.author ? series.artist : null].filter(Boolean).join('; ')}
                   </Text>
                 )}
-                <Text style={styles.heroFacts}>
-                  {series.chapters.length} {series.chapters.length === 1 ? 'chapter' : 'chapters'}
-                  {unread ? ` · ${unread} unread` : series.chapters.length ? ' · all read' : ''}
-                </Text>
-                <Text style={styles.heroFacts}>
+                <View style={styles.heroLine}>
+                  <Icon name={series.pubStatus === 'completed' ? 'check' : 'clock'} size={13} color={p.text} weight="bold" />
+                  <Text style={styles.heroFacts} numberOfLines={1}>
+                    {[series.pubStatus ? series.pubStatus[0].toUpperCase() + series.pubStatus.slice(1) : null, MANGA_KINDS.find((k) => k.key === (series.kind ?? 'manga'))?.label.split(' /')[0]].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Text style={styles.heroFacts} numberOfLines={1}>
                   {pages} pages · {fmtSize(size)}
                 </Text>
               </View>
             </View>
+
+            {/* Icon row: rate, log time, kind (long strip is the default way to read; the reader can change it) */}
+            <View style={styles.actRow}>
+              <TouchableOpacity style={styles.act} onPress={() => setRating(true)}>
+                <Icon name={series.rating ? 'star' : 'starOff'} size={20} color={series.rating ? p.rating : p.textSecondary} />
+                <Text style={[styles.actText, !!series.rating && { color: p.rating }]}>{series.rating ? fmtRating(series.rating) : 'Rate'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.act} onPress={() => setLogging(true)} accessibilityLabel="Log reading time">
+                <Icon name="clock" size={20} color={p.textSecondary} />
+                <Text style={styles.actText}>Log time</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.act} onPress={() => setMenu('kind')}>
+                <Icon name="book" size={20} color={p.textSecondary} />
+                <Text style={styles.actText}>{MANGA_KINDS.find((k) => k.key === (series.kind ?? 'manga'))?.label.split(' /')[0]}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.body}>
+            {!!series.description && (
+              <TouchableOpacity onPress={() => setAboutOpen((o) => !o)} activeOpacity={0.8} accessibilityLabel={aboutOpen ? 'Show less' : 'Show the whole description'}>
+                <Text style={styles.about} numberOfLines={aboutOpen ? undefined : 3}>
+                  {series.description}
+                </Text>
+                {!aboutOpen && (
+                  <View style={styles.more}>
+                    <Icon name="down" size={14} color={p.textSecondary} weight="bold" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
             {continueLabel && (
               <TouchableOpacity
                 style={styles.primary}
@@ -261,25 +305,6 @@ export default function MangaDetail({
               </View>
             )}
 
-            <View style={styles.quick}>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => setRating(true)}>
-                <Icon name={series.rating ? 'star' : 'starOff'} size={18} color={series.rating ? p.rating : p.textSecondary} />
-                <Text style={styles.quickText}>{series.rating ? fmtRating(series.rating) : 'Rate'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => setLogging(true)} accessibilityLabel="Log reading time">
-                <Icon name="clock" size={18} color={p.textSecondary} />
-                <Text style={styles.quickText}>Log time</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => setMenu('mode')}>
-                <Icon name="bookOpen" size={18} color={p.textSecondary} />
-                <Text style={styles.quickText}>{READING_MODES.find((m) => m.key === mode)?.label}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => setMenu('kind')}>
-                <Icon name="book" size={18} color={p.textSecondary} />
-                <Text style={styles.quickText}>{MANGA_KINDS.find((k) => k.key === (series.kind ?? 'manga'))?.label.split(' /')[0]}</Text>
-              </TouchableOpacity>
-            </View>
-
             <Text style={styles.section}>Status</Text>
             <View style={styles.chips}>
               {MANGA_STATUSES.map((s) => {
@@ -311,15 +336,10 @@ export default function MangaDetail({
               </TouchableOpacity>
             </View>
 
-            {!!series.description && (
-              <>
-                <Text style={styles.section}>About</Text>
-                <Text style={styles.about}>{series.description}</Text>
-              </>
-            )}
-
             <View style={styles.chHead}>
-              <Text style={[styles.section, { marginTop: 0, flex: 1 }]}>Chapters</Text>
+              <Text style={styles.chCount}>
+                {series.chapters.length} {series.chapters.length === 1 ? 'Chapter' : 'Chapters'}
+              </Text>
               {series.chapters.length > 1 && (
                 <TouchableOpacity
                   onPress={() => setShow((x) => (x === 'all' ? 'unread' : x === 'unread' && onPhone.length && online.length ? 'phone' : 'all'))}
@@ -372,8 +392,16 @@ export default function MangaDetail({
                       <Icon name="info" size={15} color={p.danger} />
                     ) : queue.has(c.id) ? (
                       <ActivityIndicator size="small" color={p.textMuted} />
+                    ) : !c.folder && c.sourceKey && !c.sourceUrl && fromSource ? (
+                      <TouchableOpacity
+                        hitSlop={10}
+                        style={styles.chDl}
+                        onPress={() => say(actions.download(series.id, [c.id]), (n: number) => (n ? 'Added to Downloads' : 'Already waiting'))}
+                        accessibilityLabel={`Download ${chapterLabel(c)}`}>
+                        <Icon name="import" size={17} color={p.textSecondary} />
+                      </TouchableOpacity>
                     ) : c.folder && c.sourceKey ? (
-                      <Icon name="import" size={13} color={p.textMuted} />
+                      <Icon name="checkCircle" size={14} color={p.success} />
                     ) : null}
                     {read ? (
                       <Icon name="checkCircle" size={18} color={p.textMuted} />
@@ -508,19 +536,27 @@ export default function MangaDetail({
 const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
-    hero: { overflow: 'hidden', paddingBottom: 18, backgroundColor: p.elevated },
-    heroBg: { position: 'absolute', top: -40, left: -40, right: -40, bottom: -40, opacity: 0.9 },
-    heroShade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)' },
-    heroBar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 10 },
-    circle: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-    heroRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 16, alignItems: 'flex-end' },
-    heroText: { flex: 1, gap: 4, paddingBottom: 4 },
-    heroTitle: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
-    heroSub: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600' },
-    heroFacts: { color: 'rgba(255,255,255,0.7)', fontSize: 13 },
+    hero: { overflow: 'hidden', paddingBottom: 6 },
+    heroBg: { position: 'absolute', top: -40, left: -40, right: -40, bottom: -40, opacity: 0.85 },
+    heroShade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+    heroFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '70%' },
+    heroBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14 },
+    circle: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+    pill: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 21, paddingHorizontal: 4 },
+    pillBtn: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+    heroRow: { flexDirection: 'row', gap: 16, paddingHorizontal: 16, alignItems: 'center' },
+    heroText: { flex: 1, gap: 5 },
+    heroTitle: { color: p.text, fontSize: 24, fontWeight: '800', letterSpacing: -0.4, lineHeight: 29 },
+    heroSub: { color: p.text, fontSize: 14, fontWeight: '700' },
+    heroLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    heroFacts: { color: p.textSecondary, fontSize: 13, fontWeight: '600', flexShrink: 1 },
+    actRow: { flexDirection: 'row', paddingHorizontal: 8, marginTop: 18 },
+    act: { flex: 1, alignItems: 'center', gap: 5, paddingVertical: 6 },
+    actText: { color: p.textSecondary, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+    more: { alignItems: 'center', marginTop: 2 },
     body: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },
-    primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, backgroundColor: p.accent, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16 },
-    primaryText: { color: '#fff', fontSize: 16, fontWeight: '800', flexShrink: 1 },
+    primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, backgroundColor: p.accent, borderRadius: 999, paddingVertical: 16, paddingHorizontal: 18, marginTop: 6 },
+    primaryText: { color: '#fff', fontSize: 17, fontWeight: '800', flexShrink: 1 },
     bar: { height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden' },
     barFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     quick: { flexDirection: 'row', gap: 8, marginTop: 6 },
@@ -534,15 +570,17 @@ const makeStyles = (p: Palette) =>
     chipTextOn: { color: p.bg },
     tag: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.accentSoft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
     tagText: { color: p.link, fontSize: 14, fontWeight: '700' },
-    about: { color: p.textSoft, fontSize: 14, lineHeight: 20 },
-    chHead: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
+    about: { color: p.textSoft, fontSize: 15, lineHeight: 21, fontWeight: '600' },
+    chHead: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 18 },
+    chCount: { color: p.text, fontSize: 20, fontWeight: '800', flex: 1 },
+    chDl: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
     chSort: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     chSortText: { color: p.textSecondary, fontSize: 12, fontWeight: '700' },
-    chList: { backgroundColor: p.card, borderRadius: 14, overflow: 'hidden' },
-    chRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: p.separator },
-    chTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
+    chList: { marginHorizontal: -16 },
+    chRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
+    chTitle: { color: p.text, fontSize: 16, fontWeight: '800' },
     chRead: { color: p.textMuted },
-    chMeta: { color: p.textSecondary, fontSize: 12 },
+    chMeta: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     linkBox: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: p.card, borderRadius: 14, padding: 14 },
     linkTitle: { color: p.link, fontSize: 16, fontWeight: '800' },
     dlRow: { flexDirection: 'row', gap: 8 },
