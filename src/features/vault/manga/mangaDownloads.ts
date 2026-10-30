@@ -100,6 +100,9 @@ const extOf = (uri: string) => {
   return m ? `p.${m[1].toLowerCase()}` : 'p.jpg';
 };
 
+/** Errors trying again cannot fix (the server lacks the extension, the site blocks the phone, …). */
+const PERMANENT = /not installed on the server|behind Cloudflare|does not have this chapter|no longer has this chapter|not set up on this phone|Link it first|is not linked/i;
+
 async function withRetry<T>(job: () => Promise<T>, times = 3, wait = 800): Promise<T> {
   let last: unknown;
   for (let i = 0; i < times; i++) {
@@ -108,7 +111,7 @@ async function withRetry<T>(job: () => Promise<T>, times = 3, wait = 800): Promi
     } catch (e) {
       last = e;
       // Paused or cancelled: no point trying again.
-      if (/^(Error: )?(Paused|Cancelled)$/.test(String(e))) throw e;
+      if (/^(Error: )?(Paused|Cancelled)$/.test(String(e)) || PERMANENT.test(String(e))) throw e;
       await new Promise((r) => setTimeout(r, wait * (i + 1)));
     }
   }
@@ -220,6 +223,10 @@ export function kickDownloads(): void {
           if (msg === 'Cancelled') continue;
           console.log(`[MANGA] download ${next.chapterId} failed: ${msg}`);
           await failDownload(next.chapterId, msg);
+          // The same will happen to the rest of that title: say so now instead of trying each one.
+          if (PERMANENT.test(msg)) {
+            for (const r of await listDownloads()) if (r.state === 'queued' && r.seriesId === next.seriesId) await failDownload(r.chapterId, msg);
+          }
         }
         current = null;
         emit(true);

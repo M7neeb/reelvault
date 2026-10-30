@@ -21,6 +21,21 @@ export type InsideProgress = { done: number; total: number; running: boolean };
 const EVERY_SEC = 4;
 const MAX_FRAMES = 60;
 
+/** While a video plays, the scan waits (decoding two videos at once can make playback stutter). */
+let busyCount = 0;
+export function pauseLookingInside(): () => void {
+  busyCount++;
+  let done = false;
+  return () => {
+    if (!done) busyCount--;
+    done = true;
+  };
+}
+
+/** Results reach the screen in batches, not after every video (each update redraws the library). */
+const FLUSH_EVERY = 15;
+const FLUSH_MS = 45_000;
+
 export const canLookInside = (): boolean => !!ReelVaultMedia?.videoPrints && !!ReelVaultMedia?.scanFrames;
 
 async function loadAll(): Promise<{ prints: Map<string, string[]>; rows: SceneRow[]; scanned: Set<string> }> {
@@ -101,27 +116,47 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
       try {
         const todo = () => videosRef.current.filter((v) => !v.deletedAt && !scanned.current!.has(v.id));
         let done = videosRef.current.length - todo().length;
+        const newPrints = new Map<string, string[]>();
+        let newRows: SceneRow[] = [];
+        let lastFlush = Date.now();
+        const flush = () => {
+          if (!newPrints.size || !alive.current) return;
+          const p = new Map(newPrints);
+          const r = newRows;
+          newPrints.clear();
+          newRows = [];
+          lastFlush = Date.now();
+          setPrints((m) => {
+            const out = new Map(m);
+            for (const [k, v] of p) out.set(k, v);
+            return out;
+          });
+          setRows((list) => [...list.filter((x) => !p.has(x.videoId)), ...r]);
+        };
         while (alive.current && enabledRef.current) {
           const next = todo()[0];
           const total = videosRef.current.filter((v) => !v.deletedAt).length;
           if (!next) {
+            flush();
             setProgress({ done: total, total, running: false });
             break;
           }
-          if (!active) {
-            await new Promise((r) => setTimeout(r, 5000));
+          if (!active || busyCount > 0) {
+            flush();
+            await new Promise((r) => setTimeout(r, 3000));
             continue;
           }
-          setProgress({ done, total, running: true });
+          if (done % FLUSH_EVERY === 0) setProgress({ done, total, running: true });
           try {
             const found = await lookInside(next);
-            setPrints((m) => new Map(m).set(next.id, found.prints));
-            setRows((list) => [...list.filter((r) => r.videoId !== next.id), ...found.rows]);
+            newPrints.set(next.id, found.prints);
+            newRows.push(...found.rows);
           } catch (e) {
             console.log(`[INSIDE] ${next.filename}: ${String(e)}`);
           }
           scanned.current!.add(next.id);
           done++;
+          if (newPrints.size >= FLUSH_EVERY || Date.now() - lastFlush > FLUSH_MS) flush();
           // A breath between videos, so the app stays smooth.
           await new Promise((r) => setTimeout(r, 400));
         }

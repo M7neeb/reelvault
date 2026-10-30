@@ -46,6 +46,7 @@ import { AirPlayButton, hasAirPlay } from '../../../../modules/reelvault-airplay
 // Turning sideways (does nothing in builds before 1.9.1 and the browser preview).
 import { allowRotation, canRotate, lockSideways, lockUpright, restoreRotation } from '../rotate';
 import { CoverPicker } from './coverPicker';
+import { pauseLookingInside } from '../scenes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { GatedModal as Modal } from './screen';
@@ -1988,6 +1989,9 @@ export default function ViewerModal({
     },
     [onChangeItem]
   );
+
+  // The background look-inside scan waits while you watch.
+  useEffect(() => pauseLookingInside(), []);
 
   // The new page starts centred; the swipe that brought it here is over.
   useLayoutEffect(() => {

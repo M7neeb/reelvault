@@ -22,6 +22,7 @@ public class ReelVaultMediaModule: Module {
   private var volumeView: MPVolumeView?
   private var restoreVolume: Float = 0.5
   private var centerVolume: Float = 0.5
+  private var savedAudio: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
 
   public func definition() -> ModuleDefinition {
     Name("ReelVaultMedia")
@@ -589,9 +590,15 @@ public class ReelVaultMediaModule: Module {
   private func startVolumeKeys() {
     guard volumeObservation == nil else { return }
     let session = AVAudioSession.sharedInstance()
-    // Volume changes are only reported while the session is active; don't stop other apps' sound.
-    if session.category == .soloAmbient {
-      try? session.setCategory(.ambient, options: [.mixWithOthers])
+    // Volume changes are only reported while the session is active. Activating it
+    // must not stop other apps' sound (music while reading): mix with them, and
+    // put the app's own setting back afterwards. An audiobook of ours that is
+    // playing keeps its setting untouched.
+    savedAudio = (session.category, session.mode, session.categoryOptions)
+    let ownPlayback = session.category == .playback && !session.isOtherAudioPlaying
+    if !ownPlayback {
+      let category: AVAudioSession.Category = session.category == .playback ? .playback : .ambient
+      try? session.setCategory(category, mode: .default, options: session.categoryOptions.union(.mixWithOthers))
     }
     try? session.setActive(true)
     // A volume view on screen (invisible) keeps the system volume pop-up away.
@@ -623,6 +630,10 @@ public class ReelVaultMediaModule: Module {
     volumeObservation?.invalidate()
     volumeObservation = nil
     setVolume(restoreVolume)
+    if let saved = savedAudio {
+      try? AVAudioSession.sharedInstance().setCategory(saved.0, mode: saved.1, options: saved.2)
+    }
+    savedAudio = nil
     let view = volumeView
     volumeView = nil
     // Leave the view a moment so putting the volume back shows no pop-up.

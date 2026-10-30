@@ -52,6 +52,8 @@ const FIELDS: Field[] = [
   { key: 'description', label: 'About', placeholder: 'What it is about', multiline: true },
 ];
 
+const CHAPTER_STEP = 80;
+
 export default function MangaDetail({
   series,
   actions,
@@ -132,6 +134,9 @@ export default function MangaDetail({
     return newestFirst ? [...list].reverse() : list;
   }, [series.chapters, newestFirst, show]);
   const mode = modeOf(series);
+  // Hundreds of chapter rows at once make the page slow to open: more come in as you scroll.
+  const [limit, setLimit] = useState(CHAPTER_STEP);
+  useEffect(() => setLimit(CHAPTER_STEP), [series.id, show, newestFirst]);
 
   const save = (f: Field) => {
     const raw = (draft[f.key] ?? '').trim();
@@ -154,7 +159,12 @@ export default function MangaDetail({
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+          scrollEventThrottle={250}
+          onScroll={({ nativeEvent: e }) => {
+            if (limit < chapters.length && e.contentOffset.y + e.layoutMeasurement.height > e.contentSize.height - 1200) setLimit((l) => l + CHAPTER_STEP);
+          }}>
           <View style={styles.hero}>
             {series.coverSource ? <Image source={series.coverSource} style={styles.heroBg} contentFit="cover" blurRadius={40} /> : null}
             <View style={styles.heroShade} />
@@ -327,7 +337,7 @@ export default function MangaDetail({
               )}
             </View>
             <View style={styles.chList}>
-              {chapters.map((c) => {
+              {chapters.slice(0, limit).map((c) => {
                 const read = isRead(c);
                 const started = !read && c.lastPage > 0;
                 return (

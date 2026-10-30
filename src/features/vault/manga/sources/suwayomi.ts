@@ -26,9 +26,36 @@ async function gql<T>(http: Http, server: SuwayomiServer, query: string, variabl
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...server.auth },
     body: JSON.stringify({ query, variables }),
   })) as { data?: T; errors?: { message?: string }[] };
-  if (res.errors?.length) throw new Error(`Suwayomi: ${res.errors.map((e) => e.message).join('; ')}`);
+  if (res.errors?.length) throw new Error(`Suwayomi: ${suwayomiError(res.errors.map((e) => e.message ?? '').join('; '))}`);
   if (!res.data) throw new Error('Suwayomi gave no answer');
   return res.data;
+}
+
+/**
+ * A server error as one readable line: the server sends Java stack traces.
+ * The usual ones say what to do about them.
+ */
+export function suwayomiError(message: string): string {
+  const line = (message.split('\n')[0] ?? '').replace(/^Exception while fetching data \([^)]*\)\s*:\s*/i, '').trim();
+  if (/^Source not installed/i.test(line)) return 'the extension this title comes from is not installed on the server. Install it in Suwayomi (Browse, Extensions).';
+  if (/cloudflare/i.test(line)) return 'the site is behind Cloudflare. Turn on FlareSolverr in Suwayomi’s settings.';
+  if (/HTTP error 5\d\d/i.test(line)) return `the site is down right now (${line.match(/\d{3}/)?.[0]}). Try again later.`;
+  if (/^Chapter not found/i.test(line)) return 'the server does not have this chapter’s files.';
+  return line.length > 200 ? `${line.slice(0, 200)}…` : line || 'no answer';
+}
+
+/** The server's list is out of date with the site: asking it to refresh the title fixes it. */
+export const isStaleChapterList = (e: unknown) => /Refresh the chapter list|Collection is empty/i.test(String(e));
+
+/** Makes the server fetch the title's chapter list from the site again. Chapter ids can change. */
+export async function suwayomiRefreshChapters(http: Http, server: SuwayomiServer, mangaId: number): Promise<GqlLibraryChapter[]> {
+  const data = await gql<{ fetchChapters: { chapters: LibraryChapterRow[] } }>(
+    http,
+    server,
+    'mutation($id: Int!) { fetchChapters(input: { mangaId: $id }) { chapters { id chapterNumber url sourceOrder } } }',
+    { id: mangaId }
+  );
+  return libraryChapters(data.fetchChapters.chapters);
 }
 
 const STATUS: Record<string, string> = { ONGOING: 'ongoing', COMPLETED: 'completed', ON_HIATUS: 'hiatus', CANCELLED: 'cancelled', PUBLISHING_FINISHED: 'completed' };

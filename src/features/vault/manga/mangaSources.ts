@@ -26,7 +26,7 @@ import { sourceHttp } from './sources/http';
 import { mangadexSource } from './sources/mangadex';
 import { opdsSource } from './sources/opds';
 import { DEFAULT_BROWSE, normaliseServerUrl, parseBrowsePrefs, updatesFor, type BrowsePrefs, type ServerConfig, type ServerKind } from './sources/prefs';
-import { suwayomiLibrary, suwayomiSource, suwayomiSources, suwayomiTitleChapters, type GqlLibraryTitle, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
+import { isStaleChapterList, suwayomiLibrary, suwayomiRefreshChapters, suwayomiSource, suwayomiSources, suwayomiTitleChapters, type GqlLibraryTitle, type GqlSource, type SuwayomiServer } from './sources/suwayomi';
 import { planChapters, planLinks, type LinkableSeries } from './mangaLink';
 import { kavitaProgress, komgaProgress, progressTarget, suwayomiProgress } from './sources/progressSync';
 import { suwayomiBase } from './sources/suwayomi';
@@ -470,7 +470,35 @@ export async function pagesOf(series: Pick<MangaSeries, 'sourceId'>, c: MangaCha
   }
   const src = await sourceFor(series.sourceId, prefs);
   if (!src) throw new Error('This chapter’s source is not set up on this phone any more');
-  return src.pages(key);
+  try {
+    return await src.pages(key);
+  } catch (e) {
+    if (!serverLibraryOf(series.sourceId) || !isStaleChapterList(e)) throw e;
+    // The server's copy of the chapter list is out of date with the site: refresh it, match again, retry once.
+    await relinkAfterRefresh(c.seriesId, prefs);
+    const fresh = (await getSeries(c.seriesId))?.chapters.find((x) => x.id === c.id)?.sourceKey;
+    if (!fresh || !SERVER_KEY.test(fresh)) throw new Error('The site no longer has this chapter.');
+    return src.pages(fresh);
+  }
+}
+
+/** After the server refreshed a title (new chapter ids), points your chapters at the new ones. */
+async function relinkAfterRefresh(seriesId: string, prefs: BrowsePrefs): Promise<void> {
+  const s = await getSeries(seriesId);
+  const serverId = serverLibraryOf(s?.sourceId ?? null);
+  const conf = prefs.servers.find((x) => x.id === serverId && x.kind === 'suwayomi');
+  if (!s || !conf || !s.sourceKey || !SERVER_KEY.test(s.sourceKey)) return;
+  const server = { id: conf.id, name: conf.name, url: conf.url, auth: await authFor(conf) };
+  const remote = await suwayomiRefreshChapters(sourceHttp, server, Number(s.sourceKey));
+  const ids = new Set(remote.map((r) => String(r.id)));
+  // Chapters whose id survived the refresh keep it; the rest are matched again.
+  const keep = new Set(s.chapters.filter((c) => c.sourceKey && ids.has(c.sourceKey)).map((c) => c.sourceKey!));
+  const lost = s.chapters.filter((c) => !c.folder && !(c.sourceKey && ids.has(c.sourceKey)));
+  const plan = planChapters(
+    lost.map((c) => ({ id: c.id, number: c.number, url: c.sourceKey && !SERVER_KEY.test(c.sourceKey) ? c.sourceKey : null, position: c.position })),
+    remote.filter((r) => !keep.has(String(r.id)))
+  );
+  for (const p of plan) await setChapterSource(p.chapterId, String(p.sourceKey), null, null);
 }
 
 /** A Suwayomi server's chapter id (anything else is a page address left over from a backup). */
