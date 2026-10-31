@@ -3,7 +3,7 @@
  * reader, put together. Presentational only (see the note at the top of types.ts).
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { nextChapter, type MangaChapter } from '../../manga/mangaLogic';
@@ -99,8 +99,7 @@ export default function MangaSection({
       />
     ) : null;
 
-  return (
-    <View style={styles.fill}>
+  const library = (
       <MangaScreen
         items={data.items}
         deleted={data.deleted}
@@ -123,6 +122,16 @@ export default function MangaSection({
         downloads={data.downloads}
         initialDeleted={dev?.deleted}
       />
+  );
+  // While the reader or a title page covers the library, it is not redrawn (downloads tick every
+  // second, every saved page reloads the list): it catches up as soon as it shows again.
+  const covered = !!reading || !!detailId;
+  const shownLibrary = useRef(library);
+  if (!covered) shownLibrary.current = library;
+
+  return (
+    <View style={styles.fill}>
+      {shownLibrary.current}
       {/* One full-screen window at a time on the iPhone: the reader opens inside the series page when it is open. */}
       {detail ? (
         <MangaDetail

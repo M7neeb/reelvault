@@ -37,7 +37,7 @@ import type { Memory } from '../memories';
 import { highlightAt, monthRanges, storyFacts, yearRange, type RRange, type StoryFacts } from '../recap';
 import { fmtBytes, fmtDay, fmtMs, presetRange, recentWeeks, wrapped as buildWrapped, type Range, type VaultPlay, type Wrapped } from '../stats';
 import { friendlyName } from '../names';
-import { useAudioPlaybackOptional } from './audio/playback';
+import { useAudioControlsOptional } from './audio/playback';
 import { CLUBS, clubJourney, clubOf, quizFrom, rewatchMeter, videoAge, type ClubKey } from '../wrappedExtras';
 import Fade from './Fade';
 import { aspectOf, Backdrop, fitFor } from './frame';
@@ -695,7 +695,7 @@ export function WrappedStory({
   const advance = useRef<() => void>(() => undefined);
   const endLogged = useRef(false);
   // Your audiobook pauses while the story plays videos with sound, and carries on when it closes.
-  const app = useAudioPlaybackOptional();
+  const app = useAudioControlsOptional();
   const appRef = useRef(app);
   appRef.current = app;
   useEffect(() => {
@@ -1703,10 +1703,19 @@ export function WrappedStory({
     // Every card plays one of your videos: the ones without their own get your most watched in turn,
     // each from a different, random-looking part (so it is never the same opening twice).
     const pool = [...new Set([...top.map((x) => x.id), ...(input.subject ? [] : [...items.keys()])])].filter((id) => items.has(id)).slice(0, 24);
+    // Before your #1 is revealed, your top three never play (no spoiler on the intro or the quiz).
+    const reveal = out.findIndex((c) => c.key === 'top1');
+    const spoil = new Set(top.slice(0, 3).map((x) => x.id));
     let k = 0;
-    for (const c of out) {
+    for (const [n, c] of out.entries()) {
       if (c.media.some((id) => items.has(id)) || !pool.length) continue;
-      c.media = [pool[k % pool.length]];
+      const cand = reveal >= 0 && n < reveal ? pool.filter((id) => !spoil.has(id)) : pool;
+      if (!cand.length) continue;
+      // Not the same video as the card before (that would reload it with a black flash).
+      const prev = out[n - 1]?.media[0];
+      let pick = cand[k % cand.length];
+      if (pick === prev && cand.length > 1) pick = cand[(k + 1) % cand.length];
+      c.media = [pick];
       c.startFrac = 0.15 + (((k * 37 + c.key.length * 11) % 60) / 100);
       k++;
     }

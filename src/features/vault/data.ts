@@ -509,8 +509,12 @@ export function useVaultData(): VaultData {
 
   // The Sunday summary's words are worked out again whenever you leave the app, so they include what you just watched.
   useEffect(() => {
+    let last = 0;
     const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'background') planWeekly().catch((e) => console.log(`[WEEK] ${String(e)}`));
+      // At most once an hour (quick switches to another app need nothing new).
+      if (s !== 'background' || Date.now() - last < 3_600_000) return;
+      last = Date.now();
+      planWeekly().catch((e) => console.log(`[WEEK] ${String(e)}`));
     });
     return () => sub.remove();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1139,33 +1143,41 @@ export function useVaultData(): VaultData {
   );
 
   const inside = useInside(videos, true);
+  const allTags = useMemo(() => tags.map(asUiTag), [tags]);
+  const clearWrappedRequest = useCallback(() => setWrappedRequest(false), []);
+  const clearOpenRequest = useCallback(() => setOpenRequest(null), []);
 
-  return {
-    items,
-    prints: inside.prints,
-    sceneRows: inside.rows,
-    insideProgress: inside.progress,
-    deletedItems,
-    duplicateGroups,
-    smartFilters,
-    albums,
-    folders,
-    viewOptions,
-    allTags: useMemo(() => tags.map(asUiTag), [tags]),
-    tagMap,
-    freeGb,
-    busy,
-    status,
-    actions,
-    duplicateAsk,
-    resume,
-    prefs,
-    wrappedRequest,
-    clearWrappedRequest: () => setWrappedRequest(false),
-    openRequest,
-    clearOpenRequest: () => setOpenRequest(null),
-    kept,
-    series,
-    members,
-  };
+  // One object while nothing in it changes: screens that read it do not redraw for other sections' changes.
+  return useMemo(
+    () => ({
+      items,
+      prints: inside.prints,
+      sceneRows: inside.rows,
+      insideProgress: inside.progress,
+      deletedItems,
+      duplicateGroups,
+      smartFilters,
+      albums,
+      folders,
+      viewOptions,
+      allTags,
+      tagMap,
+      freeGb,
+      busy,
+      status,
+      actions,
+      duplicateAsk,
+      resume,
+      prefs,
+      wrappedRequest,
+      clearWrappedRequest,
+      openRequest,
+      clearOpenRequest,
+      kept,
+      series,
+      members,
+    }),
+    // prettier-ignore
+    [items, inside.prints, inside.rows, inside.progress, deletedItems, duplicateGroups, smartFilters, albums, folders, viewOptions, allTags, tagMap, freeGb, busy, status, actions, duplicateAsk, resume, prefs, wrappedRequest, clearWrappedRequest, openRequest, clearOpenRequest, kept, series, members]
+  );
 }

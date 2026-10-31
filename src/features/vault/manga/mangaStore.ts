@@ -131,9 +131,18 @@ export async function listManga(): Promise<MangaSeries[]> {
   const chRows = await db.getAllAsync<ChapterRow>('SELECT * FROM manga_chapters;');
   const tagRows = await db.getAllAsync<{ series_id: string; name: string }>('SELECT series_id, name FROM manga_tags ORDER BY name COLLATE NOCASE;');
   const chapters = new Map<string, MangaChapter[]>();
-  for (const c of chRows) chapters.set(c.series_id, [...(chapters.get(c.series_id) ?? []), toChapter(c)]);
+  // Added in place (copying the list for every chapter took ages for titles with 1,000+ chapters).
+  for (const c of chRows) {
+    let list = chapters.get(c.series_id);
+    if (!list) chapters.set(c.series_id, (list = []));
+    list.push(toChapter(c));
+  }
   const tags = new Map<string, string[]>();
-  for (const t of tagRows) tags.set(t.series_id, [...(tags.get(t.series_id) ?? []), t.name]);
+  for (const t of tagRows) {
+    let list = tags.get(t.series_id);
+    if (!list) tags.set(t.series_id, (list = []));
+    list.push(t.name);
+  }
   return rows.map((r) => toSeries(r, tags.get(r.id) ?? [], chapters.get(r.id) ?? []));
 }
 
@@ -291,12 +300,15 @@ export type DownloadRow = { chapterId: string; seriesId: string; state: 'queued'
 
 export async function queueDownloads(rows: { chapterId: string; seriesId: string }[], at: number): Promise<void> {
   const db = await getDb();
-  for (const [i, r] of rows.entries()) {
-    await db.runAsync(
-      "INSERT INTO manga_downloads (chapter_id, series_id, state, added_at) VALUES (?, ?, 'queued', ?) ON CONFLICT(chapter_id) DO UPDATE SET state = 'queued', error = NULL;",
-      [r.chapterId, r.seriesId, at + i]
-    );
-  }
+  // One transaction: thousands of chapters go in in a moment instead of one write each.
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    for (const [i, r] of rows.entries()) {
+      await tx.runAsync(
+        "INSERT INTO manga_downloads (chapter_id, series_id, state, added_at) VALUES (?, ?, 'queued', ?) ON CONFLICT(chapter_id) DO UPDATE SET state = 'queued', error = NULL;",
+        [r.chapterId, r.seriesId, at + i]
+      );
+    }
+  });
 }
 
 export async function listDownloads(): Promise<DownloadRow[]> {
@@ -338,16 +350,16 @@ export async function cancelDownloads(chapterIds: string[] | null): Promise<void
 /** Puts the waiting downloads in this order (the ones not named keep their place after them). */
 export async function orderDownloads(chapterIds: string[]): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
-    for (const [i, id] of chapterIds.entries()) await db.runAsync('UPDATE manga_downloads SET added_at = ? WHERE chapter_id = ?;', [i + 1, id]);
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    for (const [i, id] of chapterIds.entries()) await tx.runAsync('UPDATE manga_downloads SET added_at = ? WHERE chapter_id = ?;', [i + 1, id]);
   });
 }
 
 /** Puts waiting downloads on hold (`true`) or lets them download again (`false`). */
 export async function holdDownloads(chapterIds: string[], hold: boolean): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
-    for (const id of chapterIds) await db.runAsync(hold ? "UPDATE manga_downloads SET state = 'held' WHERE chapter_id = ? AND state = 'queued';" : "UPDATE manga_downloads SET state = 'queued' WHERE chapter_id = ? AND state = 'held';", [id]);
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    for (const id of chapterIds) await tx.runAsync(hold ? "UPDATE manga_downloads SET state = 'held' WHERE chapter_id = ? AND state = 'queued';" : "UPDATE manga_downloads SET state = 'queued' WHERE chapter_id = ? AND state = 'held';", [id]);
   });
 }
 
@@ -398,8 +410,16 @@ export async function renameMangaTag(from: string, to: string): Promise<void> {
   const n = to.trim().replace(/^#/, '');
   if (!n || n === from) return;
   const db = await getDb();
-  await db.runAsync('INSERT OR IGNORE INTO manga_tags (series_id, name) SELECT series_id, ? FROM manga_tags WHERE name = ?;', [n, from]);
-  await db.runAsync('DELETE FROM manga_tags WHERE name = ?;', [from]);
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    // Names ignore capitals in the database: "action" to "Action" is a change of spelling, not a merge
+    // (the copy-then-delete below would delete them all).
+    if (n.toLowerCase() === from.toLowerCase()) {
+      await tx.runAsync('UPDATE manga_tags SET name = ? WHERE name = ?;', [n, from]);
+      return;
+    }
+    await tx.runAsync('INSERT OR IGNORE INTO manga_tags (series_id, name) SELECT series_id, ? FROM manga_tags WHERE name = ?;', [n, from]);
+    await tx.runAsync('DELETE FROM manga_tags WHERE name = ?;', [from]);
+  });
 }
 
 /** Takes a keyword off every title (the titles stay). */
@@ -416,9 +436,9 @@ export const BACKUP_READ = 'backup';
 /** Puts the reading time from a backup in place of what an earlier import of it brought. */
 export async function replaceBackupReads(rows: { seriesId: string; startedAt: number; readMs: number }[]): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync('DELETE FROM manga_reads WHERE chapter_id = ?;', [BACKUP_READ]);
-    for (const r of rows) await db.runAsync('INSERT INTO manga_reads (series_id, chapter_id, started_at, read_ms, pages) VALUES (?, ?, ?, ?, 0);', [r.seriesId, BACKUP_READ, r.startedAt, r.readMs]);
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    await tx.runAsync('DELETE FROM manga_reads WHERE chapter_id = ?;', [BACKUP_READ]);
+    for (const r of rows) await tx.runAsync('INSERT INTO manga_reads (series_id, chapter_id, started_at, read_ms, pages) VALUES (?, ?, ?, ?, 0);', [r.seriesId, BACKUP_READ, r.startedAt, r.readMs]);
   });
 }
 

@@ -123,6 +123,8 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
         key: `season-${n}`,
         colors,
         ms: 3400,
+        // Its poster wall fills the card: nothing else animates underneath.
+        solid: posters.length > 0,
         backdrop: (
           <>
             {posters.length > 0 && <ImageRiver sources={posters} columns={3} aspect={1.5} tilt={-7} speed={1.6} />}

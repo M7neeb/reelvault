@@ -243,16 +243,26 @@ export function useMangaData(): MangaData {
 
   /** Asks every title's source for new chapters; tells you, and queues them when you chose that. */
   const checking = useRef(false);
+  const checkRun = useRef<Promise<{ added: number; failed: string[] }> | null>(null);
   const checkForNew = async (byHand: boolean): Promise<{ added: number; failed: string[] }> => {
     const p = prefsRef.current;
     // One check at a time (the one at start-up and one by hand could meet).
-    if (checking.current) return { added: 0, failed: [] };
+    if (checking.current) {
+      // The check that starts by itself is already running: say so (and wait for it) instead of doing nothing.
+      if (byHand) {
+        setStatus('Already checking for new chapters…');
+        return checkRun.current ?? { added: 0, failed: [] };
+      }
+      return { added: 0, failed: [] };
+    }
     if (!byHand && (!p.checkOnOpen || !(await dueForCheck(Date.now())))) return { added: 0, failed: [] };
     checking.current = true;
     try {
-      return await checkNow(byHand, p);
+      checkRun.current = checkNow(byHand, p);
+      return await checkRun.current;
     } finally {
       checking.current = false;
+      checkRun.current = null;
     }
   };
   const checkNow = async (byHand: boolean, p: BrowsePrefs): Promise<{ added: number; failed: string[] }> => {
@@ -356,7 +366,13 @@ export function useMangaData(): MangaData {
         await run(() => importMangaFolder(dir.name, files, setStatus));
       },
       update: async (ids, patch) => {
-        await updateSeries(ids, { ...patch, ...(patch.status === 'completed' ? { finishedAt: Date.now() } : {}) });
+        // A title newly marked Completed gets today; titles already Completed, or an Undo that names the day, keep theirs.
+        if (patch.status === 'completed' && !('finishedAt' in patch)) {
+          const fresh = ids.filter((id) => allRef.current.find((x) => x.id === id)?.status !== 'completed');
+          const kept = ids.filter((id) => !fresh.includes(id));
+          if (fresh.length) await updateSeries(fresh, { ...patch, finishedAt: Date.now() });
+          if (kept.length) await updateSeries(kept, patch);
+        } else await updateSeries(ids, patch);
         await refresh();
       },
       addTag: async (ids, name) => {
@@ -767,7 +783,7 @@ export function useMangaData(): MangaData {
   const deleted = useMemo(() => all.filter((s) => s.deletedAt).map(asUi), [all]);
   const browse = useMemo(() => ({ prefs, actions: browseActions, canTellWifi }), [prefs, browseActions]);
   const ani = useAniList(all, refresh);
-  return { items, deleted, busy, status, actions, browse, downloads, anilist: ani };
+  return useMemo(() => ({ items, deleted, busy, status, actions, browse, downloads, anilist: ani }), [items, deleted, busy, status, actions, browse, downloads, ani]);
 }
 
 /** A new cover (a small copy), the old one removed. `move` for a picker's temporary copy. */

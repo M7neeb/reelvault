@@ -106,10 +106,6 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
   useEffect(() => {
     // A scan already running picks up new videos by itself.
     if (!enabled || !canLookInside() || running.current) return;
-    let active = AppState.currentState === 'active';
-    const sub = AppState.addEventListener('change', (st) => {
-      active = st === 'active';
-    });
     const t = setTimeout(async () => {
       if (!scanned.current) return;
       running.current = true;
@@ -141,7 +137,9 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
             setProgress({ done: total, total, running: false });
             break;
           }
-          if (!active || busyCount > 0) {
+          // Read fresh every time: the scan keeps going past a reload of this effect, and must
+          // still stop while the app is in the background (sound playing keeps it alive there).
+          if (AppState.currentState !== 'active' || busyCount > 0) {
             flush();
             await new Promise((r) => setTimeout(r, 3000));
             continue;
@@ -164,10 +162,7 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
         running.current = false;
       }
     }, 20_000);
-    return () => {
-      clearTimeout(t);
-      sub.remove();
-    };
+    return () => clearTimeout(t);
   }, [enabled, videos.length]);
 
   return { prints, rows, progress };

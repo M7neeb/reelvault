@@ -38,12 +38,19 @@ export type Pic = { source: NonNullable<ImageProps['source']>; aspect: number | 
  * Pages of a title, decoded once per size while the story is open (going back
  * and forth never loads or decodes twice; closing the story frees them).
  */
-export type PageLoader = { pages: (seriesId: string, opts: { maxWidth: number; max: number }) => Promise<Pic[]> };
+export type PageLoader = {
+  pages: (seriesId: string, opts: { maxWidth: number; max: number }) => Promise<Pic[]>;
+  /** The same pages at once, when they are already decoded (no flash of covers first). */
+  peek: (seriesId: string, opts: { maxWidth: number; max: number }) => Pic[] | null;
+};
 
 /** Wraps "the pages of a title" (addresses) into a PageLoader that decodes and remembers. */
 export function cachedLoader(load: (seriesId: string) => Promise<ImageRef[]>): PageLoader {
   const raw = new Map<string, Promise<ImageRef[]>>();
-  const done = new Map<string, Promise<Pic[]>>();
+  // Each page decoded once per width (whatever asks for it), never taller than 8 widths: a long
+  // webtoon page would otherwise take tens of megabytes and the phone could close the app.
+  const pic = new Map<string, Promise<Pic>>();
+  const ready = new Map<string, Pic[]>();
   const rawOf = (id: string) => {
     let p = raw.get(id);
     if (!p) {
@@ -52,33 +59,34 @@ export function cachedLoader(load: (seriesId: string) => Promise<ImageRef[]>): P
     }
     return p;
   };
+  const one = (r: ImageRef, maxWidth: number) => {
+    const k = `${r.uri}|${maxWidth}`;
+    let p = pic.get(k);
+    if (!p) {
+      p = Image.loadAsync({ uri: r.uri, headers: r.headers }, { maxWidth, maxHeight: maxWidth * 8 })
+        .then((bmp): Pic => ({ source: bmp, aspect: bmp.width > 0 ? bmp.height / bmp.width : null }))
+        .catch((): Pic => ({ source: { uri: r.uri, headers: r.headers }, aspect: null }));
+      pic.set(k, p);
+    }
+    return p;
+  };
   return {
     pages: (id, { maxWidth, max }) => {
       const k = `${id}|${maxWidth}|${max}`;
-      let p = done.get(k);
-      if (!p) {
-        p = rawOf(id).then((refs) =>
-          Promise.all(
-            refs.slice(0, max).map(async (r): Promise<Pic> => {
-              try {
-                const bmp = await Image.loadAsync({ uri: r.uri, headers: r.headers }, { maxWidth });
-                return { source: bmp, aspect: bmp.width > 0 ? bmp.height / bmp.width : null };
-              } catch {
-                return { source: { uri: r.uri, headers: r.headers }, aspect: null };
-              }
-            })
-          )
-        );
-        done.set(k, p);
-      }
-      return p;
+      return rawOf(id)
+        .then((refs) => Promise.all(refs.slice(0, max).map((r) => one(r, maxWidth))))
+        .then((list) => {
+          ready.set(k, list);
+          return list;
+        });
     },
+    peek: (id, { maxWidth, max }) => ready.get(`${id}|${maxWidth}|${max}`) ?? null,
   };
 }
 
 /** The pages of one title for a card that fills the screen. */
 export function usePages(load: PageLoader | null | undefined, seriesId: string | null | undefined, max = 6): Pic[] | null {
-  const [pages, setPages] = useState<Pic[] | null>(null);
+  const [pages, setPages] = useState<Pic[] | null>(() => (load && seriesId ? load.peek(seriesId, { maxWidth: 600, max }) : null));
   useEffect(() => {
     if (!load || !seriesId) return;
     let live = true;
@@ -241,7 +249,7 @@ export function MultiMontage({ load, ids, covers, dim = 0.45 }: { load?: PageLoa
   useEffect(() => {
     if (!load) return;
     let live = true;
-    Promise.all(ids.slice(0, 6).map((id) => load.pages(id, { maxWidth: 700, max: 6 }).catch(() => [] as Pic[])))
+    Promise.all(ids.slice(0, 6).map((id) => load.pages(id, { maxWidth: 600, max: 6 }).catch(() => [] as Pic[])))
       .then((all) => {
         // Interleave titles: a panel from each in turn (skipping the title page).
         const out: Pic[] = [];

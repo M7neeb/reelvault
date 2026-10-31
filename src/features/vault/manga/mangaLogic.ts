@@ -743,15 +743,21 @@ export function invertSelection(listIds: string[], selected: Iterable<string>): 
 
 /** How many of the picked titles have this keyword (category): all, some or none. */
 export function tagState(series: Pick<MangaSeries, 'tags'>[], tag: string): { has: number; state: 'all' | 'some' | 'none' } {
-  const has = series.filter((s) => s.tags.includes(tag)).length;
+  const t = tag.toLowerCase();
+  const has = series.filter((s) => s.tags.some((x) => x.toLowerCase() === t)).length;
   return { has, state: !has ? 'none' : has === series.length ? 'all' : 'some' };
 }
 
 /** The picked titles grouped by the status they had, so a move can be taken back. */
-export function statusGroups(series: Pick<MangaSeries, 'id' | 'status'>[]): { status: MangaStatus | null; ids: string[] }[] {
-  const m = new Map<MangaStatus | null, string[]>();
-  for (const s of series) m.set(s.status, [...(m.get(s.status) ?? []), s.id]);
-  return [...m.entries()].map(([status, ids]) => ({ status, ids }));
+export function statusGroups(series: (Pick<MangaSeries, 'id' | 'status'> & { finishedAt?: number | null })[]): { status: MangaStatus | null; finishedAt: number | null; ids: string[] }[] {
+  const m = new Map<string, { status: MangaStatus | null; finishedAt: number | null; ids: string[] }>();
+  for (const s of series) {
+    const k = `${s.status}|${s.finishedAt ?? ''}`;
+    const g = m.get(k) ?? { status: s.status, finishedAt: s.finishedAt ?? null, ids: [] };
+    g.ids.push(s.id);
+    m.set(k, g);
+  }
+  return [...m.values()];
 }
 
 /* ------------------------------------------------------- the library tabs */

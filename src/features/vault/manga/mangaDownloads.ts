@@ -233,6 +233,8 @@ export function kickDownloads(): void {
         if (paused) break;
         if (waitingForWifi()) {
           emit(true);
+          // Look again in half a minute: Wi-Fi may come back while the app stays open.
+          setTimeout(kickDownloads, 30_000);
           break;
         }
         const next = await nextDownload();
@@ -243,11 +245,19 @@ export function kickDownloads(): void {
           const msg = String(e).replace(/^Error:\s*/, '');
           if (msg === 'Paused') {
             // Already carried on again: keep going instead of stopping.
-            if (!paused) continue;
+            if (!paused) {
+              current = null;
+              emit(true);
+              continue;
+            }
             break;
           }
-          // Cancelled or deleted: its row is already gone.
-          if (msg === 'Cancelled') continue;
+          // Cancelled or deleted: its row is already gone (and the bar stops showing its pages).
+          if (msg === 'Cancelled') {
+            current = null;
+            emit(true);
+            continue;
+          }
           console.log(`[MANGA] download ${next.chapterId} failed: ${msg}`);
           await failDownload(next.chapterId, msg);
           // The same will happen to the rest of that title: say so now instead of trying each one.

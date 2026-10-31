@@ -126,22 +126,35 @@ export function StoryDeck({
   // The living background is built once per card, not on every tick of the progress bar.
   const scene = useMemo(() => (ambient && card && !card.solid ? ambient(card, i) : null), [ambient, card, i]);
 
+  // Closes once, however many ways ask at the same moment (a swipe down as the last card ends).
+  const closed = useRef(false);
+  const close = () => {
+    if (closed.current) return;
+    closed.current = true;
+    cancelAnimation(progress);
+    onClose();
+  };
+  /** The card the clock is running for; a fresh card starts from zero, a resumed one where it was. */
+  const ranFor = useRef(-1);
   const go = (n: number) => {
+    if (closed.current) return;
     if (n < 0) {
-      progress.value = 0;
+      ranFor.current = -1;
       return setRestart((r) => r + 1);
     }
-    if (n >= cards.length) return onClose();
+    if (n >= cards.length) return close();
     if (cards[n].cheer) success();
     else tick();
     if (n === cards.length - 1 && !ended.current) {
       ended.current = true;
       onEnd?.();
     }
-    progress.value = 0;
     setI(n);
   };
-  const next = () => go(iRef.current + 1);
+  // Moves on only if the card that ran out is still the one showing (a tap at that moment already moved).
+  const advanceFrom = (from: number) => {
+    if (iRef.current === from) go(from + 1);
+  };
 
   // The clock of the current card: runs from where it is to the end, then moves on. Holding pauses it.
   useEffect(() => {
@@ -151,8 +164,13 @@ export function StoryDeck({
       return;
     }
     const ms = cards[Math.min(i, cards.length - 1)].ms;
-    progress.value = withTiming(1, { duration: Math.max(0, (1 - progress.value) * ms), easing: Easing.linear }, (done) => {
-      if (done) scheduleOnRN(next);
+    const fresh = ranFor.current !== i;
+    ranFor.current = i;
+    const from = fresh ? 0 : progress.value;
+    progress.value = from;
+    const at = i;
+    progress.value = withTiming(1, { duration: Math.max(0, (1 - from) * ms), easing: Easing.linear }, (done) => {
+      if (done) scheduleOnRN(advanceFrom, at);
     });
     return () => cancelAnimation(progress);
   }, [i, paused, restart, cards.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -167,7 +185,7 @@ export function StoryDeck({
     })
     .onEnd((e) => {
       'worklet';
-      if (e.translationY > 120 || e.velocityY > 900) ty.value = withTiming(height, { duration: DUR.base }, (d) => d && scheduleOnRN(onClose));
+      if (e.translationY > 120 || e.velocityY > 900) ty.value = withTiming(height, { duration: DUR.base }, (d) => d && scheduleOnRN(close));
       else ty.value = withSpring(0, SPRING);
     });
   const tap = Gesture.Tap()
@@ -193,7 +211,7 @@ export function StoryDeck({
 
   if (!card) return null;
   return (
-    <Modal visible animationType="fade" transparent onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible animationType="fade" transparent onRequestClose={close} statusBarTranslucent>
       <GestureHandlerRootView style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
         <GestureDetector gesture={gestures}>
           <Animated.View style={[styles.story, sheetStyle]}>
@@ -228,7 +246,7 @@ export function StoryDeck({
             </View>
             <View style={[styles.top, { top: insets.top + 20 }]}>
               {sound && <IconButton icon={sound.muted ? 'muted' : 'sound'} label={sound.muted ? 'Sound on' : 'Mute'} clear color="#fff" onPress={sound.onToggle} size={36} />}
-              <IconButton icon="close" label="Close" clear color="#fff" onPress={onClose} size={36} />
+              <IconButton icon="close" label="Close" clear color="#fff" onPress={close} size={36} />
             </View>
             <Animated.View key={`b${i}`} entering={reduce ? undefined : bodyIn} style={[styles.body, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 40 }]}>
               {card.body}
