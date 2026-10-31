@@ -27,11 +27,16 @@ import { audioWrapped } from '../../audio/audioWrapped';
 import { canSnap, shareSnap } from '../../snap';
 import { success, warn } from '../haptics';
 import Icon from '../Icon';
-import { BadgeGrid, ClockDial, GiantRank, Heatmap, RatingBars, StreakChain, TextQuiz } from '../manga/mangaKit';
-import { Equalizer, ImageRiver, Tint, Vinyl } from '../scenes';
+import { BadgeGrid, ClockDial, GiantRank, Heatmap, RatingBars, StreakChain, TextQuiz, type Pic } from '../manga/mangaKit';
+import { PicScene } from '../manga/pageScenes';
+import { SOUND_SEQUENCE, type Layout } from '../../manga/pageDirector';
+
+/** The countdown's looks, one per place (#5 to #2); your #1 gets the record. */
+const RANK_SOUND: Layout[] = ['poster', 'equalizer', 'orbit', 'kenburns'];
+import { Equalizer, Vinyl } from '../scenes';
 import { StoryDeck, useStoryText, type DeckCard } from '../storyDeck';
 import { Backdrop } from '../frame';
-import { Confetti, CountUp, CoverWall, GrowBar, GrowColumn, KenBurns, Rays, Tilt } from '../storyKit';
+import { Confetti, CountUp, CoverWall, GrowBar, GrowColumn, Rays, Tilt } from '../storyKit';
 import { sheet, useStyles } from '../theme';
 import AudioCover from './AudioCover';
 import { useAudioControlsOptional } from './playback';
@@ -115,26 +120,20 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
   // Behind every card: your covers themselves, never a plain colour. A cover whole over a blurred copy
   // of itself, a record spinning with the cover as its label (over the same cover, blurred), or your
   // covers flowing by over an equaliser.
+  // Behind every card: your covers, in one of sixteen looks that change from card to card (a slow camera
+  // over a cover, a record spinning, covers flowing, an equalizer, covers in orbit, tossed on a table...),
+  // never the same look twice in a row. With no cover at all: a record with the title's first letter.
+  const scenePics = useMemo<Pic[]>(() => sceneCovers.map((c) => ({ source: c, aspect: 1 })), [sceneCovers]);
   const ambient = useCallback(
-    (card: DeckCard, i: number) => {
-      const cover = sceneCovers.length ? sceneCovers[i % Math.min(6, sceneCovers.length)] : undefined;
-      const v = i % 3;
-      if (v === 1 && sceneCovers.length >= 3)
-        return (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]}>
-            <ImageRiver sources={sceneCovers} columns={3} aspect={1} tilt={-10} speed={0.9} />
-            <Equalizer color="#fff" />
-          </View>
-        );
-      if (v === 0 && cover) return <KenBurns source={cover} ms={9000} seed={i} />;
-      return (
+    (card: DeckCard, i: number) =>
+      scenePics.length ? (
+        <PicScene i={i} pics={scenePics} seq={SOUND_SEQUENCE} />
+      ) : (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]}>
-          {cover && <Backdrop source={cover} dim={0.2} />}
-          <Vinyl cover={cover} label={labels[i % Math.max(1, labels.length)] ?? '♪'} accent={card.colors[0]} />
+          <Vinyl cover={undefined} label={labels[i % Math.max(1, labels.length)] ?? '♪'} accent={card.colors[0]} />
         </View>
-      );
-    },
-    [sceneCovers, labels]
+      ),
+    [scenePics, labels]
   );
 
   // A random part of your top titles plays behind the cards (a different one every card), fading in.
@@ -414,11 +413,13 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
         colors: rankColors[(5 - r) % rankColors.length],
         ms: 4800,
         solid: true,
-        backdrop: (
+        // Each place in the countdown its own look round its own cover (a record for one without a cover).
+        backdrop: t.item.coverSource ? (
+          <PicScene i={5 - r} pics={scenePics} lead={[{ source: t.item.coverSource, aspect: 1 }]} seq={RANK_SOUND} dim={0.25} />
+        ) : (
           <>
-            {/* Its own cover behind it (blurred), its record spinning: no colour wash. */}
-            <Backdrop source={t.item.coverSource ?? undefined} dim={0.25} />
-            <Vinyl cover={t.item.coverSource ?? undefined} label={(t.item.title ?? '♪').trim()[0]?.toUpperCase()} accent={rankColors[(5 - r) % rankColors.length][0]} />
+            <Backdrop source={undefined} dim={0.25} />
+            <Vinyl cover={undefined} label={(t.item.title ?? '♪').trim()[0]?.toUpperCase()} accent={rankColors[(5 - r) % rankColors.length][0]} />
           </>
         ),
         body: (

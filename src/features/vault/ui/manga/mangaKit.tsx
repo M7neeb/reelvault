@@ -1,9 +1,8 @@
 /**
  * The moving pieces of the reading Wrapped, made of your manga itself:
- * - the pages of the title a card talks about, behind it: a long strip that
- *   scrolls by itself (webtoons) or pages turning one after another (manga),
- *   with a quick cut of panels for the opening; the cover moves slowly until
- *   the pages have loaded;
+ * - pages: a long strip that scrolls by itself, pages turning one after
+ *   another, quick cuts between panels (the layouts that use them are in
+ *   pageScenes.tsx); a chapter's title page made of three of your pages;
  * - a calendar of every day you read, wiped in from the left;
  * - a 24-hour clock, a streak of flames, rating bars, a stack of paper, a fan
  *   of covers, a shelf of finished titles, badges and quizzes.
@@ -17,16 +16,14 @@ import { Image, type ImageProps } from 'expo-image';
 import Animated, { Easing, FadeIn, Keyframe, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSpring, withTiming, ZoomIn } from 'react-native-reanimated';
 
 import type { ImageRef } from '../../manga/sources/types';
-import Fade from '../Fade';
 import { success, warn } from '../haptics';
 import Icon from '../Icon';
 import type { IconName } from '../icons';
 import { EASE_OUT, useReducedMotion } from '../motion';
-import { ImageRiver, Screentone } from '../scenes';
-import { CoverWall, GrowColumn, KenBurns, Tilt } from '../storyKit';
+import { GrowColumn, Tilt } from '../storyKit';
 import { sheet, useStyles } from '../theme';
-import type { ThumbSource } from '../types';
 import MangaCover from './MangaCover';
+import { usePageBank } from './pageScenes';
 import type { MangaUiSeries } from './mangaTypes';
 
 /* ------------------------------------------------------------------ pages */
@@ -84,53 +81,10 @@ export function cachedLoader(load: (seriesId: string) => Promise<ImageRef[]>): P
   };
 }
 
-/** The pages of one title for a card that fills the screen. */
-export function usePages(load: PageLoader | null | undefined, seriesId: string | null | undefined, max = 6): Pic[] | null {
-  const [pages, setPages] = useState<Pic[] | null>(() => (load && seriesId ? load.peek(seriesId, { maxWidth: 600, max }) : null));
-  useEffect(() => {
-    if (!load || !seriesId) return;
-    let live = true;
-    load
-      .pages(seriesId, { maxWidth: 600, max })
-      .then((p) => live && setPages(p))
-      .catch(() => live && setPages([]));
-    return () => {
-      live = false;
-    };
-  }, [load, seriesId, max]);
-  return pages;
-}
-
-/**
- * A few pages from each of several titles, mixed together (for the scenes
- * behind the cards). Small (360 px wide); very long strips only if nothing
- * else is there (they would be cropped to their top anyway).
- */
-export function usePagePool(load: PageLoader | null | undefined, ids: string[], per = 4): Pic[] {
-  const [pool, setPool] = useState<Pic[]>([]);
-  const key = ids.join('|');
-  useEffect(() => {
-    if (!load || !ids.length) return;
-    let live = true;
-    Promise.all(ids.slice(0, 6).map((id) => load.pages(id, { maxWidth: 360, max: per }).catch(() => [] as Pic[])))
-      .then((all) => {
-        const out: Pic[] = [];
-        for (let k = 0; k < per; k++) for (const p of all) if (p[k]) out.push(p[k]);
-        const fit = out.filter((p) => p.aspect === null || p.aspect <= 3);
-        if (live) setPool(fit.length >= 6 ? fit : out);
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [load, key, per]); // eslint-disable-line react-hooks/exhaustive-deps
-  return pool;
-}
-
 const PAGE_ASPECT = 1.45;
 
 /** A long strip of pages scrolling up by itself, without end (webtoons), each page at its real shape. */
-export function PageStrip({ pages, ms = 26000, width: w, reverse = false }: { pages: Pic[]; ms?: number; /** Narrower than the screen (side by side). */ width?: number; /** Scrolls down instead of up. */ reverse?: boolean }) {
+export function PageStrip({ pages, ms = 26000, width: w, reverse = false, perScreen = 4500 }: { pages: Pic[]; ms?: number; /** Narrower than the screen (side by side). */ width?: number; /** Scrolls down instead of up. */ reverse?: boolean; /** How long one screen of strip takes to go by (ms). */ perScreen?: number }) {
   const screen = useWindowDimensions();
   const width = w ?? screen.width;
   const reduce = useReducedMotion();
@@ -141,7 +95,7 @@ export function PageStrip({ pages, ms = 26000, width: w, reverse = false }: { pa
     if (reduce || !set) return;
     y.value = 0;
     // About one screen every 7 seconds, like a slow, steady scroll.
-    y.value = withRepeat(withTiming(1, { duration: Math.max(ms, (set / Math.max(1, width)) * 4500), easing: Easing.linear }), -1, false);
+    y.value = withRepeat(withTiming(1, { duration: Math.max(perScreen === 4500 ? ms : Math.min(ms, perScreen * 4), (set / Math.max(1, width)) * perScreen), easing: Easing.linear }), -1, false);
   }, [set, reduce]); // eslint-disable-line react-hooks/exhaustive-deps
   const anim = useAnimatedStyle(() => ({ transform: [{ translateY: reverse ? -set + y.value * set : -y.value * set }] }));
   return (
@@ -209,147 +163,6 @@ export function PanelMontage({ pages, every = 520 }: { pages: Pic[]; every?: num
       <Animated.View key={n} entering={reduce ? undefined : FadeIn.duration(90)} style={[StyleSheet.absoluteFill, { transform: [{ scale: zoom }, { translateX: dx }, { translateY: dy }] }]}>
         <Image source={p.source} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="top" transition={0} />
       </Animated.View>
-    </View>
-  );
-}
-
-/**
- * The backdrop of a card about one title: its pages (a strip or turning
- * pages, or quick cuts), darkened so the words stay readable; its cover until
- * they load.
- */
-export function TitleBackdrop({ load, series, style = 'auto', dim = 0.55 }: { load?: PageLoader | null; series: MangaUiSeries | undefined; style?: 'auto' | 'strip' | 'flip' | 'montage'; dim?: number }) {
-  const pages = usePages(load, series?.id, style === 'strip' || style === 'auto' ? 5 : 8);
-  if (!series) return null;
-  const strip = series.readingMode === 'webtoon' || (series.readingMode === null && series.kind !== 'comic' && series.kind !== 'manga');
-  const kind = style === 'auto' ? (strip ? 'strip' : 'flip') : style;
-  const rtl = series.readingMode ? series.readingMode === 'rtl' : series.kind === 'manga';
-  return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} pointerEvents="none">
-      {pages && pages.length ? (
-        kind === 'strip' ? (
-          <PageStrip pages={pages} />
-        ) : kind === 'montage' ? (
-          <PanelMontage pages={pages} />
-        ) : (
-          <PageFlip pages={pages} rtl={rtl} />
-        )
-      ) : (
-        <KenBurns source={series.coverSource ?? undefined} ms={9000} fill seed={series.title.length} />
-      )}
-      {/* The story's own dark shade sits on top: only a touch more here, so the pages stay clear. */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(0,0,0,${Math.max(0, dim - 0.4)})` }]} />
-    </View>
-  );
-}
-
-/** Quick cuts through the pages of several titles (the opening); your covers drifting by while they load or when there are none. */
-export function MultiMontage({ load, ids, covers, dim = 0.45 }: { load?: PageLoader | null; ids: string[]; covers: ThumbSource[]; dim?: number }) {
-  const [pages, setPages] = useState<Pic[]>([]);
-  useEffect(() => {
-    if (!load) return;
-    let live = true;
-    Promise.all(ids.slice(0, 6).map((id) => load.pages(id, { maxWidth: 600, max: 6 }).catch(() => [] as Pic[])))
-      .then((all) => {
-        // Interleave titles: a panel from each in turn (skipping the title page).
-        const out: Pic[] = [];
-        for (let k = 1; k < 6; k++) for (const p of all) if (p[k]) out.push(p[k]);
-        if (live) setPages(out);
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [load, ids.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} pointerEvents="none">
-      {pages.length ? <PanelMontage pages={pages} every={380} /> : <CoverWall sources={covers} opacity={0.6} />}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(0,0,0,${Math.max(0, dim - 0.35)})` }]} />
-    </View>
-  );
-}
-
-/** One page moving slowly inside a frame: panning down it, zooming in on part of it, like a camera over the paper. */
-function PanPage({ pic, w, h, ms, zoom = 1.25, seed = 0 }: { pic: Pic | undefined; w: number; h: number; ms: number; zoom?: number; seed?: number }) {
-  const reduce = useReducedMotion();
-  const k = useSharedValue(0);
-  const imgH = Math.max(h, w * Math.min(6, pic?.aspect ?? PAGE_ASPECT));
-  useEffect(() => {
-    k.value = 0;
-    if (!reduce) k.value = withTiming(1, { duration: ms, easing: Easing.inOut(Easing.quad) });
-  }, [pic, reduce]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dx = (rand(seed) - 0.5) * w * 0.3;
-  const anim = useAnimatedStyle(() => ({
-    transform: [{ translateY: -k.value * (imgH - h) * 0.6 }, { translateX: k.value * dx }, { scale: 1 + k.value * (zoom - 1) }],
-  }));
-  if (!pic) return <View style={{ width: w, height: h, backgroundColor: '#111' }} />;
-  return (
-    <View style={{ width: w, height: h, overflow: 'hidden', backgroundColor: '#111' }}>
-      <Animated.View style={anim}>
-        <Image source={pic.source} style={{ width: w, height: imgH }} contentFit="cover" contentPosition="top" transition={0} />
-      </Animated.View>
-    </View>
-  );
-}
-
-/**
- * The background of a card in the reading Wrapped: your manga itself, never a
- * plain colour. The layout changes from card to card (and the title with it):
- * a long strip scrolling, two titles side by side scrolling opposite ways,
- * pages turning, three titles framed like the panels of a page, a slow camera
- * move over one page, or a wall of pages from everything you read. While the
- * pages load (or when a title has none on the phone), your covers flow by.
- */
-export function MangaScene({ load, ids, index, pool, covers }: { load?: PageLoader | null; ids: string[]; index: number; pool: Pic[]; covers: ThumbSource[] }) {
-  const { width, height } = useWindowDimensions();
-  const v = index % 6;
-  const n = Math.max(1, ids.length);
-  const a = ids.length ? ids[index % n] : null;
-  const b = ids.length > 1 ? ids[(index + 1) % n] : null;
-  const c = ids.length > 2 ? ids[(index + 2) % n] : null;
-  const pa = usePages(load, a, 5);
-  const pb = usePages(load, v === 1 || v === 3 ? b : null, 5);
-  const pc = usePages(load, v === 3 ? c : null, 5);
-  const has = (p: Pic[] | null): p is Pic[] => !!p && p.length > 0;
-  const gutter = 6;
-  let body: ReactNode;
-  if (v === 5 && pool.length >= 3) {
-    body = <ImageRiver sources={pool.map((p) => p.source)} columns={3} aspect={1.45} tilt={-9} speed={1.1} />;
-  } else if (!has(pa)) {
-    body = <ImageRiver sources={covers} columns={3} aspect={1.42} tilt={8} speed={0.9} />;
-  } else if (v === 0) {
-    body = <PageStrip pages={pa} />;
-  } else if (v === 1) {
-    const half = (width - gutter) / 2;
-    body = (
-      <View style={[StyleSheet.absoluteFill, { flexDirection: 'row', gap: gutter, backgroundColor: '#fff' }]}>
-        <PageStrip pages={pa} width={half} />
-        <PageStrip pages={has(pb) ? pb : pa} width={half} reverse />
-      </View>
-    );
-  } else if (v === 2) {
-    body = <PageFlip pages={pa} />;
-  } else if (v === 3) {
-    // Three titles framed like the panels of one page: white gutters, black borders.
-    const third = (width - gutter * 4) / 3;
-    const h = height - gutter * 2;
-    const pics = [pa[1] ?? pa[0], (has(pb) ? pb : pa)[1] ?? pa[0], (has(pc) ? pc : pa)[2] ?? pa[0]];
-    body = (
-      <View style={[StyleSheet.absoluteFill, { flexDirection: 'row', gap: gutter, padding: gutter, backgroundColor: '#fff' }]}>
-        {pics.map((p, i) => (
-          <View key={i} style={{ borderWidth: 2, borderColor: '#000' }}>
-            <PanPage pic={p} w={third - 4} h={h - 4} ms={9000 + i * 1500} zoom={1.1 + i * 0.08} seed={index + i} />
-          </View>
-        ))}
-      </View>
-    );
-  } else {
-    body = <PanPage pic={pa[2] ?? pa[0]} w={width} h={height} ms={8000} zoom={1.55} seed={index} />;
-  }
-  return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} pointerEvents="none">
-      {body}
-      <Screentone opacity={0.05} />
     </View>
   );
 }
@@ -711,12 +524,13 @@ const makeStyles = () =>
  * A chapter's title page: a little manga page of three panels filled with your
  * pages (one wide on top, two below), dropping in one after another.
  */
-export function ChapterArt({ load, ids, seed }: { load?: PageLoader | null; ids: string[]; seed: number }) {
-  const pool = usePagePool(load, ids, 3);
+export function ChapterArt({ seed }: { seed: number }) {
+  const pool = usePageBank().all;
   const { width, height } = useWindowDimensions();
   const reduce = useReducedMotion();
   if (pool.length < 3) return null;
-  const pick = (k: number) => pool[(seed * 3 + k) % pool.length];
+  // Three different pages, from further into the pile for each chapter.
+  const pick = (k: number) => pool[(pool.length - 1 - ((seed * 3 + k) % pool.length) + pool.length) % pool.length];
   const W = Math.min(width * 0.86, height * 0.5);
   const panel = (src: Pic, w: number, h: number, delay: number, rot: number) => (
     <Animated.View entering={reduce ? undefined : ZoomIn.delay(delay).springify().damping(13)} style={{ width: w, height: h, borderWidth: 3, borderColor: '#000', backgroundColor: '#fff', transform: [{ rotate: `${rot}deg` }], overflow: 'hidden' }}>

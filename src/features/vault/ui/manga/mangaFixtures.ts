@@ -13,6 +13,7 @@ import type { BrowseActions, MangaActions, MangaData, MangaUiSeries } from './ma
 
 const DAY = 86_400_000;
 const NOW = Date.now();
+const FEW_PAGES = typeof window !== 'undefined' && !!window.location && new URLSearchParams(window.location.search).has('fewpages');
 
 const svg = (body: string, w: number, h: number) => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${body}</svg>`)}`;
 
@@ -29,8 +30,12 @@ function cover(title: string, a: string, b: string): string {
 }
 
 /** A comic-like page: panels and a page number. */
-function page(n: number, tall = false): string {
+function page(n: number, tall = false, label = ''): string {
   const h = tall ? 1600 : 1100;
+  // Each title's pages look different (a tint and its name), so repeats are easy to spot.
+  let hash = 0;
+  for (const c of label) hash = (hash * 31 + c.charCodeAt(0)) % 360;
+  const tint = `hsl(${hash},55%,42%)`;
   const panels = tall
     ? `<rect x="40" y="40" width="720" height="460" rx="8" fill="#e8e3d8" stroke="#111" stroke-width="6"/>
        <rect x="40" y="540" width="720" height="560" rx="8" fill="#ddd6c6" stroke="#111" stroke-width="6"/>
@@ -42,7 +47,9 @@ function page(n: number, tall = false): string {
   return svg(
     `<rect width="800" height="${h}" fill="#fbfaf7"/>${panels}
      <ellipse cx="240" cy="200" rx="120" ry="60" fill="#fff" stroke="#111" stroke-width="5"/>
-     <text x="400" y="${tall ? 330 : 290}" text-anchor="middle" font-family="Helvetica, Arial" font-size="140" font-weight="900" fill="#111" opacity="0.18">${n}</text>`,
+     <text x="400" y="${tall ? 330 : 290}" text-anchor="middle" font-family="Helvetica, Arial" font-size="140" font-weight="900" fill="#111" opacity="0.18">${n}</text>
+     <circle cx="${200 + ((n * 97) % 400)}" cy="${560 + ((n * 53) % 200)}" r="90" fill="${tint}" opacity="0.75"/>
+     <text x="60" y="${h - 60}" font-family="Helvetica, Arial" font-size="56" font-weight="900" fill="${tint}">${label.toUpperCase()} · ${n}</text>`,
     800,
     h
   );
@@ -152,7 +159,11 @@ export function fixtureMangaData(): MangaData {
     markPreviousRead: none,
     saveProgress: none,
     addRead: none,
-    loadPages: async (_s, c) => Array.from({ length: c.pageCount || 18 }, (_, i) => ({ uri: page(i + 1, c.seriesId === 'tower') })),
+    // `&fewpages` in the preview: only two titles have pages (like titles from a backup, not on the phone).
+    loadPages: async (_s, c) =>
+      FEW_PAGES && c.seriesId !== 'ember' && c.seriesId !== 'tower'
+        ? []
+        : Array.from({ length: c.pageCount || 18 }, (_, i) => ({ uri: page(i + 1, c.seriesId === 'tower', c.seriesId) })),
     refresh: async () => 0,
     refreshAll: async () => ({ added: 0, failed: [] }),
     setCoverFromPhoto: none,

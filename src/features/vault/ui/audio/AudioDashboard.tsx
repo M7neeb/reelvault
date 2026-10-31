@@ -20,6 +20,8 @@ import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import { YearHeatCard } from '../yearHeatUI';
 import AudioCover from './AudioCover';
 import { AudioWrapped } from './AudioStory';
+import { listeningYears } from '../../audio/audioYears';
+import { PosterRow, WrappedPoster } from '../wrappedPoster';
 import type { AudioActions, AudioUiItem } from './audioTypes';
 
 
@@ -29,7 +31,8 @@ export default function AudioDashboard({ items, actions, onOpen, onClose }: { it
   const p = usePalette();
   const [plays, setPlays] = useState<AudioPlay[] | null>(null);
   const [bytes, setBytes] = useState<number | null>(null);
-  const [wrapped, setWrapped] = useState(false);
+  /** The year whose Audio Wrapped is playing. */
+  const [wrapped, setWrapped] = useState<number | null>(null);
   const [now] = useState(() => Date.now());
 
   useEffect(() => {
@@ -47,7 +50,12 @@ export default function AudioDashboard({ items, actions, onOpen, onClose }: { it
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const weekMax = st ? Math.max(1, ...st.week.map((d) => d.ms)) : 1;
   const hourMax = st ? Math.max(1, ...st.hours) : 1;
-  const year = new Date(now).getFullYear();
+  const years = useMemo(() => (plays ? listeningYears(plays, now) : []), [plays, now]);
+  // Covers for the poster: this year's top first, then the rest of your library.
+  const wall = useMemo(() => {
+    const ids = [...(years[0]?.top ?? []), ...items.map((i) => i.id)];
+    return [...new Set(ids)].map((id) => byId.get(id)?.coverSource).filter(Boolean).slice(0, 16) as NonNullable<AudioUiItem['coverSource']>[];
+  }, [years, items, byId]);
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -95,12 +103,33 @@ export default function AudioDashboard({ items, actions, onOpen, onClose }: { it
               </View>
             </View>
 
-            <TouchableOpacity activeOpacity={0.85} style={styles.wrapCard} onPress={() => setWrapped(true)} accessibilityLabel={`Open your ${year} Audio Wrapped`}>
-              <View style={styles.wrapGlow} />
-              <Text style={styles.wrapKicker}>AUDIO WRAPPED</Text>
-              <Text style={styles.wrapTitle}>Your {year} in listening</Text>
-              <Text style={styles.wrapSub}>Your #1, your most listened, your author and what you finished.</Text>
-            </TouchableOpacity>
+            {years[0] && (
+              <WrappedPoster
+                kicker="AUDIO WRAPPED"
+                title={String(years[0].year)}
+                stats={[
+                  { v: years[0].ms >= 7_200_000 ? `${Math.round(years[0].ms / 3_600_000)} h` : years[0].ms ? fmtLength(years[0].ms) : '0 min', l: 'listening' },
+                  { v: String(years[0].titles), l: 'titles' },
+                  { v: String(years[0].days), l: 'days' },
+                  { v: st.averageRating !== null ? `★ ${fmtRating(st.averageRating)}` : '-', l: 'rating' },
+                ]}
+                wall={wall}
+                top={years[0].top.map((id) => ({ title: byId.get(id) ? displayTitle(byId.get(id)!) : 'A title', source: byId.get(id)?.coverSource ?? null }))}
+                tint="#BF5AF2"
+                background="#160520"
+                tileAspect={1}
+                playLabel={`Play ${years[0].year}`}
+                onPress={() => setWrapped(years[0].year)}
+                accessibilityLabel={`Open your ${years[0].year} Audio Wrapped`}
+              />
+            )}
+            <PosterRow
+              title="Years before"
+              items={years.slice(1).map((y) => {
+                const one = y.top[0] ? byId.get(y.top[0]) : undefined;
+                return { key: String(y.year), label: String(y.year), line: `${fmtLength(y.ms)} · ${y.titles} ${y.titles === 1 ? 'title' : 'titles'}`, top: one ? displayTitle(one) : undefined, source: one?.coverSource ?? null, onPress: () => setWrapped(y.year) };
+              })}
+            />
 
             <YearHeatCard
               index={1}
@@ -166,7 +195,7 @@ export default function AudioDashboard({ items, actions, onOpen, onClose }: { it
           </ScrollView>
         )}
       </View>
-      {wrapped && plays && <AudioWrapped items={items} plays={plays} year={year} onClose={() => setWrapped(false)} />}
+      {wrapped !== null && plays && <AudioWrapped items={items} plays={plays} year={wrapped} onClose={() => setWrapped(null)} />}
     </Modal>
   );
 }
@@ -188,11 +217,6 @@ const makeStyles = (p: Palette) =>
     tile: { flex: 1, backgroundColor: p.card, borderRadius: 16, padding: 12, gap: 2 },
     tileNum: { color: p.text, fontSize: 17, fontWeight: '800' },
     tileLabel: { color: p.textSecondary, fontSize: 12 },
-    wrapCard: { borderRadius: 22, padding: 18, gap: 6, backgroundColor: '#25093A', overflow: 'hidden' },
-    wrapGlow: { position: 'absolute', right: -60, top: -60, width: 220, height: 220, borderRadius: 110, backgroundColor: '#BF5AF2', opacity: 0.45 },
-    wrapKicker: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
-    wrapTitle: { color: '#fff', fontSize: 24, fontWeight: '900' },
-    wrapSub: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     rowTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
     hours: { flexDirection: 'row', alignItems: 'flex-end', height: 64 },

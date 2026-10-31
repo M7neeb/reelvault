@@ -119,9 +119,16 @@ const ITEMS: AudioItem[] = [
 
 const DELETED: AudioItem[] = [base('aud-del', { filename: 'old take.wav', title: 'Old take', deletedAt: NOW - 3 * DAY })];
 
-const asUi = (i: AudioItem): AudioUiItem => ({ ...i, coverSource: null, trackUris: i.tracks.map(() => '') });
+// `&covers` in the preview: drawn covers (otherwise none, to show the letter tiles).
+const WITH_COVERS = typeof window !== 'undefined' && !!window.location && new URLSearchParams(window.location.search).has('covers');
+const drawnCover = (i: AudioItem, k: number) => {
+  const hue = (k * 67) % 360;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="hsl(${hue},60%,38%)"/><circle cx="${120 + k * 30}" cy="150" r="110" fill="hsl(${(hue + 40) % 360},70%,60%)"/><text x="30" y="360" font-family="Helvetica" font-size="44" font-weight="900" fill="#fff">${(i.title ?? '').slice(0, 14)}</text></svg>`;
+  return { uri: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
+};
+const asUi = (i: AudioItem, k: number): AudioUiItem => ({ ...i, coverSource: WITH_COVERS ? drawnCover(i, k) : null, trackUris: i.tracks.map(() => '') });
 
-export const FIXTURE_AUDIO: AudioUiItem[] = ITEMS.map(asUi);
+export const FIXTURE_AUDIO: AudioUiItem[] = ITEMS.map((i, k) => asUi(i, k));
 
 const BOOK: BookJson = {
   v: 1,

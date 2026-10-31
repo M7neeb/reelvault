@@ -69,6 +69,12 @@ export type WrappedStoryData = {
   weekendShare: number;
   badges: Badge[];
   quizzes: Quiz[];
+  /** The range in parts (years of all time, months of a year, weeks of a month, days of a week), each with the title you read most then. */
+  periods: { start: number; label: string; seriesId: string | null; weight: number }[];
+  /** Your 1st, 100th, 1,000th... chapter in the range: when, and which title. */
+  milestones: { n: number; at: number; seriesId: string }[];
+  /** The page you stopped on in the title you read last (a chapter begun, not finished). */
+  lastStop: { seriesId: string; chapterId: string; page: number; pages: number; at: number } | null;
 };
 
 export const MODE_LABEL: Record<ReadingMode, string> = { rtl: 'Right to left', ltr: 'Left to right', vertical: 'Page by page, down', webtoon: 'Long strip' };
@@ -130,7 +136,8 @@ export function wrappedStory(series: MangaSeries[], reads: MangaRead[], start: n
   // A day with chapters but no time recorded (from a backup) still lights up.
   for (const d of done) if (!y.ms || !dayVal.has(sod(d.at))) dayVal.set(sod(d.at), (dayVal.get(sod(d.at)) ?? 0) + CHAPTER_MS);
   const calendar: { day: number; v: number }[] = [];
-  for (let d = sod(start); d < last && calendar.length < 370; d = sod(d + DAY + 3_600_000 * 3)) calendar.push({ day: d, v: dayVal.get(d) ?? 0 });
+  // Every day: up to a year for a year, up to ten years for all time.
+  for (let d = sod(start); d < last && calendar.length < 3660; d = sod(d + DAY + 3_600_000 * 3)) calendar.push({ day: d, v: dayVal.get(d) ?? 0 });
   const daysInRange = Math.max(1, calendar.length);
   const readDays = calendar.filter((c) => c.v > 0).length;
   const weekendDays = calendar.filter((c) => c.v > 0 && [0, 6].includes(new Date(c.day).getDay())).length;
@@ -231,7 +238,7 @@ export function wrappedStory(series: MangaSeries[], reads: MangaRead[], start: n
     const order = [...opts].sort((a, b) => a - b);
     quizzes.push({ key: 'hours', question: 'How many hours did you read?', options: order.map((n) => `${n} h`), answer: order.indexOf(real) });
   }
-  if (calendar.length > 62) {
+  if (calendar.length > 62 && calendar.length <= 370) {
     const ranked = months.map((m, i) => ({ i, v: m.ms || m.chapters * CHAPTER_MS })).filter((m) => m.v > 0).sort((a, b) => b.v - a.v);
     if (ranked.length >= 3) {
       const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -244,7 +251,71 @@ export function wrappedStory(series: MangaSeries[], reads: MangaRead[], start: n
     quizzes.push({ key: 'when', question: 'When do you read the most?', options: parts, answer: ['morning', 'afternoon', 'evening', 'night'].indexOf(w.partOfDay) });
   }
 
-  return { y, w, titles, calendar, months, sessions, ratings, gem, dropped, waiting, firstChapter, lastChapter, directions, secondsPerPage, adds, dayShare, weekendShare, badges, quizzes };
+  // The range in parts, each with its most read title (time, else chapters as five minutes).
+  const SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const spanDays = (end - start) / DAY;
+  const bounds: { start: number; label: string }[] = [];
+  if (spanDays > 400) {
+    // All time: a part for each year.
+    for (let yr = new Date(start).getFullYear(); yr <= new Date(Math.min(end - 1, now)).getFullYear(); yr++) {
+      const t = new Date(yr, 0, 1).getTime();
+      bounds.push({ start: Math.max(t, sod(start)), label: String(yr) });
+    }
+  } else if (spanDays > 62) {
+    const d0 = new Date(start);
+    for (let m = 0; m < 12; m++) {
+      const t = new Date(d0.getFullYear(), d0.getMonth() + m, 1).getTime();
+      if (t >= end || t > now) break;
+      bounds.push({ start: t, label: SHORT[new Date(t).getMonth()] });
+    }
+  } else if (spanDays > 10) {
+    for (let t = sod(start), k = 1; t < end && t <= now; t = sod(t + 7 * DAY + 3 * 3_600_000), k++) bounds.push({ start: t, label: `Week ${k}` });
+  } else {
+    for (let t = sod(start); t < end && t <= now; t = sod(t + DAY + 3 * 3_600_000)) bounds.push({ start: t, label: DAYS[new Date(t).getDay()] });
+  }
+  const partOf = (t: number) => {
+    let k = -1;
+    for (let j = 0; j < bounds.length && bounds[j].start <= t; j++) k = j;
+    return k;
+  };
+  const perPart = bounds.map(() => new Map<string, number>());
+  for (const r of rs) {
+    const k = partOf(r.startedAt);
+    if (k >= 0) perPart[k].set(r.seriesId, (perPart[k].get(r.seriesId) ?? 0) + r.readMs);
+  }
+  // A chapter counts as five minutes in a part where its title has no time kept (time already counts it).
+  const timed = bounds.map(() => new Set<string>());
+  for (const r of rs) {
+    const k = partOf(r.startedAt);
+    if (k >= 0) timed[k].add(r.seriesId);
+  }
+  for (const d of done) {
+    const k = partOf(d.at);
+    if (k >= 0 && !timed[k].has(d.s.id)) perPart[k].set(d.s.id, (perPart[k].get(d.s.id) ?? 0) + CHAPTER_MS);
+  }
+  const periods = bounds.map((b, k) => {
+    const best = [...perPart[k].entries()].sort((a, c) => c[1] - a[1])[0];
+    return { start: b.start, label: b.label, seriesId: best ? best[0] : null, weight: best ? [...perPart[k].values()].reduce((a, v) => a + v, 0) : 0 };
+  });
+
+  // Where you left off: in the title read last, the chapter you were part-way through.
+  const recent = [...readList].sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0));
+  let lastStop: WrappedStoryData['lastStop'] = null;
+  for (const s of recent) {
+    const open = s.chapters.filter((c) => !c.readAt && c.lastPage > 0 && (c.pageCount || c.pages.length) > c.lastPage + 1);
+    const c = open[open.length - 1];
+    if (c) {
+      lastStop = { seriesId: s.id, chapterId: c.id, page: c.lastPage, pages: c.pageCount || c.pages.length, at: s.lastReadAt ?? 0 };
+      break;
+    }
+  }
+
+  const milestones = [1, 10, 50, 100, 250, 500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000]
+    .filter((n) => done.length >= n)
+    .map((n) => ({ n, at: done[n - 1].at, seriesId: done[n - 1].s.id }));
+
+  return { y, w, titles, calendar, months, sessions, ratings, gem, dropped, waiting, firstChapter, lastChapter, directions, secondsPerPage, adds, dayShare, weekendShare, badges, quizzes, periods, milestones, lastStop };
 }
 
 /** Which chapter to show pages of for a title: one on the phone first (fast, offline), else the last one you read. */
