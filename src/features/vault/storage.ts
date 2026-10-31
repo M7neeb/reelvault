@@ -40,9 +40,13 @@ export function coverFileName(videoId: string, coverAt: number | null = null): s
   return coverAt ? `${videoId}-${coverAt}.jpg` : `${videoId}.jpg`;
 }
 
+/** The thumbnails folder's address, worked out once (not a native File for every video on every reload). */
+let thumbsBase: string | null = null;
+
 export function thumbnailUri(videoId: string, coverAt: number | null = null): string {
   if (!canUseFs) return '';
-  return new File(thumbsDir, coverFileName(videoId, coverAt)).uri;
+  if (thumbsBase === null) thumbsBase = thumbsDir.uri.replace(/\/?$/, '/');
+  return thumbsBase + encodeURIComponent(coverFileName(videoId, coverAt)).replace(/%2F/g, '/');
 }
 
 export function bytesToGb(bytes: number): string {

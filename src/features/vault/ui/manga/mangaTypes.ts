@@ -26,6 +26,8 @@ export type MangaEdit = Partial<{
   rating: number;
   isPrivate: boolean;
   readingMode: ReadingMode | null;
+  /** Given: set as is (Undo puts back the day a title was finished). */
+  finishedAt: number | null;
 }>;
 
 export type MangaActions = {

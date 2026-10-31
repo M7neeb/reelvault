@@ -145,6 +145,7 @@ export default function MangaScreen({
 
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState('all');
+  const pendingChip = useRef<string | null>(null);
   const [inDeleted, setInDeleted] = useState(initialDeleted);
   const [selected, setSelected] = useState<Set<string> | null>(null);
   // The last cover tapped while selecting: holding another picks everything between.
@@ -167,9 +168,15 @@ export default function MangaScreen({
   const visible = useMemo(() => items.filter((s) => showPrivate || !s.isPrivate), [items, showPrivate]);
   const privateCount = items.length - visible.length;
   const tags = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of visible) for (const t of s.tags) m.set(t, (m.get(t) ?? 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+    // "Action" and "action" are one category (the first spelling seen is shown).
+    const m = new Map<string, { name: string; n: number }>();
+    for (const s of visible)
+      for (const t of new Set(s.tags.map((x) => x.toLowerCase()))) {
+        const cur = m.get(t);
+        if (cur) cur.n++;
+        else m.set(t, { name: s.tags.find((x) => x.toLowerCase() === t) ?? t, n: 1 });
+      }
+    return [...m.values()].sort((a, b) => b.n - a.n).map((x) => x.name);
   }, [visible]);
   // Categories: your keywords, plus ones you made that no title is in yet.
   const categories = useMemo(() => [...tags, ...tabPrefs.extra.filter((t) => !tags.includes(t))], [tags, tabPrefs.extra]);
@@ -204,6 +211,11 @@ export default function MangaScreen({
   }, [chips, visible]);
   // The tab you were on went away (its last title left it): back to Library.
   useEffect(() => {
+    // A tab just renamed shows up after the library reloads: keep it rather than jump to Library.
+    if (pendingChip.current === chip) {
+      if (chips.some((c) => c.key === chip)) pendingChip.current = null;
+      return;
+    }
     if (!chips.some((c) => c.key === chip)) setChip('all');
   }, [chips, chip]);
   const resume = useMemo(() => (!view.continueRow || query || chip !== 'all' || inDeleted ? [] : continueReading(visible)), [visible, query, chip, inDeleted, view.continueRow]);
@@ -250,7 +262,7 @@ export default function MangaScreen({
       )
       .then(() =>
         say(`Moved ${titles(n)} to ${label}`, () => {
-          Promise.all(before.map((g) => actions.update(g.ids, { status: g.status }))).catch(failed);
+          Promise.all(before.map((g) => actions.update(g.ids, { status: g.status, finishedAt: g.finishedAt }))).catch(failed);
           say('Moved back');
         })
       )
@@ -674,7 +686,10 @@ export default function MangaScreen({
             if (!key.startsWith('#')) return changeTabs({ ...tabPrefs, labels: { ...tabPrefs.labels, [key]: name } });
             const to = `#${name.replace(/^#/, '')}`;
             changeTabs(renameTabKey(tabPrefs, key, to));
-            if (chip === key) setChip(to);
+            if (chip === key) {
+              pendingChip.current = to;
+              setChip(to);
+            }
             actions.renameTag(key.slice(1), name).catch(failed);
           }}
           onDelete={(keys) => {
@@ -701,7 +716,7 @@ export default function MangaScreen({
             {
               label: `Download ${items.filter((s) => s.sourceId && !s.sourceId.startsWith('tachi:')).reduce((a, s) => a + s.chapters.filter((c) => !c.folder && c.sourceKey && !c.sourceUrl).length, 0)} chapters`,
               hint: 'About 5 to 10 MB each (half with Smaller pages). Runs while the app is open.',
-              onPress: () => actions.downloadLibrary().then(() => onDownloads()),
+              onPress: () => actions.downloadLibrary().then(() => onDownloads()).catch(failed),
             },
           ]}
           onClose={() => setMenu(null)}

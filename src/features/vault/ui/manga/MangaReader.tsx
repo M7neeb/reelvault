@@ -196,7 +196,8 @@ const StripPage = memo(function StripPage({
   width: number;
   aspect: number;
   onAspect: (a: number) => void;
-  onTap: () => void;
+  /** Taps are handled by the zoom layer (so a double-tap to zoom does not also show the controls). */
+  onTap?: () => void;
   onLong?: () => void;
 }) {
   return (
@@ -252,6 +253,8 @@ export default function MangaReader({
   const resume = useRef(!(fromStart || chapter.readAt));
   const rawUris = loaded?.chapterId === chapter.id ? loaded.pages : null;
   const count = rawUris?.length ?? 0;
+  const countRef = useRef(0);
+  countRef.current = count;
   const firstPage = useRef(0);
   const [page, setPage] = useState(0);
   const [reloadMap, setReloadMap] = useState<{ chapterId: string; n: Record<number, number> }>({ chapterId: '', n: {} });
@@ -422,7 +425,12 @@ export default function MangaReader({
     };
   }, [count, page, next?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reached the end card, then left (Close or Next) before the save ran: it still counts as read.
+  const saveIfFinished = () => {
+    if (atEnd.current && count) actions.saveProgress(series.id, chapter.id, count - 1, true).catch(() => undefined);
+  };
   const close = () => {
+    saveIfFinished();
     endSession();
     onClose();
   };
@@ -430,6 +438,7 @@ export default function MangaReader({
   const openChapter = (c: MangaChapter | null, startAt: 'start' | 'end' = 'start') => {
     if (!c) return;
     tick();
+    saveIfFinished();
     endSession();
     // A new session now, so leaving before the next chapter loads does not count this time twice.
     session.current = { startedAt: Date.now(), pages: new Set([0]) };
@@ -615,7 +624,11 @@ export default function MangaReader({
     const first = viewableItems.find((v) => v.item && v.item.img);
     const last = viewableItems[viewableItems.length - 1];
     atEnd.current = !!(last?.item && last.item.img === null);
-    if (first?.item) {
+    if (atEnd.current && countRef.current > 0) {
+      // The end card is on screen: the chapter is finished even if a short last page never reached the top.
+      session.current.pages.add(countRef.current - 1);
+      setPage(countRef.current - 1);
+    } else if (first?.item) {
       session.current.pages.add(first.item.index);
       setPage(first.item.index);
     }
@@ -669,7 +682,6 @@ export default function MangaReader({
         width={W}
         aspect={aspects[item.index] ?? 1.45}
         onAspect={(a) => setAspects((m) => (Math.abs((m[item.index] ?? 0) - a) < 0.001 ? m : { ...m, [item.index]: a }))}
-        onTap={toggleChrome}
         onLong={() => setPageMenu(item.index)}
       />
     );
@@ -729,7 +741,7 @@ export default function MangaReader({
             </TouchableOpacity>
           </View>
         ) : mode === 'webtoon' ? (
-          <ZoomStrip width={W} height={H} resetKey={chapter.id} lastScrollAt={scrolledAt}>
+          <ZoomStrip width={W} height={H} resetKey={chapter.id} lastScrollAt={scrolledAt} onTap={toggleChrome}>
           <FlatList
             key={`strip:${chapter.id}`}
             ref={listRef}
@@ -782,7 +794,7 @@ export default function MangaReader({
 
         {/* The left edge belongs to the swipe that closes the reader: the strip and the
             pages scroll under fingers anywhere else, but would take this swipe first. */}
-        <View style={s.edge} />
+        {mode === 'webtoon' && <View style={s.edge} />}
 
 
         {chrome && count > 0 && (

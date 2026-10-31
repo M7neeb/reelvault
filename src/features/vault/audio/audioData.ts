@@ -498,7 +498,21 @@ export function useAudioData(): AudioData {
   );
 
   const boostedSet = useMemo(() => new Set(prefs.boosted), [prefs.boosted]);
-  const items = useMemo(() => all.filter((i) => !i.deletedAt).map((i) => asUi(i, boostedSet)), [all, boostedSet]);
+  // Each item made ready once: saving your place every 10 s changes one item, not all (and no disk checks for the rest).
+  const uiCache = useRef<{ boosted: Set<string>; map: WeakMap<AudioItem, AudioUiItem> }>({ boosted: boostedSet, map: new WeakMap() });
+  if (uiCache.current.boosted !== boostedSet) uiCache.current = { boosted: boostedSet, map: new WeakMap() };
+  const items = useMemo(
+    () =>
+      all
+        .filter((i) => !i.deletedAt)
+        .map((i) => {
+          const c = uiCache.current.map;
+          let u = c.get(i);
+          if (!u) c.set(i, (u = asUi(i, boostedSet)));
+          return u;
+        }),
+    [all, boostedSet]
+  );
   const deleted = useMemo(() => all.filter((i) => i.deletedAt).map((i) => asUi(i)), [all]);
-  return { items, deleted, busy, status, duplicateAsk, actions, prefs };
+  return useMemo(() => ({ items, deleted, busy, status, duplicateAsk, actions, prefs }), [items, deleted, busy, status, duplicateAsk, actions, prefs]);
 }

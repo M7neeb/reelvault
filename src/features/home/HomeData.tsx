@@ -5,7 +5,7 @@
  * routes read them with useHome().
  */
 
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { useRouter, type Href } from 'expo-router';
 
@@ -42,7 +42,7 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
   const audio = useAudioData();
   const manga = useMangaData();
   const system = useColorScheme();
-  const palette = themeFor(resolveScheme(vault.viewOptions.theme, system), vault.viewOptions);
+  const palette = useMemo(() => themeFor(resolveScheme(vault.viewOptions.theme, system), vault.viewOptions), [vault.viewOptions, system]);
   const router = useRouter();
 
   // Settings → Personalise → Turn with the phone: the whole app, or only the player.
@@ -55,7 +55,8 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
     if (simkl.openRequest) router.navigate(ROUTE_FOR[simkl.openRequest.type] as Href);
   }, [simkl.openRequest, router]);
 
-  return <HomeContext.Provider value={{ vault, simkl, audio, manga, palette }}>{children}</HomeContext.Provider>;
+  const value = useMemo(() => ({ vault, simkl, audio, manga, palette }), [vault, simkl, audio, manga, palette]);
+  return <HomeContext.Provider value={value}>{children}</HomeContext.Provider>;
 }
 
 export function useHome(): Home {

@@ -34,7 +34,7 @@ import { Backdrop } from '../frame';
 import { Confetti, CountUp, CoverWall, GrowBar, GrowColumn, KenBurns, Rays, Tilt } from '../storyKit';
 import { sheet, useStyles } from '../theme';
 import AudioCover from './AudioCover';
-import { useAudioPlaybackOptional } from './playback';
+import { useAudioControlsOptional } from './playback';
 import type { AudioUiItem } from './audioTypes';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -144,21 +144,29 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
     p.loop = true;
     p.volume = 0;
   });
+  const pausedRef = useRef(false);
+  const lastUri = useRef<string | null>(null);
   useEffect(() => {
     const top = data.top.map((t) => byId.get(t.id)).filter((x): x is AudioUiItem => !!x && x.trackUris.length > 0);
     if (!top.length) return;
     const it = top[cardIndex % top.length];
     const track = it.trackUris.length > 1 ? (cardIndex * 7) % it.trackUris.length : 0;
     const frac = 0.15 + ((cardIndex * 37) % 60) / 100;
+    const uri = it.trackUris[track];
+    // Its length is known from the library (the player only knows once the file is ready).
+    const lenMs = it.tracks[track]?.durationMs ?? (it.trackUris.length === 1 ? it.durationMs : null) ?? 0;
     let live = true;
     let fade: ReturnType<typeof setInterval> | null = null;
     player.volume = 0;
-    player
-      .replaceAsync({ uri: it.trackUris[track] })
+    // The same file as the card before: jump within it instead of loading it again (no gap, no click).
+    const ready = lastUri.current === uri ? Promise.resolve() : player.replaceAsync({ uri });
+    lastUri.current = uri;
+    ready
       .then(() => {
         if (!live) return;
-        if (player.duration > 0) player.currentTime = player.duration * frac;
-        player.play();
+        if (lenMs > 0) player.currentTime = (lenMs * frac) / 1000;
+        else if (player.duration > 0) player.currentTime = player.duration * frac;
+        if (!pausedRef.current) player.play();
         let v = 0;
         fade = setInterval(() => {
           v = Math.min(0.85, v + 0.08);
@@ -176,7 +184,7 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
     player.muted = muted;
   }, [muted, player]);
   // Your own audiobook pauses while the story plays its snippets, and carries on when the story closes.
-  const app = useAudioPlaybackOptional();
+  const app = useAudioControlsOptional();
   const appRef = useRef(app);
   appRef.current = app;
   useEffect(() => {
@@ -189,6 +197,7 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
   // Holding the screen pauses the story: the snippet pauses with it.
   const onPaused = useCallback(
     (p: boolean) => {
+      pausedRef.current = p;
       try {
         if (p) player.pause();
         else player.play();

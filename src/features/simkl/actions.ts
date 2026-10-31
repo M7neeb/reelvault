@@ -455,14 +455,24 @@ export async function fillMissingMeta(onProgress: (done: number, total: number) 
  * The Up Next cards want each title's wide picture, which only its detail page
  * has. After a sync, fetch it for what you are watching (a few at a time).
  */
+/** When each title's details were last asked for (this session): a title without any is not asked again for a day. */
+const artTried = new Map<string, number>();
+
 export async function prefetchArt(limit = 24): Promise<number> {
   const have = await metaMap();
   const want = (await listSimklItems())
     .filter((i) => !have.has(i.simklId) && (i.status === 'watching' || (i.type === 'movie' && i.status === 'plantowatch')))
     .sort((a, b) => Date.parse(b.lastWatchedAt ?? b.addedAt ?? '') - Date.parse(a.lastWatchedAt ?? a.addedAt ?? ''))
     .slice(0, limit);
-  for (const i of want) await loadDetail(i.type, i.simklId).catch(() => undefined);
-  return want.length;
+  // Count only the ones that now have their details (titles Simkl has none for are tried once a day, not every time).
+  let saved = 0;
+  for (const i of want) {
+    const k = `simkl.artTried.${i.simklId}`;
+    if (artTried.get(k) && Date.now() - artTried.get(k)! < 86_400_000) continue;
+    artTried.set(k, Date.now());
+    if (await loadDetail(i.type, i.simklId).then(() => true).catch(() => false)) saved++;
+  }
+  return saved;
 }
 
 /* ------------------------------------------------------- continue watching */

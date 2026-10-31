@@ -48,7 +48,7 @@ import { allowRotation, canRotate, lockSideways, lockUpright, restoreRotation } 
 import { CoverPicker } from './coverPicker';
 import { pauseLookingInside } from '../scenes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { AppState, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { GatedModal as Modal } from './screen';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
@@ -192,7 +192,7 @@ function ViewerPage({
     pl.staysActiveInBackground = opts.background;
     pl.showNowPlayingNotification = opts.background;
     if (enableVideo) pl.play();
-    pl.timeUpdateEventInterval = 0.2;
+    pl.timeUpdateEventInterval = 0.25;
   });
   useEffect(() => {
     player.loop = opts.endLoop;
@@ -465,14 +465,16 @@ function ViewerPage({
       .loadTags(item.id)
       .then(setVideoTags)
       .catch((e) => console.log(`[TAG] load failed: ${String(e)}`));
-  }, [item.id, actions]);
+    // Again when its keywords change, not after every rating elsewhere.
+  }, [item.id, item.tagCount, item.tagNames.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     actions
       .loadFrames(item)
       .then(setFrames)
       .catch((e) => console.log(`[FILM] failed: ${String(e)}`));
-  }, [item, actions]);
+    // Only for another video (or a new file of it): rating or tagging does not rebuild the filmstrip.
+  }, [item.id, item.uri, item.durationMs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Playhead + auto-scroll the strip.
   useEffect(() => {
@@ -480,8 +482,10 @@ function ViewerPage({
       if (scrubbing.current || Date.now() < holdUntil.current) return;
       const total = player.duration || (item.durationMs ?? 0) / 1000;
       if (!total) return;
-      const fraction = Math.min(1, Math.max(0, payload.currentTime / total));
-      setProgress(fraction);
+      // In the background (sound only) nobody sees the bar; and an unchanged bar is not redrawn.
+      if (AppState.currentState !== 'active') return;
+      const fraction = Math.round(Math.min(1, Math.max(0, payload.currentTime / total)) * 1000) / 1000;
+      setProgress((p) => (p === fraction ? p : fraction));
     });
     return () => sub.remove();
   }, [player, item.durationMs]);

@@ -35,7 +35,14 @@ test('statusGroups keeps what each title had, for Undo', () => {
     { id: '3', status: 'reading' },
   ]);
   assert.deepEqual(g, [
-    { status: 'reading', ids: ['1', '3'] },
-    { status: null, ids: ['2'] },
+    { status: 'reading', finishedAt: null, ids: ['1', '3'] },
+    { status: null, finishedAt: null, ids: ['2'] },
   ]);
+  // Completed titles keep their own finish day apart.
+  const h = statusGroups([
+    { id: 'a', status: 'completed', finishedAt: 5 },
+    { id: 'b', status: 'completed', finishedAt: 9 },
+  ]);
+  assert.equal(h.length, 2);
+  assert.deepEqual(h.map((x) => x.finishedAt), [5, 9]);
 });

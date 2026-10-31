@@ -493,7 +493,18 @@ export async function addFromSource(sourceId: string, d: SourceDetails, chapters
 const NOT_LINKED = 'This title came from a Tachimanga backup and is not linked to a source yet. Open it and tap Find on a source.';
 
 /** Asks a series' source for chapters you don't have yet. The ids of the chapters added. */
-export async function refreshSeries(seriesId: string, prefs: BrowsePrefs): Promise<string[]> {
+/** Titles being checked right now: a second check of the same title waits for the first (no chapters added twice). */
+const refreshing = new Map<string, Promise<string[]>>();
+
+export function refreshSeries(seriesId: string, prefs: BrowsePrefs): Promise<string[]> {
+  const running = refreshing.get(seriesId);
+  if (running) return running;
+  const p = refreshSeriesNow(seriesId, prefs).finally(() => refreshing.delete(seriesId));
+  refreshing.set(seriesId, p);
+  return p;
+}
+
+async function refreshSeriesNow(seriesId: string, prefs: BrowsePrefs): Promise<string[]> {
   const s = await getSeries(seriesId);
   if (!s?.sourceId || !s.sourceKey) return [];
   if (tachiSourceOf(s.sourceId)) throw new Error(NOT_LINKED);

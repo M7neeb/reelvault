@@ -111,7 +111,7 @@ import { DuplicatePrompt } from './dupPrompt';
 import AudioSection from './audio/AudioSection';
 import MangaSection from './manga/MangaSection';
 import type { MixVideos } from './manga/MangaWrapped';
-import { useAudioPlaybackOptional } from './audio/playback';
+import { useAudioControlsOptional } from './audio/playback';
 
 const EMPTY_RESUME = new Map<string, number>();
 const EMPTY_OVERVIEW: OverviewData = { kept: [], series: [], members: [] };
@@ -212,7 +212,8 @@ function VaultScreenBody({
       })
       .catch(() => undefined);
   };
-  useEffect(loadPlayCounts, [actions]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Once at start; again when a video closes (below). Not after every rating or tag (those change `actions`).
+  useEffect(loadPlayCounts, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The Monday notification was tapped: last week's Wrapped.
   useEffect(() => {
@@ -316,7 +317,7 @@ function VaultScreenBody({
     () => items.find((i) => i.id === dev?.viewerId) ?? null
   );
   // A video and an audiobook never play at once: opening a video pauses the audio.
-  const audioPlayback = useAudioPlaybackOptional();
+  const audioPlayback = useAudioControlsOptional();
   useEffect(() => {
     if (playing && audioPlayback?.playing) audioPlayback.pause();
   }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -489,7 +490,14 @@ function VaultScreenBody({
     [duplicateGroups, publicIds]
   );
   // Comparing every video with every other is work: only while Similar is on screen.
-  const needSimilar = filter.kind === 'similar' || sidebarOpen || dupReview === 'similar';
+  // The sidebar only shows how many similar groups there are: worked out once it has slid open, so it opens smoothly.
+  const [sidebarSettled, setSidebarSettled] = useState(false);
+  useEffect(() => {
+    if (!sidebarOpen) return setSidebarSettled(false);
+    const t = setTimeout(() => setSidebarSettled(true), 450);
+    return () => clearTimeout(t);
+  }, [sidebarOpen]);
+  const needSimilar = filter.kind === 'similar' || sidebarSettled || dupReview === 'similar';
   const similarGroups = useMemo(
     () =>
       !needSimilar
@@ -681,7 +689,7 @@ function VaultScreenBody({
   const seriesOf = useMemo(() => {
     const names = new Map(overview.series.map((x) => [x.id, x.name]));
     return new Map(overview.members.map((m) => [m.videoId, names.get(m.seriesId) ?? 'Series']));
-  }, [overview]);
+  }, [overview.series, overview.members]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));

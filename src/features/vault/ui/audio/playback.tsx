@@ -46,6 +46,14 @@ export type Playback = {
 
 const Ctx = createContext<Playback | null>(null);
 
+export type AudioControls = { playing: boolean; pause: () => void; resume: () => void };
+const ControlsCtx = createContext<AudioControls | null>(null);
+
+/** Is audio playing, and pause/resume; null outside a provider. Changes only when playing starts or stops. */
+export function useAudioControlsOptional(): AudioControls | null {
+  return useContext(ControlsCtx);
+}
+
 /** The player, or null outside a provider (screens that may run without audio). */
 export function useAudioPlaybackOptional(): Playback | null {
   return useContext(Ctx);
@@ -211,7 +219,8 @@ export function AudioPlaybackProvider({
           if (d > 0 && d < 5000) s.listened += d / Math.max(0.5, live.current.rate);
         }
         s.lastTime = ms;
-        setPosition(ms);
+        // With the screen off nobody sees the position: no redraws then (it is still saved below).
+        if (AppState.currentState === 'active') setPosition(ms);
         live.current.position = ms;
         if (live.current.playing && Date.now() - s.lastSave > SAVE_EVERY) save();
         // The sleep timer.
@@ -388,5 +397,14 @@ export function AudioPlaybackProvider({
 
   openRef.current = api.open;
 
-  return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
+  // Screens that only need "is it playing" and pause/resume get this one: it changes only when
+  // playing starts or stops, not with every half second of position.
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const controls = useMemo<AudioControls>(() => ({ playing, pause: () => apiRef.current.pause(), resume: () => apiRef.current.resume() }), [playing]);
+  return (
+    <ControlsCtx.Provider value={controls}>
+      <Ctx.Provider value={api}>{children}</Ctx.Provider>
+    </ControlsCtx.Provider>
+  );
 }

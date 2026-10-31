@@ -52,8 +52,13 @@ export default function SearchRoute() {
 
   // This week across every section, worked out again each time you open the tab.
   const [week, setWeek] = useState<WeekSummary | null>(null);
+  // Read through a ref: the summary is worked out when the tab opens, not again every time a list changes
+  // (audio saves its place every 10 s, downloads change manga all the time).
+  const src = useRef({ vault, audio, manga, simkl });
+  src.current = { vault, audio, manga, simkl };
   const loadWeek = useCallback(() => {
     let live = true;
+    const { vault, audio, manga, simkl } = src.current;
     (async () => {
       const shown = new Set(vault.items.filter((v) => !v.isPrivate).map((v) => v.id));
       const privateAudio = new Set(audio.items.filter((a) => a.isPrivate).map((a) => a.id));
@@ -78,7 +83,7 @@ export default function SearchRoute() {
     return () => {
       live = false;
     };
-  }, [vault.items, vault.actions, audio.items, audio.actions, manga.items, simkl.connected, simkl.bridge]);
+  }, []);
   useFocusEffect(loadWeek);
 
   const local = useMemo<LocalSearch>(() => {

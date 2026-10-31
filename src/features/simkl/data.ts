@@ -103,8 +103,9 @@ export function useSimklData() {
           await reload();
           await rescheduleReminders().catch((e) => console.log(`[NOTIFY] ${String(e)}`));
         }
-        // Wide pictures for the Up Next cards, in the background.
-        prefetchArt()
+        // Wide pictures for the Up Next cards, in the background (only when something changed, not on every return to the app).
+        if (result.kind !== 'skipped')
+          prefetchArt()
           .then((n) => (n ? reload() : undefined))
           .catch(() => undefined);
         setStatus_(result.kind === 'synced' ? `Synced · ${result.changed} updated` : result.kind === 'unchanged' ? 'Up to date' : '');
@@ -307,18 +308,9 @@ export function useSimklData() {
     [connected, sync]
   );
 
-  return {
-    configured,
-    connected,
-    items,
-    syncing,
-    status,
-    lastSyncAt: lastSync,
-    actions,
-    lists,
-    prefs,
-    bridge,
-    openRequest,
-    clearOpenRequest: () => setOpenRequest(null),
-  };
+  const clearOpenRequest = useCallback(() => setOpenRequest(null), []);
+  return useMemo(
+    () => ({ configured, connected, items, syncing, status, lastSyncAt: lastSync, actions, lists, prefs, bridge, openRequest, clearOpenRequest }),
+    [configured, connected, items, syncing, status, lastSync, actions, lists, prefs, bridge, openRequest, clearOpenRequest]
+  );
 }
