@@ -283,7 +283,7 @@ function hash(s: string): number {
 
 /* ------------------------------------------------------------------ ranges */
 
-export type ReadRange = { start: number; end: number; label: string; kind: 'week' | 'month' | 'year' | 'custom' };
+export type ReadRange = { start: number; end: number; label: string; kind: 'week' | 'month' | 'year' | 'all' | 'custom' };
 
 /** This week first (Monday to now), then the weeks before. */
 export function recentWeekRanges(now: number, n: number): ReadRange[] {
@@ -320,6 +320,15 @@ export function yearRangeOf(year: number, now: number): ReadRange {
   const start = new Date(year, 0, 1).getTime();
   const end = Math.min(new Date(year + 1, 0, 1).getTime(), now + 1);
   return { start, end, label: String(year), kind: 'year' };
+}
+
+/** Everything, from the first day you read (a chapter finished or time kept) to now. */
+export function allTimeRange(series: MangaSeries[], reads: MangaRead[], now: number): ReadRange {
+  let first = now;
+  for (const r of reads) if (r.readMs > 0 && r.startedAt < first) first = r.startedAt;
+  for (const s of series) for (const c of s.chapters) if (c.readAt && c.readAt < first) first = c.readAt;
+  const d = new Date(first);
+  return { start: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(), end: now + 1, label: 'All time', kind: 'all' };
 }
 
 /** The years you read in, newest first. */

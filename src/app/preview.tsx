@@ -56,7 +56,9 @@ import type { SimklWrap } from '@/features/simkl/simklWrapped';
 /** A made-up year of watching for the Simkl Wrapped in the preview (posters are not reachable here). */
 function previewSimklWrap(): SimklWrap {
   const y = new Date().getFullYear();
-  const top = FIXTURE_SIMKL.slice(0, 5).map((t, i) => ({ simklId: t.simklId, title: t.title, poster: null, type: t.type, minutes: 900 - i * 120, count: 30 - i * 4, rating: 9 - i * 0.5 }));
+  // `&posters`: poster paths (the screenshot script serves pictures for them), else none.
+  const withPosters = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('posters');
+  const top = FIXTURE_SIMKL.slice(0, 5).map((t, i) => ({ simklId: t.simklId, title: t.title, poster: withPosters ? `preview/p${i}` : null, fanart: withPosters ? `preview/f${i}` : null, type: t.type, minutes: 900 - i * 120, count: 30 - i * 4, rating: 9 - i * 0.5 }));
   return {
     range: { start: new Date(y, 0, 1).getTime(), end: new Date(y + 1, 0, 1).getTime(), label: String(y), kind: 'year' },
     minutes: 5400,

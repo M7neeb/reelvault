@@ -13,9 +13,13 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { ZoomIn } from 'react-native-reanimated';
 
-import { FilmStrips, ImageRiver, Scanlines, Tint } from '@/features/vault/ui/scenes';
-import { GiantRank, PanelMontage, StreakChain } from '@/features/vault/ui/manga/mangaKit';
-import { KenBurns } from '@/features/vault/ui/storyKit';
+import { ImageRiver, Scanlines } from '@/features/vault/ui/scenes';
+import { GiantRank, PanelMontage, StreakChain, type Pic } from '@/features/vault/ui/manga/mangaKit';
+import { PicScene } from '@/features/vault/ui/manga/pageScenes';
+import { SCREEN_SEQUENCE, type Layout } from '@/features/vault/manga/pageDirector';
+
+/** The countdown's looks, one per place (#5 to #2). */
+const RANK_SCREEN: Layout[] = ['kenburns', 'poster', 'orbit', 'cinema'];
 import { StoryDeck, useStoryText, type DeckCard } from '@/features/vault/ui/storyDeck';
 import { Confetti, CountUp, CoverWall, GrowColumn, Rays, Tilt } from '@/features/vault/ui/storyKit';
 import { success, warn } from '@/features/vault/ui/haptics';
@@ -79,35 +83,30 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
   // Behind every card: your shows and films themselves, never a plain colour. The look changes from card to card:
   // a title's picture whole over a blurred copy of itself (like a cinema screen), posters flowing by,
   // film strips rolling, or two posters side by side.
+  // One list of pictures, wide stills and posters taking turns, for the scenes.
+  const scenePics = useMemo<Pic[]>(() => {
+    const out: Pic[] = [];
+    const n = Math.max(sceneWide.length, scenePosters.length);
+    for (let k = 0; k < n; k++) {
+      if (sceneWide[k] && !scenePosters.some((p) => p.uri === sceneWide[k].uri)) out.push({ source: sceneWide[k], aspect: 0.5625 });
+      if (scenePosters[k]) out.push({ source: scenePosters[k], aspect: 1.5 });
+    }
+    return out;
+  }, [scenePosters, sceneWide]);
+  // Behind every card: your shows and films themselves, in one of sixteen looks that change from card to
+  // card (a slow camera over a still, posters flowing, widescreen cuts, stills tossed on a table, film
+  // strips, posters in orbit...), never the same look twice in a row.
   const ambient = useCallback(
-    (_card: DeckCard, i: number) => {
-      if (!scenePosters.length && !sceneWide.length)
-        return (
-          // Nothing to show at all: a projector's beam turning slowly.
-          <View style={{ position: 'absolute', top: '-30%', left: '-30%' }}>
-            <Rays size={1400} count={22} opacity={0.09} />
-          </View>
-        );
-      const v = i % 4;
-      const wide = sceneWide.length ? sceneWide[i % sceneWide.length] : scenePosters[i % scenePosters.length];
-      if (v === 0 || !scenePosters.length) return <KenBurns source={wide} ms={9000} seed={i} />;
-      if (v === 1) return <ImageRiver sources={scenePosters} columns={3} aspect={1.5} tilt={-9} />;
-      if (v === 2) return <FilmStrips sources={[...sceneWide, ...scenePosters]} count={3} frame={92} />;
-      const a = scenePosters[i % scenePosters.length];
-      const b = scenePosters[(i + 1) % scenePosters.length];
-      return (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', backgroundColor: '#000' }}>
-          <View style={{ flex: 1 }}>
-            <KenBurns source={a} ms={9000} fill seed={i} />
-          </View>
-          <View style={{ width: 4, backgroundColor: '#000' }} />
-          <View style={{ flex: 1 }}>
-            <KenBurns source={b} ms={9000} fill seed={i + 5} />
-          </View>
+    (_card: DeckCard, i: number) =>
+      scenePics.length ? (
+        <PicScene i={i} pics={scenePics} seq={SCREEN_SEQUENCE} />
+      ) : (
+        // Nothing to show at all: a projector's beam turning slowly.
+        <View style={{ position: 'absolute', top: '-30%', left: '-30%' }}>
+          <Rays size={1400} count={22} opacity={0.09} />
         </View>
-      );
-    },
-    [scenePosters, sceneWide]
+      ),
+    [scenePics]
   );
 
   const cards = useMemo<DeckCard[]>(() => {
@@ -282,12 +281,15 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
           colors: rankColors[(5 - r) % rankColors.length],
           ms: 4600,
           solid: !!t.poster,
+          // Each place in the countdown its own look, built round the title's own pictures.
           backdrop: t.poster ? (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000' }}>
-              <KenBurns source={poster(t.poster)} ms={6000} fill seed={r} />
-              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} />
-              <Scanlines opacity={0.18} />
-            </View>
+            <PicScene
+              i={5 - r}
+              pics={scenePics}
+              lead={[{ source: poster(t.poster), aspect: 1.5 }, ...(t.fanart ? [{ source: { uri: fanartUrl(t.fanart)! }, aspect: 0.5625 }] : [])]}
+              seq={RANK_SCREEN}
+              dim={0.3}
+            />
           ) : undefined,
           body: (
             <>

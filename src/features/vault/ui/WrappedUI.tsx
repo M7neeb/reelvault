@@ -48,6 +48,7 @@ import { gradient, iconOr, Medallion } from './insightParts';
 import { DUR, EASE_OUT, enterUp, PressableScale, SPRING, useReducedMotion } from './motion';
 import { Segment } from './sheets';
 import { FilmStrips, ImageRiver, Tint } from './scenes';
+import { LookFrame, lookFor, type VideoLook } from './videoLooks';
 import { Aurora, Confetti, CountUp, CoverWall, Float, GrowBar, GrowColumn, hexA, Marquee, Pulse, Rays, Tilt, Words } from './storyKit';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
@@ -425,6 +426,8 @@ type StoryCard = {
   focus?: 'words';
   /** Where its video starts, as a share of the video (0.15 = 15% in): a random part instead of the usual moment. */
   startFrac?: number;
+  /** The frame its video plays in (see videoLooks.tsx); the whole screen when not set. */
+  look?: VideoLook;
 };
 
 export type StoryInput = {
@@ -459,7 +462,12 @@ function StoryMedia({
   muted,
   paused,
   onCurrent,
+  decor = [],
+  seed = 0,
 }: {
+  /** Thumbnails of your other videos, for the frames round the video. */
+  decor?: NonNullable<VaultItem['thumbSource']>[];
+  seed?: number;
   card: StoryCard;
   items: Map<string, VaultItem>;
   starts: Map<string, number>;
@@ -537,6 +545,24 @@ function StoryMedia({
   const { width: sw, height: sh } = useWindowDimensions();
   const fit = fitFor(aspectOf(item), sw / sh);
 
+  const look = card.look ?? 'full';
+  if (item && look !== 'full') {
+    // In a frame shaped like the video: it fills the frame and still shows whole (the circle crops a little).
+    const others = decor.filter((d) => d !== item.thumbSource);
+    return (
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <LookFrame key={card.key} look={look} aspect={aspectOf(item)} decor={others} cover={item.thumbSource ?? undefined} seed={seed}>
+          {enableVideo ? (
+            <VideoView pointerEvents="none" player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+          ) : (
+            <Animated.View key={current} entering={FadeIn.duration(DUR.slow)} style={[StyleSheet.absoluteFill, zoomStyle]}>
+              <Image source={item.thumbSource} style={StyleSheet.absoluteFill} contentFit="cover" />
+            </Animated.View>
+          )}
+        </LookFrame>
+      </View>
+    );
+  }
   return (
     <View style={[StyleSheet.absoluteFill, !item && { opacity: 0 }]} pointerEvents="none">
       {/* The whole video shows, over a blurred copy of itself where it doesn't fill the screen. */}
@@ -1719,6 +1745,9 @@ export function WrappedStory({
       c.startFrac = 0.15 + (((k * 37 + c.key.length * 11) % 60) / 100);
       k++;
     }
+    // A different frame for the video from card to card (the opening and your #1 fill the screen).
+    const looks = lookFor(out.map((c) => ({ key: c.key, media: c.media.filter((id) => items.has(id)) })), ['top1', 'intro', 'everything', 'videos']);
+    for (const c of out) c.look = looks.get(c.key);
     return out;
   }, [input, thumbs, width, height, reduce, memories]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1840,7 +1869,7 @@ export function WrappedStory({
               <Aurora colors={card.colors} width={width} height={height} />
             </Animated.View>
             {scene}
-            <StoryMedia card={card} items={items} starts={starts} enableVideo={enableVideo} muted={muted} paused={paused} onCurrent={setNowId} />
+            <StoryMedia card={card} items={items} starts={starts} enableVideo={enableVideo} muted={muted} paused={paused} onCurrent={setNowId} decor={sceneSources} seed={i} />
             {videoFirst && (
               <View
                 pointerEvents="none"

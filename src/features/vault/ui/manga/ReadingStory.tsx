@@ -1,25 +1,30 @@
 /**
  * The reading Wrapped, told like a manga volume: a prologue, four chapters
- * and an epilogue, each opening with its own title page.
+ * and an epilogue, each opening with its own title page. Behind every card:
+ * your pages and covers, in one of eighteen layouts that change from card to card
+ * (pageScenes.tsx).
  *
  * - Prologue: quick cuts through the panels of what you read, then the year
- *   (or month, or week) on a wall of your covers.
+ *   (or month, or week).
  * - Chapter 1, The Numbers: guess your hours, your time counted up against the
  *   time before, the pages you turned as a stack of paper, what it all adds up
- *   to (films, days, how high the paper, how far the long strips scrolled).
+ *   to (films, days, printed volumes), and how far your thumb scrolled long
+ *   strips, against the Eiffel Tower and friends.
  * - Chapter 2, Your Stories: guess your #1, the top five counted down with each
- *   title's own pages scrolling or turning behind it, the #1 with confetti, how
- *   you met it and your binge day with it, your favourite, a hidden gem and a
- *   throwback.
+ *   title's own pages behind it, the #1 with confetti, how you met it and your
+ *   binge day with it, name that panel (a page up close: which title?), your
+ *   favourite, a hidden gem and a throwback.
  * - Chapter 3, Your Habits: every day of the range as a calendar, the year
- *   month by month, your biggest day, a guess and a 24-hour clock of when you
- *   read, your favourite weekday, your longest sitting, your streak in flames,
- *   how your pages turned and how fast.
+ *   month by month, a page a month (what you read most in each), your biggest
+ *   day, a guess and a 24-hour clock of when you read, your longest sitting,
+ *   your streak in flames, how your pages turned, and your speed, with pages
+ *   turning behind it at your own pace.
  * - Chapter 4, Your Taste: manga or manhwa or comics, genres, your author,
  *   your ratings and the harshest one, what you started (a fan of covers),
  *   finished (a shelf), dropped, and your first and last chapter.
- * - Epilogue: then vs now, your badges, the kind of reader you are, "to be
- *   continued" with the chapters waiting for you, and a card to share.
+ * - Epilogue: then vs now, your badges, the kind of reader you are, the very
+ *   page you stopped on, "to be continued" with the chapters waiting for you,
+ *   and a card to share.
  * A Videos + Manga Wrapped adds who won, your #1 video and mornings vs nights.
  * Presentational only.
  */
@@ -33,17 +38,20 @@ import { fmtLength } from '../../audio/audioLogic';
 import { chapterLabel, fmtRating, type MangaChapter, type MangaRead } from '../../manga/mangaLogic';
 import { kindLabel, mixNumbers, type MixPlay, type ReadRange } from '../../manga/mangaInsights';
 import { chapterToShow, MODE_LABEL, wrappedStory } from '../../manga/mangaWrapped';
+import { scrollCompare } from '../../manga/pageDirector';
 import type { ImageRef } from '../../manga/sources/types';
 import { canSnap, shareSnap } from '../../snap';
 import { success, warn } from '../haptics';
 import Icon from '../Icon';
 import { StoryDeck, useStoryText, type DeckCard } from '../storyDeck';
-import { Confetti, CountUp, CoverWall, GrowBar, GrowColumn, Rays, Tilt } from '../storyKit';
+import { Confetti, CountUp, GrowBar, GrowColumn, Rays, Tilt } from '../storyKit';
 import { sheet, useStyles } from '../theme';
 import type { ThumbSource } from '../types';
 import MangaCover from './MangaCover';
-import { Panel, Screentone, SfxSet, ImageRiver, Tint } from '../scenes';
-import { BadgeGrid, cachedLoader, ChapterArt, MangaScene, usePagePool, ClockDial, CoverFan, GiantRank, Heatmap, MultiMontage, PageStack, RatingBars, Shelf, StreakChain, TextQuiz, TitleBackdrop, TitleChip, type PageLoader } from './mangaKit';
+import { SfxSet } from '../scenes';
+import { BadgeGrid, cachedLoader, ChapterArt, ClockDial, CoverFan, GiantRank, Heatmap, PageStack, RatingBars, Shelf, StreakChain, TextQuiz, TitleChip, type PageLoader } from './mangaKit';
+import { BankMontage, PageBankProvider, PageScene, useBankLoader } from './pageScenes';
+import { PageTimeline, PanelQuiz, RacingStrip, SpeedFlip, StopPage } from './readingExtras';
 import type { MangaUiSeries } from './mangaTypes';
 
 /** Your videos, for a Videos + Manga Wrapped. */
@@ -144,13 +152,7 @@ export function RangeWrapped({
       if (!ser) return [];
       const cid = chapterToShow(ser, range.start, range.end);
       const ch = ser.chapters.find((c) => c.id === cid);
-      if (!ch) return [];
-      // Not on the phone and from a backup or a server title that needs repairing first:
-      // the cover is enough (a Wrapped never changes your library).
-      if (!(ch.folder && ch.pages.length)) {
-        if (!ser.sourceId || ser.sourceId.startsWith('tachi:')) return [];
-        if (/^server:.*:library$/.test(ser.sourceId) && !/^\d+$/.test(ch.sourceKey ?? '')) return [];
-      }
+      if (!ch || !reachable(ser, ch)) return [];
       return loadPages(ser, ch);
     });
   }, [loadPages, byId, range.start, range.end]);
@@ -167,24 +169,34 @@ export function RangeWrapped({
   // All the numbers, worked out once.
   const st = useMemo(() => wrappedStory(items, reads, range.start, range.end, now, prevStart), [items, reads, range.start, range.end, now, prevStart]);
   const topIds = useMemo(() => st.titles.map((t) => t.id), [st]);
-  const pool = usePagePool(load, topIds);
   const coverPool = useMemo(
     () => [...topIds.map((id) => byId.get(id)?.coverSource), ...items.filter((i) => i.lastReadAt).map((i) => i.coverSource)].filter(Boolean).slice(0, 18) as ThumbSource[],
     [topIds, items, byId]
   );
-  // Behind every card: your manga itself (see MangaScene), never a plain colour.
-  const ambient = useCallback((_card: DeckCard, i: number) => <MangaScene load={load} ids={topIds} index={i} pool={pool} covers={coverPool} />, [load, topIds, pool, coverPool]);
+  // Pages for every card: your top titles first, then everything else you read in the range
+  // (latest first), then titles with chapters on the phone, so there are many to choose from.
+  const bankIds = useMemo(() => {
+    const inRange = (t: number | null | undefined) => typeof t === 'number' && t >= range.start && t < range.end;
+    const readNow = items.filter((i) => inRange(i.lastReadAt) || i.chapters.some((c) => inRange(c.readAt))).sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0));
+    const onPhone = items.filter((i) => i.chapters.some((c) => c.folder && c.pages.length > 2));
+    const out: string[] = [];
+    for (const id of [...topIds, ...readNow.map((i) => i.id), ...onPhone.map((i) => i.id)]) if (!out.includes(id)) out.push(id);
+    return out.slice(0, 18);
+  }, [topIds, items, range.start, range.end]);
+  const bank = useBankLoader(load, bankIds, coverPool);
+  // Behind every card: your manga itself (see pageScenes.tsx), never a plain colour.
+  const ambient = useCallback((_card: DeckCard, i: number) => <PageScene i={i} />, []);
 
   const cards = useMemo<DeckCard[]>(() => {
     const { y, w } = st;
     const mix = videos ? mixNumbers(videos.plays, y, reads) : null;
     const get = (id: string | null | undefined) => (id ? byId.get(id) : undefined);
-    const covers = [...y.top.map((t) => get(t.id)?.coverSource), ...items.filter((i) => i.lastReadAt).map((i) => i.coverSource)].filter(Boolean).slice(0, 24) as ThumbSource[];
     const top = st.titles.map((t) => ({ ...t, s: get(t.id)! })).filter((t) => t.s);
     const isYear = range.kind === 'year';
+    const isAll = range.kind === 'all';
     const sameBefore = isYear ? 'this time last year' : range.kind === 'month' ? 'the same days last month' : range.kind === 'week' ? 'the same days last week' : 'the time before';
     const span = isYear ? 'year' : range.kind === 'month' ? 'month' : range.kind === 'week' ? 'week' : 'time';
-    const when = isYear || range.kind === 'month' ? `in ${range.label}` : range.label === 'This week' ? 'this week' : range.label === 'Last week' ? 'last week' : `from ${range.label}`;
+    const when = isAll ? `since ${monthYear(range.start)}` : isYear || range.kind === 'month' ? `in ${range.label}` : range.label === 'This week' ? 'this week' : range.label === 'Last week' ? 'last week' : `from ${range.label}`;
     const nothing = !y.chapters && !y.ms && !(mix && mix.watchMs);
     const out: DeckCard[] = [];
 
@@ -204,7 +216,7 @@ export function RangeWrapped({
         backdrop: (
           <>
             <Rays size={1400} count={56} opacity={0.12} />
-            <ChapterArt load={load} ids={montageIds} seed={n} />
+            <ChapterArt seed={n} />
           </>
         ),
         body: (
@@ -226,7 +238,7 @@ export function RangeWrapped({
         colors: ['#000000', '#000000'],
         ms: 3400,
         solid: true,
-        backdrop: <MultiMontage load={load} ids={montageIds} covers={covers} />,
+        backdrop: <BankMontage />,
         body: (
           <View style={{ alignItems: 'center', gap: 8 }}>
             {s.kicker(mix ? 'VIDEOS + MANGA' : 'PREVIOUSLY, ON YOUR READING…', 0)}
@@ -239,7 +251,6 @@ export function RangeWrapped({
       key: 'intro',
       colors: mix ? ['#BF5AF2', '#16052B'] : ['#FF375F', '#2B0612'],
       ms: 5200,
-      backdrop: covers.length ? <CoverWall sources={covers} opacity={0.5} /> : undefined,
       body: (
         <>
           {s.kicker(mix ? 'VIDEOS + MANGA WRAPPED' : 'YOUR READING WRAPPED', 0)}
@@ -249,7 +260,7 @@ export function RangeWrapped({
               ? `Nothing ${mix ? 'watched or read' : 'read'} ${when} yet. Open a chapter and come back.`
               : mix
                 ? `${orDash(mix.totalMs)} of videos and manga ${when}, on ${plural(mix.days, 'day')}.`
-                : `${plural(y.chapters, 'chapter')}${y.ms ? `, ${fmtLength(y.ms)}` : ''}, ${plural(y.titles, 'title')}. Let's look back.`,
+                : `${plural(y.chapters, 'chapter')}${y.ms ? `, ${fmtLength(y.ms)}` : ''}, ${plural(y.titles, 'title')}${isAll ? ` since ${monthYear(range.start)}. Your whole reading story` : `. Let's look back`}.`,
             2
           )}
         </>
@@ -285,7 +296,7 @@ export function RangeWrapped({
         colors: ['#0A84FF', '#03142B'],
         ms: 6500,
         solid: !!top[0],
-        backdrop: top[0] ? <TitleBackdrop load={load} series={top[0].s} style="montage" dim={0.72} /> : undefined,
+        backdrop: top[0] ? <PageScene i={out.length} focus={top[0].s} dim={0.32} /> : undefined,
         body: (
           <>
             {s.kicker('YOU READ FOR', 0)}
@@ -344,11 +355,13 @@ export function RangeWrapped({
       });
     }
 
-    if (!mix && (st.adds.movies >= 1 || st.adds.stripKm >= 0.05)) {
-      const rows: { icon: 'film' | 'sun' | 'fast'; text: string }[] = [];
+    const volumes = Math.round(y.chapters / 9);
+    if (!mix && (st.adds.movies >= 1 || volumes >= 2)) {
+      const rows: { icon: 'film' | 'sun' | 'book'; text: string }[] = [];
       if (st.adds.movies >= 1) rows.push({ icon: 'film', text: `${st.adds.movies >= 10 ? Math.round(st.adds.movies) : st.adds.movies} films back to back` });
       if (st.adds.fullDays >= 1) rows.push({ icon: 'sun', text: `${st.adds.fullDays} full ${st.adds.fullDays === 1 ? 'day and night' : 'days and nights'} without stopping` });
-      if (st.adds.stripKm >= 0.05) rows.push({ icon: 'fast', text: `${st.adds.stripKm >= 1 ? `${st.adds.stripKm.toFixed(1)} km` : `${Math.round(st.adds.stripKm * 1000)} m`} of long strip scrolled with your thumb` });
+      // A printed volume holds about nine chapters.
+      if (volumes >= 2) rows.push({ icon: 'book', text: `about ${volumes.toLocaleString()} printed volumes on a shelf` });
       out.push({
         key: 'adds',
         colors: ['#30D158', '#05210E'],
@@ -366,6 +379,32 @@ export function RangeWrapped({
                 </Animated.View>
               ))}
             </View>
+          </>
+        ),
+      });
+    }
+
+    // How far your thumb scrolled long strips, against things you could climb.
+    const metres = Math.round(st.adds.stripKm * 1000);
+    const vs = scrollCompare(metres);
+    if (!mix && vs && metres >= 50) {
+      out.push({
+        key: 'scroll',
+        colors: ['#64D2FF', '#03202B'],
+        ms: 6500,
+        solid: true,
+        backdrop: (
+          <>
+            <RacingStrip />
+            <SfxSet kind="rush" color="#64D2FF" />
+          </>
+        ),
+        body: (
+          <>
+            {s.kicker('YOUR THUMB SCROLLED', 0)}
+            <CountUp to={metres} format={(m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`)} style={styles.count} delay={200} ms={1700} />
+            {s.line(`of long strip. That's ${vs.times >= 1.05 ? `${vs.times}× ` : ''}${vs.name}${vs.times < 0.95 ? `, ${Math.round(vs.times * 100)}% of the way` : ''}.`, 2)}
+            {s.line('(A long-strip chapter is about 4 m of scrolling.)', 4)}
           </>
         ),
       });
@@ -409,7 +448,7 @@ export function RangeWrapped({
         solid: true,
         backdrop: (
           <>
-            <TitleBackdrop load={load} series={t.s} dim={0.6} />
+            <PageScene i={out.length} focus={t.s} dim={0.2} />
             {r === 2 && <SfxSet kind="menace" />}
           </>
         ),
@@ -437,7 +476,7 @@ export function RangeWrapped({
         solid: true,
         backdrop: (
           <>
-            <TitleBackdrop load={load} series={one.s} dim={0.5} />
+            <PageScene i={out.length} focus={one.s} dim={0.1} />
             <SfxSet kind="impact" color="#FFD60A" />
             <View style={{ position: 'absolute', alignSelf: 'center', top: '20%' }}>
               <Rays size={1000} color="#FFD60A" opacity={0.18} />
@@ -446,7 +485,7 @@ export function RangeWrapped({
         ),
         body: (
           <>
-            {s.kicker(mix ? 'YOUR #1 MANGA' : `YOUR #1 OF THE ${span.toUpperCase()}`, 0)}
+            {s.kicker(mix ? 'YOUR #1 MANGA' : isAll ? 'YOUR #1 OF ALL TIME' : `YOUR #1 OF THE ${span.toUpperCase()}`, 0)}
             <Tilt rotate={-3} delay={200}>
               <MangaCover series={one.s} width={160} radius={14} />
             </Tilt>
@@ -467,19 +506,38 @@ export function RangeWrapped({
           colors: ['#FF9F0A', '#2B1500'],
           ms: 6500,
           solid: true,
-          backdrop: <TitleBackdrop load={load} series={one.s} dim={0.68} style={one.s.readingMode === 'webtoon' ? 'strip' : 'flip'} />,
+          backdrop: <PageScene i={out.length} focus={one.s} dim={0.28} />,
           body: (
             <>
               {s.kicker('YOU AND YOUR #1', 0)}
               <TitleChip series={one.s} sub={one.s.author ?? undefined} />
               {one.metAt && s.big(one.metAt < range.start ? `Since ${monthYear(one.metAt)}` : `Met on ${new Date(one.metAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}`, 2)}
-              {one.metAt && s.line(one.metAt < range.start ? 'An old friend you kept coming back to.' : `A new story that became your favourite of the ${span}.`, 3)}
+              {one.metAt && s.line(isAll ? 'The story you gave the most of your time to, ever.' : one.metAt < range.start ? 'An old friend you kept coming back to.' : `A new story that became your favourite of the ${span}.`, 3)}
               {one.binge && s.line(`Your binge: ${plural(one.binge.chapters, 'chapter')} in one day, ${longDay(one.binge.day)}.`, 4)}
               {one.sessions > 1 && s.line(`${plural(one.sessions, 'sitting')}, from ${new Date(one.firstAt!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} to ${new Date(one.lastAt!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}.`, 5)}
             </>
           ),
         });
       }
+    }
+
+    // Name that panel: a page from one of your titles, up close.
+    if (top.length >= 3) {
+      const opts = [...top.slice(1, 4).map((t) => t.s), top[0].s];
+      out.push({
+        key: 'q-panel',
+        backdrop: <SfxSet kind="question" />,
+        colors: ['#FF375F', '#2B0612'],
+        ms: 16000,
+        interactive: true,
+        body: (
+          <>
+            {s.kicker('NAME THAT PANEL', 0)}
+            {s.big('Which title is this from?', 1)}
+            <PanelQuiz options={opts} seed={y.chapters + top.length} />
+          </>
+        ),
+      });
     }
 
     if (mix?.topVideo && videos) {
@@ -508,7 +566,7 @@ export function RangeWrapped({
         solid: true,
         backdrop: (
           <>
-            <TitleBackdrop load={load} series={fav} dim={0.62} />
+            <PageScene i={out.length} focus={fav} dim={0.22} />
             <SfxSet kind="heart" color="#FF375F" />
           </>
         ),
@@ -532,7 +590,7 @@ export function RangeWrapped({
         colors: ['#64D2FF', '#03202B'],
         ms: 5500,
         solid: true,
-        backdrop: <TitleBackdrop load={load} series={gem} dim={0.65} />,
+        backdrop: <PageScene i={out.length} focus={gem} dim={0.25} />,
         body: (
           <>
             {s.kicker('A HIDDEN GEM', 0)}
@@ -551,7 +609,7 @@ export function RangeWrapped({
         colors: ['#AC8E68', '#1E160C'],
         ms: 5500,
         solid: true,
-        backdrop: <TitleBackdrop load={load} series={back} dim={0.62} />,
+        backdrop: <PageScene i={out.length} focus={back} dim={0.22} />,
         body: (
           <>
             {s.kicker('A THROWBACK', 0)}
@@ -568,7 +626,28 @@ export function RangeWrapped({
     /* --------------------------------------------------- 3 · your habits */
     chapter(3, 'Your Habits', 'When, how long and how often.', ['#5E5CE6', '#090820']);
 
-    if (st.calendar.length >= 7) {
+    if (isAll && st.periods.length >= 2) {
+      // Years side by side (a calendar of every day would be far too long).
+      const readDays = st.calendar.filter((c) => c.v > 0).length;
+      const most = Math.max(1, ...st.periods.map((p) => p.weight));
+      const best = st.periods.reduce((b, p) => (p.weight > b.weight ? p : b), st.periods[0]);
+      out.push({
+        key: 'years',
+        colors: ['#30D158', '#041A0B'],
+        ms: 7000,
+        body: (
+          <>
+            {s.kicker('YEAR BY YEAR', 0)}
+            {s.big(`${best.label} was your year`, 1)}
+            {s.bars(
+              st.periods.map((p) => ({ label: p.label, share: p.weight / most, sub: p.weight ? fmtLength(p.weight) : '-' })),
+              2
+            )}
+            {s.line(`${plural(readDays, 'day')} with manga out of ${plural(st.calendar.length, 'day')} since you started.`, 4)}
+          </>
+        ),
+      });
+    } else if (st.calendar.length >= 7) {
       const readDays = st.calendar.filter((c) => c.v > 0).length;
       out.push({
         key: 'calendar',
@@ -628,6 +707,26 @@ export function RangeWrapped({
           ),
         });
       }
+    }
+
+    // A page for each part of the range: what you were reading month by month (or week, or day).
+    const parts = st.periods.filter((p) => p.seriesId).length;
+    if (parts >= 3) {
+      const unit = isAll ? 'year' : isYear ? 'month' : range.kind === 'month' ? 'week' : 'day';
+      const stories = new Set(st.periods.map((p) => p.seriesId).filter(Boolean)).size;
+      out.push({
+        key: 'timeline',
+        colors: ['#BF5AF2', '#1C0533'],
+        ms: 8000,
+        body: (
+          <>
+            {s.kicker(`A PAGE A ${unit.toUpperCase()}`, 0)}
+            {s.big(stories === 1 ? `One story, every ${unit}` : `${stories} stories, ${unit} by ${unit}`, 1)}
+            <PageTimeline periods={st.periods} byId={byId} />
+            {s.line(`What you were reading most, each ${unit} ${when}.`, 3)}
+          </>
+        ),
+      });
     }
 
     if (y.busiestDay && (y.busiestDay.ms || y.busiestDay.chapters > 1)) {
@@ -707,7 +806,7 @@ export function RangeWrapped({
         solid: !!sitTitle,
         backdrop: (
           <>
-            {sitTitle && <TitleBackdrop load={load} series={sitTitle} dim={0.66} style="strip" />}
+            {sitTitle && <PageScene i={out.length} focus={sitTitle} dim={0.26} />}
             <SfxSet kind="menace" color="#FF453A" />
           </>
         ),
@@ -755,6 +854,25 @@ export function RangeWrapped({
               2
             )}
             {st.secondsPerPage !== null && s.line(`About a page every ${st.secondsPerPage} seconds.${st.secondsPerPage <= 6 ? ' Fast!' : ''}`, 4)}
+          </>
+        ),
+      });
+    }
+
+    if (st.secondsPerPage !== null && st.secondsPerPage > 0) {
+      const spp = st.secondsPerPage;
+      out.push({
+        key: 'speed',
+        colors: ['#FF9F0A', '#2B1500'],
+        ms: 7000,
+        solid: true,
+        backdrop: <SpeedFlip secondsPerPage={spp} />,
+        body: (
+          <>
+            {s.kicker('YOUR READING SPEED', 0)}
+            {s.huge(`${spp} s`, 1)}
+            {s.line(`a page. Behind this card, pages turn at your pace${spp < 1 ? ' (slowed down so you can see them)' : ''}.`, 2)}
+            {s.line(`That's about ${Math.round(3600 / spp).toLocaleString()} pages an hour.${spp <= 4 ? ' Blink and you miss it.' : spp >= 15 ? ' You take in every panel.' : ''}`, 3)}
           </>
         ),
       });
@@ -895,7 +1013,7 @@ export function RangeWrapped({
 
     const firstS = get(st.firstChapter?.seriesId);
     const lastS = get(st.lastChapter?.seriesId);
-    if (firstS && st.firstChapter && (isYear || range.kind === 'month')) {
+    if (firstS && st.firstChapter && (isYear || range.kind === 'month' || isAll)) {
       const fc = firstS.chapters.find((c) => c.id === st.firstChapter!.chapterId);
       const lc = lastS?.chapters.find((c) => c.id === st.lastChapter?.chapterId);
       out.push({
@@ -904,13 +1022,13 @@ export function RangeWrapped({
         ms: 6000,
         body: (
           <>
-            {s.kicker('FIRST AND LAST', 0)}
-            {s.line(`Your ${span} opened with`, 1)}
-            <TitleChip series={firstS} sub={`${fc ? chapterLabel(fc, true) : 'a chapter'} · ${new Date(st.firstChapter.at).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}`} />
+            {s.kicker(isAll ? 'WHERE IT ALL BEGAN' : 'FIRST AND LAST', 0)}
+            {s.line(isAll ? 'Your very first chapter' : `Your ${span} opened with`, 1)}
+            <TitleChip series={firstS} sub={`${fc ? chapterLabel(fc, true) : 'a chapter'} · ${new Date(st.firstChapter.at).toLocaleDateString(undefined, isAll ? { day: 'numeric', month: 'long', year: 'numeric' } : { day: 'numeric', month: 'long' })}`} />
             {lastS && st.lastChapter && (
               <>
-                {s.line(lastS.id === firstS.id ? '…and, all this time later, it is still' : 'and so far it ends with', 3)}
-                <TitleChip series={lastS} sub={`${lc ? chapterLabel(lc, true) : 'a chapter'} · ${new Date(st.lastChapter.at).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}`} />
+                {s.line(isAll ? (lastS.id === firstS.id ? '…and your latest is still the same story' : 'and your latest') : lastS.id === firstS.id ? '…and, all this time later, it is still' : 'and so far it ends with', 3)}
+                <TitleChip series={lastS} sub={`${lc ? chapterLabel(lc, true) : 'a chapter'} · ${new Date(st.lastChapter.at).toLocaleDateString(undefined, isAll ? { day: 'numeric', month: 'long', year: 'numeric' } : { day: 'numeric', month: 'long' })}`} />
               </>
             )}
           </>
@@ -918,8 +1036,45 @@ export function RangeWrapped({
       });
     }
 
+    // Milestones: your 1st, 50th, 100th, 1,000th chapter (all time, or a year).
+    const marks = st.milestones.filter((m) => m.n === 1 || m.n >= 50);
+    if ((isAll || isYear) && marks.length >= 2) {
+      const shown = [marks[0], ...marks.slice(1).slice(-4)];
+      const lastMark = shown[shown.length - 1];
+      out.push({
+        key: 'milestones',
+        colors: ['#FFD60A', '#2E2400'],
+        ms: 8000,
+        cheer: lastMark.n >= 1000,
+        backdrop: <SfxSet kind="sparkle" color="#FFD60A" />,
+        body: (
+          <>
+            {s.kicker('MILESTONES', 0)}
+            {s.big(`Chapter ${lastMark.n.toLocaleString()}`, 1)}
+            <View style={{ gap: 10, marginTop: 6 }}>
+              {shown.map((m, k) => {
+                const ser = get(m.seriesId);
+                return (
+                  <Animated.View key={m.n} entering={s.enter(2 + k)} style={styles.mileRow}>
+                    <Text style={styles.mileN}>{m.n === 1 ? '1st' : m.n.toLocaleString()}</Text>
+                    {ser && <MangaCover series={ser} width={30} radius={5} />}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.mileTitle} numberOfLines={1}>
+                        {ser?.title ?? 'A chapter'}
+                      </Text>
+                      <Text style={styles.mileDate}>{new Date(m.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                    </View>
+                  </Animated.View>
+                );
+              })}
+            </View>
+          </>
+        ),
+      });
+    }
+
     /* ------------------------------------------------------------ epilogue */
-    if (!mix && (w.prev.ms > 0 || w.prev.chapters > 0) && range.kind !== 'custom') {
+    if (!mix && (w.prev.ms > 0 || w.prev.chapters > 0) && range.kind !== 'custom' && !isAll) {
       const rows = [
         { label: 'Time', now: y.ms, then: w.prev.ms, fmt: orDash },
         { label: 'Chapters', now: y.chapters, then: w.prev.chapters, fmt: (v: number) => v.toLocaleString() },
@@ -998,6 +1153,27 @@ export function RangeWrapped({
       ),
     });
 
+    const stopS = get(st.lastStop?.seriesId);
+    const stopC = stopS?.chapters.find((c) => c.id === st.lastStop?.chapterId);
+    if (stopS && stopC && st.lastStop && loadPages && reachable(stopS, stopC)) {
+      const ls = st.lastStop;
+      out.push({
+        key: 'stop',
+        colors: ['#FF375F', '#2B0612'],
+        ms: 7000,
+        solid: true,
+        backdrop: <PageScene i={out.length} focus={stopS} dim={0.35} />,
+        body: (
+          <>
+            {s.kicker('WHERE YOU LEFT OFF', 0)}
+            {s.big(stopS.title, 1)}
+            <StopPage series={stopS} chapter={stopC} page={ls.page} loadPages={loadPages} />
+            {s.line(`${chapterLabel(stopC, true)}, page ${ls.page + 1} of ${ls.pages}. It's waiting right there.`, 3)}
+          </>
+        ),
+      });
+    }
+
     const next = get(st.waiting.most?.id);
     if (next && st.waiting.most) {
       out.push({
@@ -1005,7 +1181,7 @@ export function RangeWrapped({
         colors: ['#000000', '#000000'],
         ms: 6000,
         solid: true,
-        backdrop: <TitleBackdrop load={load} series={next} dim={0.7} />,
+        backdrop: <PageScene i={out.length} focus={next} dim={0.3} />,
         body: (
           <>
             <Text style={styles.tbc}>To be continued…</Text>
@@ -1072,7 +1248,20 @@ export function RangeWrapped({
     });
     return out;
   }, [st, items, reads, range, videos, load, byId]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <StoryDeck cards={cards} onClose={onClose} ambient={ambient} />;
+  return (
+    <PageBankProvider value={bank}>
+      <StoryDeck cards={cards} onClose={onClose} ambient={ambient} />
+    </PageBankProvider>
+  );
+}
+
+/** Whether a chapter's pages can be shown without changing the library: on the phone, or from a source that serves them as is. */
+function reachable(ser: MangaUiSeries, ch: MangaChapter): boolean {
+  if (ch.folder && ch.pages.length) return true;
+  // A title from a backup, or a server title that needs repairing first: the cover is all there is.
+  if (!ser.sourceId || ser.sourceId.startsWith('tachi:')) return false;
+  if (/^server:.*:library$/.test(ser.sourceId) && !/^\d+$/.test(ch.sourceKey ?? '')) return false;
+  return true;
 }
 
 const makeStyles = () =>
@@ -1093,6 +1282,10 @@ const makeStyles = () =>
     monthCell: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 6 },
     monthLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '900' },
     vsHead: { flexDirection: 'row', justifyContent: 'space-between' },
+    mileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 14, padding: 8, paddingRight: 12 },
+    mileN: { color: '#FFD60A', fontSize: 20, fontWeight: '900', minWidth: 62 },
+    mileTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    mileDate: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700' },
     vsLabel: { color: '#fff', fontSize: 17, fontWeight: '800' },
     vsValue: { fontSize: 15, fontWeight: '900' },
     rangeTitle: { color: '#fff', fontWeight: '900', letterSpacing: -2 },

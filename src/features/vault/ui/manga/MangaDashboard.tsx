@@ -302,7 +302,7 @@ export default function MangaDashboard({
               <View style={styles.wrapGlow} />
               <Text style={styles.wrapKicker}>READING WRAPPED</Text>
               <Text style={styles.wrapTitle}>Your {year} in manga</Text>
-              <Text style={styles.wrapSub}>Your #1, your most read, your busiest month and genre. Weeks, months and Videos + Manga are in Wrapped.</Text>
+              <Text style={styles.wrapSub}>Your #1, your most read, your busiest month and genre. Weeks, months, all time and Videos + Manga are in Wrapped.</Text>
             </TouchableOpacity>
 
             <YearHeatCard

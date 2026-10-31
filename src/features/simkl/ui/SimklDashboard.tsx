@@ -24,6 +24,7 @@ import { YearHeatCard } from '@/features/vault/ui/yearHeatUI';
 import { posterUrl } from '../logic';
 import { fmtMinutesLong, monthWrapRange, simklDash, simklWrap, wrapChoices, yearWrapRange, type SimklWrap } from '../simklWrapped';
 import SimklWrapped from './SimklWrapped';
+import { PosterRow, WrappedPoster } from '@/features/vault/ui/wrappedPoster';
 import type { Meta, SimklActions, SimklItem, WatchEvent } from './types';
 
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -76,6 +77,28 @@ export default function SimklDashboard({
   }, [initialWrap, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const year = new Date(now).getFullYear();
+  // The poster: this year's numbers, top three and posters; then earlier months and years, each with its #1.
+  const yearWrap = useMemo(() => (data ? simklWrap(data.events, items, data.meta, yearWrapRange(year)) : null), [data, items, year]);
+  const wall = useMemo(() => {
+    const paths = [...(yearWrap?.top ?? []), ...(yearWrap?.discoveries ?? [])].map((t) => t.poster).filter((x): x is string => !!x);
+    return [...new Set(paths)].slice(0, 16).map(poster);
+  }, [yearWrap]);
+  const earlier = useMemo(() => {
+    if (!data || !choices) return [];
+    const ranges = [...choices.months.map((m) => monthWrapRange(m.year, m.month)), ...choices.years.filter((y) => y !== year).map((y) => yearWrapRange(y))];
+    return ranges.map((r) => {
+      const w = simklWrap(data.events, items, data.meta, r);
+      const one = w.top[0];
+      return {
+        key: `${r.kind}-${r.start}`,
+        label: r.kind === 'month' ? MONTH[new Date(r.start).getMonth()] + (new Date(r.start).getFullYear() !== year ? ` ${new Date(r.start).getFullYear()}` : '') : r.label,
+        line: `${fmtMinutesLong(w.minutes)} · ${w.titles} ${w.titles === 1 ? 'title' : 'titles'}`,
+        top: one?.title,
+        source: one?.poster ? poster(one.poster) : null,
+        onPress: () => openWrap(r),
+      };
+    });
+  }, [data, choices, items, year]); // eslint-disable-line react-hooks/exhaustive-deps
   const weekMax = dash ? Math.max(1, ...dash.weekDays.map((d) => d.minutes)) : 1;
   const weekChange = dash && dash.lastWeek > 0 && dash.week > 0 ? Math.round(((dash.week - dash.lastWeek) / dash.lastWeek) * 100) : null;
 
@@ -139,30 +162,27 @@ export default function SimklDashboard({
               </View>
             </Card>
 
-            <TouchableOpacity activeOpacity={0.85} onPress={() => openWrap(yearWrapRange(year))} style={styles.wrapCard} accessibilityLabel={`Open your ${year} Simkl Wrapped`}>
-              <View style={styles.wrapGlow} />
-              <Text style={styles.wrapKicker}>SIMKL WRAPPED</Text>
-              <Text style={styles.wrapTitle}>Your {year} so far</Text>
-              <Text style={styles.wrapSub}>Your top titles, binges, genres and the kind of watcher you are. Tap to play.</Text>
-            </TouchableOpacity>
-            {(choices.years.filter((y) => y !== year).length > 0 || choices.months.length > 0) && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-                {choices.months.map((m) => (
-                  <TouchableOpacity key={`${m.year}-${m.month}`} style={styles.chip} onPress={() => openWrap(monthWrapRange(m.year, m.month))}>
-                    <Text style={styles.chipText}>
-                      {MONTH[m.month]} {m.year !== year ? m.year : ''}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                {choices.years
-                  .filter((y) => y !== year)
-                  .map((y) => (
-                    <TouchableOpacity key={y} style={styles.chip} onPress={() => openWrap(yearWrapRange(y))}>
-                      <Text style={styles.chipText}>{y}</Text>
-                    </TouchableOpacity>
-                  ))}
-              </ScrollView>
+            {yearWrap && (
+              <WrappedPoster
+                kicker="SIMKL WRAPPED"
+                title={String(year)}
+                stats={[
+                  { v: yearWrap.minutes >= 120 ? `${Math.round(yearWrap.minutes / 60).toLocaleString()} h` : `${yearWrap.minutes} min`, l: 'watching' },
+                  { v: yearWrap.episodes.toLocaleString(), l: 'episodes' },
+                  { v: String(yearWrap.movies), l: 'movies' },
+                  { v: String(yearWrap.activeDays), l: 'days' },
+                ]}
+                wall={wall}
+                top={yearWrap.top.slice(0, 3).map((t) => ({ title: t.title, source: t.poster ? poster(t.poster) : null }))}
+                tint="#FF375F"
+                background="#1A0510"
+                tileAspect={1.5}
+                playLabel={`Play ${year}`}
+                onPress={() => openWrap(yearWrapRange(year))}
+                accessibilityLabel={`Open your ${year} Simkl Wrapped`}
+              />
             )}
+            <PosterRow title="Months and years before" items={earlier} />
 
             <Card index={2} title="Up next" sub={`${dash.counts.watching} watching · ${dash.counts.plan} planned`}>
               <View style={styles.pair}>
@@ -316,14 +336,6 @@ const makeStyles = (p: Palette) =>
     flame: { width: 44, height: 44, borderRadius: 22, backgroundColor: p.tile, alignItems: 'center', justifyContent: 'center' },
     streakNum: { color: p.text, fontSize: 18, fontWeight: '800' },
     sub: { color: p.textSecondary, fontSize: 13 },
-    wrapCard: { borderRadius: 22, padding: 18, gap: 6, backgroundColor: '#3A0A1C', overflow: 'hidden' },
-    wrapGlow: { position: 'absolute', right: -60, top: -60, width: 220, height: 220, borderRadius: 110, backgroundColor: '#FF375F', opacity: 0.45 },
-    wrapKicker: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
-    wrapTitle: { color: '#fff', fontSize: 26, fontWeight: '900' },
-    wrapSub: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
-    chips: { gap: 8, marginTop: -4 },
-    chip: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
-    chipText: { color: p.text, fontSize: 14, fontWeight: '700' },
     pair: { flexDirection: 'row', gap: 12 },
     pairCell: { flex: 1, gap: 2 },
     pairNum: { color: p.text, fontSize: 24, fontWeight: '900' },
