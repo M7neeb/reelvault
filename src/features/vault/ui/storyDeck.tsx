@@ -90,6 +90,7 @@ export function StoryDeck({
   onEnd,
   ambient,
   onIndex,
+  onPaused,
   sound,
 }: {
   cards: DeckCard[];
@@ -97,6 +98,8 @@ export function StoryDeck({
   onEnd?: () => void;
   /** Told which card is showing (a story with sound switches what it plays). */
   onIndex?: (index: number) => void;
+  /** Told when holding the screen pauses the story, and when it carries on. */
+  onPaused?: (paused: boolean) => void;
   /** A story with sound gets a speaker button. */
   sound?: { muted: boolean; onToggle: () => void };
   /** The story's own living background for each card (pages, posters, covers), under its backdrop and words. */
@@ -119,6 +122,7 @@ export function StoryDeck({
   const ended = useRef(false);
   const card = cards[Math.min(i, cards.length - 1)];
   useEffect(() => onIndex?.(i), [i]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onPaused?.(paused), [paused]); // eslint-disable-line react-hooks/exhaustive-deps
   // The living background is built once per card, not on every tick of the progress bar.
   const scene = useMemo(() => (ambient && card && !card.solid ? ambient(card, i) : null), [ambient, card, i]);
 

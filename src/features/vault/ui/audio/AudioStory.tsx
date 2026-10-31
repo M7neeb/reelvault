@@ -34,6 +34,7 @@ import { Backdrop } from '../frame';
 import { Confetti, CountUp, CoverWall, GrowBar, GrowColumn, KenBurns, Rays, Tilt } from '../storyKit';
 import { sheet, useStyles } from '../theme';
 import AudioCover from './AudioCover';
+import { useAudioPlaybackOptional } from './playback';
 import type { AudioUiItem } from './audioTypes';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -174,6 +175,29 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
   useEffect(() => {
     player.muted = muted;
   }, [muted, player]);
+  // Your own audiobook pauses while the story plays its snippets, and carries on when the story closes.
+  const app = useAudioPlaybackOptional();
+  const appRef = useRef(app);
+  appRef.current = app;
+  useEffect(() => {
+    const was = appRef.current?.playing ?? false;
+    if (was) appRef.current?.pause();
+    return () => {
+      if (was) appRef.current?.resume();
+    };
+  }, []);
+  // Holding the screen pauses the story: the snippet pauses with it.
+  const onPaused = useCallback(
+    (p: boolean) => {
+      try {
+        if (p) player.pause();
+        else player.play();
+      } catch {
+        // released while closing
+      }
+    },
+    [player]
+  );
 
 
   const cards = useMemo<DeckCard[]>(() => {
@@ -767,7 +791,7 @@ export function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiIt
     return out;
   }, [data, items, byId, year]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <StoryDeck cards={cards} onClose={onClose} ambient={ambient} onIndex={setCardIndex} sound={{ muted, onToggle: () => setMuted((m) => !m) }} />;
+  return <StoryDeck cards={cards} onClose={onClose} ambient={ambient} onIndex={setCardIndex} onPaused={onPaused} sound={{ muted, onToggle: () => setMuted((m) => !m) }} />;
 }
 
 const makeStyles = () =>
