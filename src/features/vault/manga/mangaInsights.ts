@@ -98,6 +98,173 @@ export function readingIn(series: MangaSeries[], reads: MangaRead[], start: numb
   };
 }
 
+/* ------------------------------------------------------ more for Wrapped */
+
+export type ReaderType = { key: 'binger' | 'night' | 'explorer' | 'devotee' | 'finisher' | 'steady'; name: string; line: string };
+
+export type WrappedMore = {
+  /** The same length of time just before (for "then vs now"). */
+  prev: { ms: number; chapters: number; titles: number };
+  /** The hour you read the most (0-23). */
+  peakHour: number | null;
+  /** Morning (5-12), afternoon (12-17), evening (17-22) or night (22-5): most of your time. */
+  partOfDay: 'morning' | 'afternoon' | 'evening' | 'night' | null;
+  /** Share of your time read at night (22:00-05:00). */
+  nightShare: number;
+  /** Your day of the week (0 = Monday) by time, else chapters. */
+  weekday: { day: number; ms: number; chapters: number } | null;
+  /** Your longest single sitting. */
+  longest: { seriesId: string | null; ms: number; at: number } | null;
+  /** The most days in a row you read. */
+  streak: number;
+  /** Chapters by kind (manga, manhwa, comic), biggest first. */
+  kinds: { kind: 'manga' | 'manhwa' | 'comic'; chapters: number; share: number }[];
+  /** The author you read the most chapters of. */
+  author: { name: string; chapters: number; titles: number } | null;
+  /** Your top genres (by titles read). */
+  genres: { name: string; titles: number }[];
+  /** The best-rated title you read. */
+  favourite: { id: string; rating: number } | null;
+  /** A title you came back to after months away. */
+  throwback: { id: string; since: number } | null;
+  /** Guess your #1: the answer and three others you read (shuffled by id). */
+  quiz: { answer: string; options: string[] } | null;
+  type: ReaderType;
+};
+
+const KIND_LABEL = { manga: 'Manga', manhwa: 'Manhwa', comic: 'Comics' } as const;
+export const kindLabel = (k: keyof typeof KIND_LABEL) => KIND_LABEL[k];
+
+/** Everything else the reading Wrapped shows, for a range (see readingIn for the basics). */
+export function wrappedMore(series: MangaSeries[], reads: MangaRead[], start: number, end: number): WrappedMore {
+  const y = readingIn(series, reads, start, end);
+  const live = series.filter((s) => !s.deletedAt);
+  const ids = new Set(live.map((s) => s.id));
+  const inside = (t: number | null | undefined) => typeof t === 'number' && t >= start && t < end;
+  const rs = reads.filter((r) => counted(ids, r.seriesId) && inside(r.startedAt) && r.readMs > 0);
+  const len = end - start;
+  const p = readingIn(series, reads, start - len, start);
+
+  const total = y.hours.reduce((a, b) => a + b, 0);
+  const peak = total ? y.hours.indexOf(Math.max(...y.hours)) : -1;
+  const sum = (from: number, to: number) => y.hours.slice(from, to).reduce((a, b) => a + b, 0);
+  const parts = { morning: sum(5, 12), afternoon: sum(12, 17), evening: sum(17, 22), night: sum(22, 24) + sum(0, 5) };
+  const partOfDay = total ? (Object.entries(parts).sort((a, b) => b[1] - a[1])[0][0] as WrappedMore['partOfDay']) : null;
+
+  // Days of the week (Monday first) and the days you read, by time and chapters.
+  const wd = Array.from({ length: 7 }, () => ({ ms: 0, chapters: 0 }));
+  const days = new Set<number>();
+  for (const r of rs) {
+    wd[(new Date(r.startedAt).getDay() + 6) % 7].ms += r.readMs;
+    days.add(sod(r.startedAt));
+  }
+  const perTitle = new Map<string, number>();
+  for (const s of live)
+    for (const c of s.chapters)
+      if (inside(c.readAt)) {
+        wd[(new Date(c.readAt!).getDay() + 6) % 7].chapters++;
+        days.add(sod(c.readAt!));
+        perTitle.set(s.id, (perTitle.get(s.id) ?? 0) + 1);
+      }
+  const best = wd.map((v, day) => ({ day, ...v })).sort((a, b) => b.ms - a.ms || b.chapters - a.chapters)[0];
+  const weekday = best && (best.ms || best.chapters) ? best : null;
+
+  const sorted = [...days].sort((a, b) => a - b);
+  let streak = 0;
+  let run = 0;
+  for (let n = 0; n < sorted.length; n++) {
+    run = n && sorted[n] - sorted[n - 1] <= DAY + 7_200_000 ? run + 1 : 1;
+    streak = Math.max(streak, run);
+  }
+
+  const long = rs.reduce<MangaRead | null>((b, r) => (!b || r.readMs > b.readMs ? r : b), null);
+  const longest = long ? { seriesId: ids.has(long.seriesId) ? long.seriesId : null, ms: long.readMs, at: long.startedAt } : null;
+
+  const byKind = new Map<'manga' | 'manhwa' | 'comic', number>();
+  const byAuthor = new Map<string, { chapters: number; titles: Set<string> }>();
+  let chapters = 0;
+  for (const [id, n] of perTitle) {
+    const s = live.find((x) => x.id === id)!;
+    chapters += n;
+    const k = s.kind ?? 'manga';
+    byKind.set(k, (byKind.get(k) ?? 0) + n);
+    if (s.author?.trim()) {
+      const a = byAuthor.get(s.author.trim()) ?? { chapters: 0, titles: new Set<string>() };
+      a.chapters += n;
+      a.titles.add(id);
+      byAuthor.set(s.author.trim(), a);
+    }
+  }
+  const kinds = [...byKind.entries()].map(([kind, n]) => ({ kind, chapters: n, share: chapters ? n / chapters : 0 })).sort((a, b) => b.chapters - a.chapters);
+  const topAuthor = [...byAuthor.entries()].sort((a, b) => b[1].chapters - a[1].chapters)[0];
+  const author = topAuthor && topAuthor[1].chapters > 1 ? { name: topAuthor[0], chapters: topAuthor[1].chapters, titles: topAuthor[1].titles.size } : null;
+
+  // Titles read in the range: by chapters, plus ones with reading time.
+  const readIds = new Set([...perTitle.keys(), ...rs.filter((r) => ids.has(r.seriesId)).map((r) => r.seriesId)]);
+  const readList = live.filter((s) => readIds.has(s.id));
+  const g = new Map<string, number>();
+  for (const s of readList) for (const t of new Set(s.tags.map((x) => x.trim()).filter(Boolean))) g.set(t, (g.get(t) ?? 0) + 1);
+  const genres = [...g.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, titles]) => ({ name, titles }));
+  const fav = readList.filter((s) => s.rating > 0).sort((a, b) => b.rating - a.rating || (perTitle.get(b.id) ?? 0) - (perTitle.get(a.id) ?? 0))[0];
+  const favourite = fav ? { id: fav.id, rating: fav.rating } : null;
+
+  // A title you came back to: read now, and first read at least six months before.
+  const firstRead = (s: MangaSeries) => Math.min(...s.chapters.map((c) => c.readAt ?? Infinity), ...reads.filter((r) => r.seriesId === s.id).map((r) => r.startedAt));
+  const back = readList
+    .map((s) => ({ id: s.id, since: firstRead(s) }))
+    .filter((x) => Number.isFinite(x.since) && x.since < start - 180 * DAY)
+    .sort((a, b) => a.since - b.since)[0];
+  const throwback = back ?? null;
+
+  const quizPool = [...new Set([...y.top.map((t) => t.id), ...readList.map((s) => s.id)])];
+  const quiz =
+    y.top[0] && quizPool.length >= 3
+      ? { answer: y.top[0].id, options: quizPool.slice(0, 4).sort((a, b) => (hash(a) % 97) - (hash(b) % 97)) }
+      : null;
+
+  const nightShare = total ? parts.night / total : 0;
+  const sessions = rs.length;
+  const type: ReaderType =
+    (longest && longest.ms >= 2 * 3_600_000) || (sessions >= 3 && y.ms / sessions >= 45 * 60_000)
+      ? { key: 'binger', name: 'The Binger', line: 'Once you start, you do not stop.' }
+      : nightShare >= 0.4
+        ? { key: 'night', name: 'The Night Owl', line: 'Your best chapters come after dark.' }
+        : y.titles >= 10 && y.started.length >= y.titles / 2
+          ? { key: 'explorer', name: 'The Explorer', line: 'Always looking for the next great story.' }
+          : y.top[0] && chapters && (perTitle.get(y.top[0].id) ?? 0) / chapters >= 0.5
+            ? { key: 'devotee', name: 'The Devotee', line: 'One story had your heart.' }
+            : y.completed.length >= 3
+              ? { key: 'finisher', name: 'The Finisher', line: 'You see things through to the last page.' }
+              : { key: 'steady', name: 'The Steady Reader', line: 'A little, often. The way to read a lot.' };
+
+  return {
+    prev: { ms: p.ms, chapters: p.chapters, titles: p.titles },
+    peakHour: peak >= 0 ? peak : null,
+    partOfDay,
+    nightShare,
+    weekday,
+    longest,
+    streak,
+    kinds,
+    author,
+    genres,
+    favourite,
+    throwback,
+    quiz,
+    type,
+  };
+}
+
+/** A small stable number for an id (so the quiz's order does not change between renders). */
+function hash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 /* ------------------------------------------------------------------ ranges */
 
 export type ReadRange = { start: number; end: number; label: string; kind: 'week' | 'month' | 'year' | 'custom' };
