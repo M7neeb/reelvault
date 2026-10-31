@@ -71,8 +71,10 @@ export function fmtLength(ms: number | null | undefined): string {
   if (!ms || ms < 0) return '';
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s} s`;
-  const h = Math.floor(s / 3600);
-  const m = Math.round((s % 3600) / 60);
+  // Rounded to the minute first, so 59.5 minutes reads "1 h", never "60 min" or "1 h 60 min".
+  const total = Math.round(s / 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
   if (!h) return `${m} min`;
   return m ? `${h} h ${m} min` : `${h} h`;
 }

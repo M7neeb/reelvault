@@ -8,18 +8,21 @@
  * Presentational only (see simkl/ui/types.ts).
  */
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { ZoomIn } from 'react-native-reanimated';
 
+import { FilmStrips, ImageRiver, Scanlines, Tint } from '@/features/vault/ui/scenes';
+import { GiantRank, PanelMontage, StreakChain } from '@/features/vault/ui/manga/mangaKit';
+import { KenBurns } from '@/features/vault/ui/storyKit';
 import { StoryDeck, useStoryText, type DeckCard } from '@/features/vault/ui/storyDeck';
-import { Confetti, CoverWall, GrowColumn, Rays, Tilt } from '@/features/vault/ui/storyKit';
+import { Confetti, CountUp, CoverWall, GrowColumn, Rays, Tilt } from '@/features/vault/ui/storyKit';
 import { success, warn } from '@/features/vault/ui/haptics';
 import { sheet, useStyles } from '@/features/vault/ui/theme';
 
 import { fmtRating } from '../insights';
-import { posterUrl } from '../logic';
+import { fanartUrl, posterUrl } from '../logic';
 import { fmtInt, fmtMinutesLong, topQuiz, WATCHER, type SimklWrap } from '../simklWrapped';
 import { canSnap, shareSnap } from '@/features/vault/snap';
 
@@ -66,12 +69,100 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
   const s = useStoryText();
   const [quizDone, setQuizDone] = useState(false);
 
+  // Behind every card: the posters of what you watched, flowing or rolling past like film.
+  const scenePosters = useMemo(() => [...wrap.top, ...wrap.discoveries].filter((t) => !!t.poster).map((t) => poster(t.poster)), [wrap]);
+  // Wide background pictures (Simkl's fanart) of your top titles, else their posters.
+  const sceneWide = useMemo(
+    () => [...wrap.top, ...wrap.discoveries].map((t) => (t.fanart ? { uri: fanartUrl(t.fanart)! } : t.poster ? poster(t.poster) : null)).filter((x): x is { uri: string } => !!x),
+    [wrap]
+  );
+  // Behind every card: your shows and films themselves, never a plain colour. The look changes from card to card:
+  // a title's picture whole over a blurred copy of itself (like a cinema screen), posters flowing by,
+  // film strips rolling, or two posters side by side.
+  const ambient = useCallback(
+    (_card: DeckCard, i: number) => {
+      if (!scenePosters.length && !sceneWide.length)
+        return (
+          // Nothing to show at all: a projector's beam turning slowly.
+          <View style={{ position: 'absolute', top: '-30%', left: '-30%' }}>
+            <Rays size={1400} count={22} opacity={0.09} />
+          </View>
+        );
+      const v = i % 4;
+      const wide = sceneWide.length ? sceneWide[i % sceneWide.length] : scenePosters[i % scenePosters.length];
+      if (v === 0 || !scenePosters.length) return <KenBurns source={wide} ms={9000} seed={i} />;
+      if (v === 1) return <ImageRiver sources={scenePosters} columns={3} aspect={1.5} tilt={-9} />;
+      if (v === 2) return <FilmStrips sources={[...sceneWide, ...scenePosters]} count={3} frame={92} />;
+      const a = scenePosters[i % scenePosters.length];
+      const b = scenePosters[(i + 1) % scenePosters.length];
+      return (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row', backgroundColor: '#000' }}>
+          <View style={{ flex: 1 }}>
+            <KenBurns source={a} ms={9000} fill seed={i} />
+          </View>
+          <View style={{ width: 4, backgroundColor: '#000' }} />
+          <View style={{ flex: 1 }}>
+            <KenBurns source={b} ms={9000} fill seed={i + 5} />
+          </View>
+        </View>
+      );
+    },
+    [scenePosters, sceneWide]
+  );
+
   const cards = useMemo<DeckCard[]>(() => {
     const w = wrap;
     const out: DeckCard[] = [];
-    const posters = [...w.top, ...w.discoveries].map((t) => poster(t.poster));
+    const posters = [...w.top, ...w.discoveries].filter((t) => !!t.poster).map((t) => poster(t.poster));
     const change = w.previousMinutes > 0 ? Math.round(((w.minutes - w.previousMinutes) / w.previousMinutes) * 100) : null;
     const before = w.range.kind === 'year' ? 'the year before' : 'the month before';
+
+    /** A season's title card, like a TV title screen: an episode tag, scan lines, a slow beam. */
+    const season = (n: number | 'finale', title: string, line: string, colors: [string, string]) =>
+      out.push({
+        key: `season-${n}`,
+        colors,
+        ms: 3400,
+        backdrop: (
+          <>
+            {posters.length > 0 && <ImageRiver sources={posters} columns={3} aspect={1.5} tilt={-7} speed={1.6} />}
+            <Scanlines />
+          </>
+        ),
+        body: (
+          <>
+            <View style={styles.epTag}>
+              <Text style={styles.epText}>{n === 'finale' ? 'SERIES FINALE' : `SEASON ${n} · EPISODE 1`}</Text>
+            </View>
+            {s.big(title, 1)}
+            <View style={styles.epRule} />
+            {s.line(line, 3)}
+          </>
+        ),
+      });
+
+    // Previously on…: quick cuts through your posters.
+    if (posters.length >= 3 && w.minutes) {
+      out.push({
+        key: 'previously',
+        colors: ['#000000', '#000000'],
+        ms: 3400,
+        solid: true,
+        backdrop: (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000' }}>
+            <PanelMontage pages={posters.map((p) => ({ source: p, aspect: 1.5 }))} every={420} />
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.45)' }} />
+            <Scanlines opacity={0.25} />
+          </View>
+        ),
+        body: (
+          <View style={{ alignItems: 'center', gap: 6 }}>
+            <Text style={styles.previously}>Previously on…</Text>
+            {s.big(w.range.label, 1)}
+          </View>
+        ),
+      });
+    }
 
     out.push({
       key: 'intro',
@@ -88,6 +179,8 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
     });
     if (!w.minutes) return out;
 
+    season(1, 'The Numbers', 'Every hour, episode and film.', ['#0A84FF', '#020B1C']);
+
     out.push({
       key: 'time',
       colors: ['#0A84FF', '#04172E'],
@@ -96,7 +189,7 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
       body: (
         <>
           {s.kicker('YOU WATCHED FOR', 0)}
-          {s.huge(fmtInt(w.minutes / 60), 1)}
+          <CountUp to={w.minutes / 60} format={(n) => fmtInt(n)} style={styles.count} delay={250} ms={1600} />
           {s.line(`hours. That's ${fmtInt(w.minutes)} minutes, on ${w.activeDays} ${w.activeDays === 1 ? 'day' : 'days'}.`, 2)}
           {s.line(`${fmtInt(w.episodes)} ${w.episodes === 1 ? 'episode' : 'episodes'} and ${fmtInt(w.movies)} ${w.movies === 1 ? 'movie' : 'movies'}${w.rewatches ? `, ${w.rewatches} of them rewatches` : ''}.`, 3)}
           {change !== null &&
@@ -127,6 +220,8 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
         ),
       });
     }
+
+    if (w.top.length) season(2, 'Your Shows', 'The ones you could not stop watching.', ['#FF375F', '#1E0410']);
 
     if (w.top.length >= 3) {
       out.push({
@@ -171,6 +266,41 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
           </>
         ),
       });
+      // The countdown: #5 to #2, each with its poster filling the screen.
+      const rankColors: [string, string][] = [
+        ['#64D2FF', '#03202B'],
+        ['#30D158', '#05210E'],
+        ['#FF9F0A', '#2B1500'],
+        ['#BF5AF2', '#1C0533'],
+      ];
+      for (let r = Math.min(w.top.length, 5); r >= 2; r--) {
+        const t = w.top[r - 1];
+        out.push({
+          key: `rank${r}`,
+          colors: rankColors[(5 - r) % rankColors.length],
+          ms: 4600,
+          solid: !!t.poster,
+          backdrop: t.poster ? (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000' }}>
+              <KenBurns source={poster(t.poster)} ms={6000} fill seed={r} />
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+              <Scanlines opacity={0.18} />
+            </View>
+          ) : undefined,
+          body: (
+            <>
+              <GiantRank n={r} />
+              {s.kicker(`NUMBER ${r}`, 0)}
+              <Tilt rotate={r % 2 ? -4 : 4} delay={150}>
+                <Image source={poster(t.poster)} style={styles.rankPoster} contentFit="cover" />
+              </Tilt>
+              {s.big(t.title, 2)}
+              {s.line(t.type === 'movie' ? fmtMinutesLong(t.minutes) : `${t.count} ${t.count === 1 ? 'episode' : 'episodes'} · ${fmtMinutesLong(t.minutes)}`, 3)}
+            </>
+          ),
+        });
+      }
+
       const one = w.top[0];
       out.push({
         key: 'top1',
@@ -207,6 +337,8 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
         ),
       });
     }
+
+    season(3, 'Your Habits', 'When, how much and how often.', ['#5E5CE6', '#090820']);
 
     if (w.binge) {
       out.push({
@@ -256,7 +388,7 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
         body: (
           <>
             {s.kicker('YOUR HABITS', 0)}
-            {s.big(`${w.favouriteWeekday.name} were yours`, 1)}
+            {s.big(`${w.favouriteWeekday.name}s were yours`, 1)}
             {s.line(`${Math.round(w.favouriteWeekday.share * 100)}% of your watching happened on ${w.favouriteWeekday.name}.`, 2)}
             {s.line(`Your favourite time: around ${hourLabel(w.peakHour)}.${w.nightShare >= 0.25 ? ` ${Math.round(w.nightShare * 100)}% after 10 at night.` : ''}`, 3)}
           </>
@@ -274,6 +406,7 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
             {s.kicker('YOUR LONGEST STREAK', 0)}
             {s.huge(String(w.longestStreak), 1)}
             {s.line('days in a row with something on.', 2)}
+            <StreakChain days={w.longestStreak} />
           </>
         ),
       });
@@ -343,6 +476,8 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
       });
     }
 
+    season('finale', 'Who You Are', 'Every season leads here.', ['#FF2D55', '#1C0309']);
+
     const who = WATCHER[w.watcher];
     out.push({
       key: 'who',
@@ -408,12 +543,18 @@ export default function SimklWrapped({ wrap, onClose }: { wrap: SimklWrap; onClo
     return out;
   }, [wrap, quizDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <StoryDeck cards={cards} onClose={onClose} />;
+  return <StoryDeck cards={cards} onClose={onClose} ambient={ambient} />;
 }
 
 const makeStyles = () =>
   sheet({
     row: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(0,0,0,0.28)', borderRadius: 16, padding: 8 },
+    epTag: { alignSelf: 'flex-start', borderWidth: 2, borderColor: '#fff', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
+    epText: { color: '#fff', fontSize: 12, fontWeight: '900', letterSpacing: 1.6 },
+    epRule: { height: 3, width: 64, backgroundColor: '#fff', borderRadius: 2, marginVertical: 4 },
+    previously: { color: '#fff', fontSize: 30, fontWeight: '900', fontStyle: 'italic', letterSpacing: -0.5, textAlign: 'center' },
+    count: { color: '#fff', fontSize: 96, fontWeight: '900', letterSpacing: -4, lineHeight: 100 },
+    rankPoster: { width: 130, height: 195, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)' },
     rank: { color: '#fff', fontSize: 26, fontWeight: '900', width: 26, textAlign: 'center' },
     rowImg: { width: 44, height: 64, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.1)' },
     rowTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },

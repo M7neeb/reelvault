@@ -7,14 +7,15 @@
  * Presentational only (see the note at the top of types.ts).
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeInDown, Keyframe, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, FadeIn, FadeInDown, Keyframe, useAnimatedStyle, useSharedValue, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import Fade from './Fade';
+import { gradient } from './insightParts';
 import { success, tick } from './haptics';
 import Icon from './Icon';
 import IconButton from './IconButton';
@@ -34,6 +35,8 @@ export type DeckCard = {
   interactive?: boolean;
   /** A small celebration when this card opens. */
   cheer?: boolean;
+  /** Its backdrop covers the whole card (pages, a video): the story's ambient scene is not drawn under it. */
+  solid?: boolean;
 };
 
 const bodyIn = new Keyframe({
@@ -81,7 +84,24 @@ export function useStoryText() {
   };
 }
 
-export function StoryDeck({ cards, onClose, onEnd }: { cards: DeckCard[]; onClose: () => void; onEnd?: () => void }) {
+export function StoryDeck({
+  cards,
+  onClose,
+  onEnd,
+  ambient,
+  onIndex,
+  sound,
+}: {
+  cards: DeckCard[];
+  onClose: () => void;
+  onEnd?: () => void;
+  /** Told which card is showing (a story with sound switches what it plays). */
+  onIndex?: (index: number) => void;
+  /** A story with sound gets a speaker button. */
+  sound?: { muted: boolean; onToggle: () => void };
+  /** The story's own living background for each card (pages, posters, covers), under its backdrop and words. */
+  ambient?: (card: DeckCard, index: number) => ReactNode;
+}) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { width, height } = useWindowDimensions();
@@ -90,14 +110,23 @@ export function StoryDeck({ cards, onClose, onEnd }: { cards: DeckCard[]; onClos
   const previewCard = Platform.OS === 'web' && typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('card') : null;
   const [i, setI] = useState(() => Math.min(cards.length - 1, Math.max(0, Number(previewCard ?? 0) || 0)));
   const [paused, setPaused] = useState(previewCard !== null);
-  const [elapsed, setElapsed] = useState(0);
+  // How far the current card has run (0 to 1), animated on the UI thread: no re-render while it runs.
+  const progress = useSharedValue(0);
+  // Bumped to restart the current card's clock (tapping back on the first card).
+  const [restart, setRestart] = useState(0);
   const iRef = useRef(0);
   iRef.current = i;
   const ended = useRef(false);
   const card = cards[Math.min(i, cards.length - 1)];
+  useEffect(() => onIndex?.(i), [i]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The living background is built once per card, not on every tick of the progress bar.
+  const scene = useMemo(() => (ambient && card && !card.solid ? ambient(card, i) : null), [ambient, card, i]);
 
   const go = (n: number) => {
-    if (n < 0) return setElapsed(0);
+    if (n < 0) {
+      progress.value = 0;
+      return setRestart((r) => r + 1);
+    }
     if (n >= cards.length) return onClose();
     if (cards[n].cheer) success();
     else tick();
@@ -105,24 +134,24 @@ export function StoryDeck({ cards, onClose, onEnd }: { cards: DeckCard[]; onClos
       ended.current = true;
       onEnd?.();
     }
-    setElapsed(0);
+    progress.value = 0;
     setI(n);
   };
+  const next = () => go(iRef.current + 1);
 
+  // The clock of the current card: runs from where it is to the end, then moves on. Holding pauses it.
   useEffect(() => {
-    if (paused || !cards.length) return;
-    const id = setInterval(() => {
-      setElapsed((e) => {
-        const next = e + 50;
-        if (next >= cards[iRef.current].ms) {
-          setTimeout(() => go(iRef.current + 1), 0);
-          return 0;
-        }
-        return next;
-      });
-    }, 50);
-    return () => clearInterval(id);
-  }, [paused, cards.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!cards.length) return;
+    if (paused) {
+      cancelAnimation(progress);
+      return;
+    }
+    const ms = cards[Math.min(i, cards.length - 1)].ms;
+    progress.value = withTiming(1, { duration: Math.max(0, (1 - progress.value) * ms), easing: Easing.linear }, (done) => {
+      if (done) scheduleOnRN(next);
+    });
+    return () => cancelAnimation(progress);
+  }, [i, paused, restart, cards.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ty = useSharedValue(0);
   const pan = Gesture.Pan()
@@ -164,23 +193,37 @@ export function StoryDeck({ cards, onClose, onEnd }: { cards: DeckCard[]; onClos
       <GestureHandlerRootView style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
         <GestureDetector gesture={gestures}>
           <Animated.View style={[styles.story, sheetStyle]}>
-            <Animated.View key={`bg${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill}>
-              <Aurora colors={card.colors} width={width} height={height} />
-            </Animated.View>
+            {/* Colour only where a story has nothing of yours to show: its scene or the card's own pictures fill it otherwise. */}
+            {!card.solid && !scene && (
+              <Animated.View key={`bg${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill}>
+                <Aurora colors={card.colors} width={width} height={height} />
+              </Animated.View>
+            )}
+            {scene && (
+              <Animated.View key={`am${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
+                {scene}
+              </Animated.View>
+            )}
             {card.backdrop && (
               <Animated.View key={`bd${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
                 {card.backdrop}
               </Animated.View>
             )}
-            <Fade color="0,0,0" from={0} to={0.35} style={StyleSheet.absoluteFill} />
+            {scene || card.solid ? (
+              // Over pictures: a plain dark shade (no colour) so the words read and the pictures still show.
+              <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.28) 22%, rgba(0,0,0,0.42) 55%, rgba(0,0,0,0.78) 100%)', 'rgba(0,0,0,0.45)')]} />
+            ) : (
+              <Fade color="0,0,0" from={0} to={0.35} style={StyleSheet.absoluteFill} />
+            )}
             <View style={[styles.bars, { top: insets.top + 8 }]}>
               {cards.map((c, n) => (
                 <View key={c.key} style={styles.bar}>
-                  <View style={[styles.barFill, { width: n < i ? '100%' : n === i ? `${(elapsed / card.ms) * 100}%` : '0%' }]} />
+                  {n < i ? <View style={[styles.barFill, { width: '100%' }]} /> : n === i ? <BarFill progress={progress} /> : null}
                 </View>
               ))}
             </View>
             <View style={[styles.top, { top: insets.top + 20 }]}>
+              {sound && <IconButton icon={sound.muted ? 'muted' : 'sound'} label={sound.muted ? 'Sound on' : 'Mute'} clear color="#fff" onPress={sound.onToggle} size={36} />}
               <IconButton icon="close" label="Close" clear color="#fff" onPress={onClose} size={36} />
             </View>
             <Animated.View key={`b${i}`} entering={reduce ? undefined : bodyIn} style={[styles.body, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 40 }]}>
@@ -199,6 +242,13 @@ export function StoryDeck({ cards, onClose, onEnd }: { cards: DeckCard[]; onClos
   );
 }
 
+/** The current card's bar: grows with the clock, on the UI thread. */
+function BarFill({ progress }: { progress: SharedValue<number> }) {
+  const styles = useStyles(makeStyles);
+  const anim = useAnimatedStyle(() => ({ transform: [{ scaleX: progress.value }] }));
+  return <Animated.View style={[styles.barFill, { width: '100%', transformOrigin: 'left' }, anim]} />;
+}
+
 const makeStyles = () =>
   sheet({
     story: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', backgroundColor: '#000' },
@@ -207,12 +257,12 @@ const makeStyles = () =>
     barFill: { height: 3, backgroundColor: '#fff' },
     top: { position: 'absolute', right: 12, zIndex: 3, flexDirection: 'row', gap: 8 },
     body: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', paddingHorizontal: 28, gap: 12 },
-    kicker: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '900', letterSpacing: 1.4 },
-    big: { color: '#fff', fontSize: 44, fontWeight: '900', letterSpacing: -1.5, lineHeight: 48 },
-    huge: { color: '#fff', fontSize: 84, fontWeight: '900', letterSpacing: -3, lineHeight: 88 },
-    line: { color: 'rgba(255,255,255,0.94)', fontSize: 18, fontWeight: '600', lineHeight: 25 },
+    kicker: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '900', letterSpacing: 1.4, textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 10, textShadowOffset: { width: 0, height: 1 } },
+    big: { color: '#fff', fontSize: 44, fontWeight: '900', letterSpacing: -1.5, lineHeight: 48, textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 10, textShadowOffset: { width: 0, height: 1 } },
+    huge: { color: '#fff', fontSize: 84, fontWeight: '900', letterSpacing: -3, lineHeight: 88, textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 10, textShadowOffset: { width: 0, height: 1 } },
+    line: { color: '#fff', fontSize: 18, fontWeight: '700', lineHeight: 25, textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 10, textShadowOffset: { width: 0, height: 1 } },
     barHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
-    barLabel: { color: '#fff', fontSize: 16, fontWeight: '800', flexShrink: 1 },
+    barLabel: { color: '#fff', fontSize: 16, fontWeight: '800', flexShrink: 1, textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 10, textShadowOffset: { width: 0, height: 1 } },
     barValue: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '700' },
     pausePill: { position: 'absolute', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
     pauseText: { color: '#fff', fontSize: 12, fontWeight: '800' },

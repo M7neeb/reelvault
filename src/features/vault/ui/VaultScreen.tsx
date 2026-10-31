@@ -1878,7 +1878,7 @@ function VaultScreenBody({
           actions={actions}
           simkl={simkl}
           reading={manga ? { items: manga.items, loadReads: manga.actions.loadReads } : undefined}
-          mix={manga ? { manga: { items: manga.items, loadReads: manga.actions.loadReads }, videos: mixVideos } : undefined}
+          mix={manga ? { manga: { items: manga.items, loadReads: manga.actions.loadReads, loadPages: manga.actions.loadPages }, videos: mixVideos } : undefined}
           listening={audio ? { items: audio.items, loadPlays: audio.actions.loadPlays } : undefined}
           ratingLabels={prefs.ratingLabels}
           onOpenVideo={(id) => {

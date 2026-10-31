@@ -10,139 +10,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { audioStats, authorsOf, displayTitle, fmtLength, fmtRating, type AudioPlay } from '../../audio/audioLogic';
+import { audioStats, displayTitle, fmtLength, fmtRating, type AudioPlay } from '../../audio/audioLogic';
 import { fmtSize } from '../format';
 import Icon from '../Icon';
 import { Card } from '../insightParts';
 import { Modal } from '../screen';
-import { StoryDeck, useStoryText, type DeckCard } from '../storyDeck';
-import { Confetti, CoverWall, GrowColumn, Rays } from '../storyKit';
+import { GrowColumn } from '../storyKit';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import { YearHeatCard } from '../yearHeatUI';
 import AudioCover from './AudioCover';
+import { AudioWrapped } from './AudioStory';
 import type { AudioActions, AudioUiItem } from './audioTypes';
 
-function AudioWrapped({ items, plays, year, onClose }: { items: AudioUiItem[]; plays: AudioPlay[]; year: number; onClose: () => void }) {
-  const s = useStoryText();
-  const styles = useStyles(makeStyles);
-  const cards = useMemo<DeckCard[]>(() => {
-    const start = new Date(year, 0, 1).getTime();
-    const end = new Date(year + 1, 0, 1).getTime();
-    const ps = plays.filter((x) => x.startedAt >= start && x.startedAt < end);
-    const byId = new Map(items.map((i) => [i.id, i]));
-    const per = new Map<string, number>();
-    for (const x of ps) per.set(x.itemId, (per.get(x.itemId) ?? 0) + x.listenedMs);
-    const top = [...per.entries()].filter(([id]) => byId.has(id)).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, ms]) => ({ item: byId.get(id)!, ms }));
-    const total = ps.reduce((a, x) => a + x.listenedMs, 0);
-    const days = new Set(ps.map((x) => new Date(x.startedAt).toDateString())).size;
-    const listened = top.map((t) => t.item);
-    const author = authorsOf(listened.length ? [...per.keys()].map((id) => byId.get(id)).filter((x): x is AudioUiItem => !!x) : [])[0];
-    const finished = items.filter((i) => i.finishedAt && i.finishedAt >= start && i.finishedAt < end);
-    const covers = items.map((i) => i.coverSource ?? undefined).filter(Boolean) as string[];
-    const out: DeckCard[] = [
-      {
-        key: 'intro',
-        colors: ['#BF5AF2', '#1E0730'],
-        ms: 5000,
-        backdrop: covers.length ? <CoverWall sources={covers} opacity={0.5} /> : undefined,
-        body: (
-          <>
-            {s.kicker('YOUR AUDIO WRAPPED', 0)}
-            {s.big(String(year), 1)}
-            {s.line(total ? `${fmtLength(total)} of listening, on ${days} ${days === 1 ? 'day' : 'days'}.` : 'Nothing listened to yet this year.', 2)}
-          </>
-        ),
-      },
-    ];
-    if (!total) return out;
-    if (top[0]) {
-      out.push({
-        key: 'top1',
-        colors: ['#FFD60A', '#2E2400'],
-        ms: 6000,
-        cheer: true,
-        backdrop: <Rays size={1000} color="#FFD60A" />,
-        body: (
-          <>
-            {s.kicker('YOUR #1', 0)}
-            <AudioCover item={top[0].item} size={200} radius={20} />
-            {s.big(displayTitle(top[0].item), 2)}
-            {s.line(`${fmtLength(top[0].ms)} of it${top[0].item.rating ? `, and you rated it ${fmtRating(top[0].item.rating)}` : ''}.`, 3)}
-            <Confetti />
-          </>
-        ),
-      });
-    }
-    if (top.length > 1) {
-      out.push({
-        key: 'top5',
-        colors: ['#30D158', '#05210E'],
-        ms: 7000,
-        body: (
-          <>
-            {s.kicker('MOST LISTENED', 0)}
-            <View style={{ gap: 8, marginTop: 6 }}>
-              {top.map((t, n) => (
-                <View key={t.item.id} style={styles.wRow}>
-                  <Text style={styles.wRank}>{n + 1}</Text>
-                  <AudioCover item={t.item} size={48} radius={10} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.wTitle} numberOfLines={1}>
-                      {displayTitle(t.item)}
-                    </Text>
-                    <Text style={styles.wSub}>{fmtLength(t.ms)}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </>
-        ),
-      });
-    }
-    if (author) {
-      out.push({
-        key: 'author',
-        colors: ['#FF9F0A', '#2B1500'],
-        ms: 5500,
-        body: (
-          <>
-            {s.kicker('YOUR AUTHOR', 0)}
-            {s.big(author.name, 1)}
-            {s.line(`${author.count} ${author.count === 1 ? 'item' : 'items'} of theirs.`, 2)}
-          </>
-        ),
-      });
-    }
-    if (finished.length) {
-      out.push({
-        key: 'finished',
-        colors: ['#64D2FF', '#03202B'],
-        ms: 5500,
-        body: (
-          <>
-            {s.kicker('YOU FINISHED', 0)}
-            {s.huge(String(finished.length), 1)}
-            {s.line(finished.length === 1 ? `${displayTitle(finished[0])}.` : `including ${displayTitle(finished[0])} and ${displayTitle(finished[1])}.`, 2)}
-          </>
-        ),
-      });
-    }
-    out.push({
-      key: 'end',
-      colors: ['#1C1C1E', '#000000'],
-      ms: 8000,
-      body: (
-        <>
-          {s.kicker(`AUDIO ${year}`, 0)}
-          {s.huge(fmtLength(total), 1)}
-          {s.line(`${days} days of listening · ${per.size} ${per.size === 1 ? 'item' : 'items'} · ${finished.length} finished`, 2)}
-        </>
-      ),
-    });
-    return out;
-  }, [items, plays, year]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <StoryDeck cards={cards} onClose={onClose} />;
-}
 
 export default function AudioDashboard({ items, actions, onOpen, onClose }: { items: AudioUiItem[]; actions: AudioActions; onOpen: (item: AudioUiItem) => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();

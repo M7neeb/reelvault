@@ -48,7 +48,7 @@ import { sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
 import { previous, WrappedPicker, WrappedStory, type StoryInput, type WrappedGroup } from './WrappedUI';
 import { MixWrappedCard, type MixVideos } from './manga/MangaWrapped';
-import type { MangaUiSeries } from './manga/mangaTypes';
+import type { MangaActions, MangaUiSeries } from './manga/mangaTypes';
 import type { MangaRead } from '../manga/mangaLogic';
 import { clubFor, yearBefore } from '../wrappedExtras';
 import { EMPTY_OV_EXTRA, type OvExtra } from '../ovExtra';
@@ -144,7 +144,7 @@ export default function VideoInsightsModal({
   mix,
 }: {
   /** Manga and your videos, for the Videos + Manga Wrapped. */
-  mix?: { manga: { items: MangaUiSeries[]; loadReads: () => Promise<MangaRead[]> }; videos: MixVideos };
+  mix?: { manga: { items: MangaUiSeries[]; loadReads: () => Promise<MangaRead[]>; loadPages?: MangaActions['loadPages'] }; videos: MixVideos };
   /** The Manga section, for the Reading badges. */
   reading?: { items: ReadingSeries[]; loadReads: () => Promise<{ startedAt: number; readMs: number; pages: number }[]> };
   /** The Audio section, for the Listening badges. */

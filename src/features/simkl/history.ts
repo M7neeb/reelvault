@@ -154,7 +154,7 @@ export async function metaMap(): Promise<Map<number, Meta>> {
     } catch {
       genres = [];
     }
-    out.set(r.simkl_id, { genres, network: r.network, country: r.country, language: r.language, runtime: r.runtime });
+    out.set(r.simkl_id, { genres, network: r.network, country: r.country, language: r.language, runtime: r.runtime, fanart: r.fanart });
   }
   return out;
 }

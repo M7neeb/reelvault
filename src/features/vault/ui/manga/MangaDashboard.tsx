@@ -69,6 +69,8 @@ export default function MangaDashboard({
   const [tab, setTab] = useState<MangaInsightsTab>(initialTab);
   const [story, setStory] = useState<{ range: ReadRange; mix: boolean } | null>(null);
   const [now] = useState(() => Date.now());
+  // Private titles never appear in a Wrapped (their pages would show behind the cards).
+  const wrappedItems = useMemo(() => items.filter((s) => !s.isPrivate), [items]);
   useEffect(() => {
     actions
       .loadReads()
@@ -395,7 +397,7 @@ export default function MangaDashboard({
           </ScrollView>
         )}
       </View>
-      {story && reads && <RangeWrapped items={items} reads={reads} range={story.range} videos={story.mix ? videos : null} onClose={() => setStory(null)} />}
+      {story && reads && <RangeWrapped items={wrappedItems} reads={reads} range={story.range} videos={story.mix ? videos : null} loadPages={actions.loadPages} onClose={() => setStory(null)} />}
     </Modal>
   );
 }
