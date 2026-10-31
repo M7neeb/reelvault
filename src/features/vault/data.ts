@@ -389,6 +389,10 @@ function parsePrefs(json: string | null): VaultPrefs {
 }
 
 /** Wi-Fi transfer: the very same file is skipped; a look-alike is kept beside the one you have. */
+/** Parts of the library that reload on their own after an edit. */
+type LibraryPart = 'videos' | 'tags' | 'albums' | 'series';
+const ALL_PARTS: readonly LibraryPart[] = ['videos', 'tags', 'albums', 'series'];
+
 const wifiDuplicates = async (info: DuplicateInfo): Promise<DupChoice> => (info.exact ? 'skip' : 'both');
 
 export function useVaultData(): VaultData {
@@ -436,47 +440,66 @@ export function useVaultData(): VaultData {
   const sortRef = useRef<SortKey>(sqlSort(viewOptions.sort));
   sortRef.current = sqlSort(viewOptions.sort);
 
-  const refresh = useCallback(async () => {
-    const [list, trash, map, index, tagList, filters, albumRows, folderRows, members, keptRows, seriesRows, seriesMembers] = await Promise.all([
-      listVideos(sortRef.current),
-      listDeleted(),
-      tagCounts(),
-      tagIndex(),
-      listTags(),
-      listSmartFilters(),
-      listAlbums(),
-      listFolders(),
-      albumMembership(),
-      listKept(),
-      listSeries(),
-      listMembers(),
-    ]);
-    setKept(keptRows);
-    setSeries(seriesRows);
-    setMembers(seriesMembers);
-    setVideos(list);
-    setDeleted(trash);
-    setCounts(map);
-    setTagMap(index);
-    setTags(tagList);
-    setSmartFilters(
-      filters.map((f) => ({ id: f.id, name: f.name, rule: parseRule(f.rule_json), folderId: f.folder_id }))
-    );
-    setAlbums(
-      albumRows.map((a) => ({
-        id: a.id,
-        name: a.name,
-        folderId: a.folder_id,
-        isPrivate: a.is_private === 1,
-        pinned: a.pinned === 1,
-        excludeUncategorized: a.exclude_uncategorized === 1,
-        lastUsedAt: a.last_used_at,
-      }))
-    );
-    setFolders(folderRows.map((f) => ({ id: f.id, name: f.name })));
-    setMembership(members);
-    setFreeGb(readFreeGb());
+  /**
+   * Reload from the database: everything, or only the parts an edit changed (a keyword edit
+   * needs 4 queries, not 12, and leaves the video list and every tile alone).
+   */
+  const reload = useCallback(async (parts: readonly LibraryPart[] = ALL_PARTS) => {
+    const want = new Set(parts);
+    const loadFilters = async () => {
+      const filters = await listSmartFilters();
+      setSmartFilters(
+        filters.map((f) => ({ id: f.id, name: f.name, rule: parseRule(f.rule_json), folderId: f.folder_id }))
+      );
+    };
+    const jobs: Promise<void>[] = [];
+    if (want.has('videos'))
+      jobs.push(
+        Promise.all([listVideos(sortRef.current), listDeleted()]).then(([list, trash]) => {
+          setVideos(list);
+          setDeleted(trash);
+        })
+      );
+    if (want.has('tags'))
+      jobs.push(
+        Promise.all([tagCounts(), tagIndex(), listTags()]).then(([map, index, tagList]) => {
+          setCounts(map);
+          setTagMap(index);
+          setTags(tagList);
+        })
+      );
+    if (want.has('albums'))
+      jobs.push(
+        Promise.all([listAlbums(), listFolders(), albumMembership()]).then(([albumRows, folderRows, members]) => {
+          setAlbums(
+            albumRows.map((a) => ({
+              id: a.id,
+              name: a.name,
+              folderId: a.folder_id,
+              isPrivate: a.is_private === 1,
+              pinned: a.pinned === 1,
+              excludeUncategorized: a.exclude_uncategorized === 1,
+              lastUsedAt: a.last_used_at,
+            }))
+          );
+          setFolders(folderRows.map((f) => ({ id: f.id, name: f.name })));
+          setMembership(members);
+        })
+      );
+    // Keyword renames also rewrite smart-filter rules, and filters sit in folders.
+    if (want.has('tags') || want.has('albums')) jobs.push(loadFilters());
+    if (want.has('series'))
+      jobs.push(
+        Promise.all([listKept(), listSeries(), listMembers()]).then(([keptRows, seriesRows, seriesMembers]) => {
+          setKept(keptRows);
+          setSeries(seriesRows);
+          setMembers(seriesMembers);
+        })
+      );
+    await Promise.all(jobs);
+    if (want.has('videos')) setFreeGb(readFreeGb());
   }, []);
+  const refresh = useCallback(() => reload(ALL_PARTS), [reload]);
 
   // Saved view options first, so the first list already uses the saved sort.
   useEffect(() => {
@@ -837,6 +860,16 @@ export function useVaultData(): VaultData {
     [refresh]
   );
 
+  /** Run a write, then reload only the parts of the library it changed. */
+  const andReload = useCallback(
+    <A extends unknown[]>(parts: readonly LibraryPart[], job: (...args: A) => Promise<unknown>) =>
+      async (...args: A) => {
+        await job(...args);
+        await reload(parts);
+      },
+    [reload]
+  );
+
   /** Run a write, then reload everything. */
   const andRefresh = useCallback(
     <A extends unknown[]>(job: (...args: A) => Promise<unknown>) =>
@@ -876,16 +909,16 @@ export function useVaultData(): VaultData {
         return v ? ensureFilmstrip(v) : [];
       },
       onRate: andPatch((id: string, rating: number) => saveRating(id, rating), (id, rating) => ({ ids: [id], set: { rating } })),
-      onAddTag: andRefresh((id: string, name: string) => addTagToVideo(id, name)),
-      onRemoveTag: andRefresh((id: string, tagId: number) => removeTagFromVideo(id, tagId)),
-      onPinTag: andRefresh(setTagPinned),
-      renameTag: andRefresh(renameTag),
-      mergeTags: andRefresh(mergeTags),
-      deleteTag: andRefresh(deleteTag),
-      setTagColor: andRefresh(setTagColor),
+      onAddTag: andReload(['tags'], (id: string, name: string) => addTagToVideo(id, name)),
+      onRemoveTag: andReload(['tags'], (id: string, tagId: number) => removeTagFromVideo(id, tagId)),
+      onPinTag: andReload(['tags'], setTagPinned),
+      renameTag: andReload(['tags'], renameTag),
+      mergeTags: andReload(['tags'], mergeTags),
+      deleteTag: andReload(['tags'], deleteTag),
+      setTagColor: andReload(['tags'], setTagColor),
       deleteUnusedTags: async () => {
         const n = await deleteUnusedTags();
-        await refresh();
+        await reload(['tags']);
         return n;
       },
       onDeleteOne: async (item) => {
@@ -905,13 +938,19 @@ export function useVaultData(): VaultData {
         await refresh();
       },
       onRateMany: andPatch(setRatingMany, (ids, rating) => ({ ids, set: { rating } })),
-      onAddTagMany: andRefresh(addTagMany),
+      onAddTagMany: andReload(['tags'], addTagMany),
       onSetStatus: andPatch(setStatusMany, (ids, status) => ({ ids, set: { status } })),
       onSetFlag: andPatch(setFlagMany, (ids, flag) => ({ ids, set: { flag } })),
       onSetTray: andPatch(setTrayMany, (ids, inTray) => ({ ids, set: { inTray } })),
-      onClearTray: andRefresh(clearTray),
-      onSetText: andRefresh(setTextMany),
-      onAdjustDates: andRefresh(adjustDates),
+      onClearTray: async () => {
+        await clearTray();
+        setVideos((vs) => (vs.some((v) => v.inTray) ? vs.map((v) => (v.inTray ? { ...v, inTray: false } : v)) : vs));
+      },
+      onSetText: andPatch(setTextMany, (ids, field, value) => ({
+        ids,
+        set: field === 'title' ? { title: value?.trim() || null } : { notes: value?.trim() || null },
+      })),
+      onAdjustDates: andReload(['videos'], adjustDates),
       onViewOptionsChange: async (next) => {
         setViewOptions(next);
         applyTheme(next.theme);
@@ -926,28 +965,28 @@ export function useVaultData(): VaultData {
         if (!r.ok && r.message) await logPasscodeAttempt('faceid-failed').catch(() => undefined);
         return r;
       },
-      onSaveSmartFilter: andRefresh((f: { id?: number; name: string; rule: unknown }) =>
+      onSaveSmartFilter: andReload(['albums'], (f: { id?: number; name: string; rule: unknown }) =>
         saveSmartFilter({ id: f.id, name: f.name, ruleJson: JSON.stringify(f.rule) })
       ),
-      onDeleteSmartFilter: andRefresh(deleteSmartFilter),
-      onMoveSmartFilter: andRefresh(moveSmartFilterToFolder),
+      onDeleteSmartFilter: andReload(['albums'], deleteSmartFilter),
+      onMoveSmartFilter: andReload(['albums'], moveSmartFilterToFolder),
       onCreateAlbum: async (name, opts) => {
         const id = await createAlbum(name, opts);
-        await refresh();
+        await reload(['albums']);
         return id;
       },
-      onUpdateAlbum: andRefresh(updateAlbum),
-      onDeleteAlbum: andRefresh(deleteAlbum),
-      onAddToAlbums: andRefresh(addToAlbums),
-      onRemoveFromAlbum: andRefresh(removeFromAlbum),
-      onAlbumNameToKeyword: andRefresh(albumNameToKeyword),
+      onUpdateAlbum: andReload(['albums'], updateAlbum),
+      onDeleteAlbum: andReload(['albums'], deleteAlbum),
+      onAddToAlbums: andReload(['albums', 'videos'], addToAlbums),
+      onRemoveFromAlbum: andReload(['albums'], removeFromAlbum),
+      onAlbumNameToKeyword: andReload(['albums', 'tags'], albumNameToKeyword),
       onCreateFolder: async (name) => {
         const id = await createFolder(name);
-        await refresh();
+        await reload(['albums']);
         return id;
       },
-      onRenameFolder: andRefresh(renameFolder),
-      onDeleteFolder: andRefresh(deleteFolder),
+      onRenameFolder: andReload(['albums'], renameFolder),
+      onDeleteFolder: andReload(['albums'], deleteFolder),
       onShare: async (item) => {
         const v = byId(item.id);
         if (v) await shareFile(v.uri);
@@ -1155,40 +1194,40 @@ export function useVaultData(): VaultData {
       },
       getWeeklySummary: weeklySummaryOn,
       setWeeklySummary: async (on) => setWeeklySummary(on, await weeklyPlan()),
-      onRemoveTagMany: andRefresh(removeTagMany),
+      onRemoveTagMany: andReload(['tags'], removeTagMany),
       deletePlays,
       pickMetadataFile,
       applyMetadata: andRefresh(applyMetadata),
       wifi,
       ovCreateSeries: async (name, ids) => {
         const id = await createSeries(name, ids);
-        await refresh();
+        await reload(['series']);
         return id;
       },
-      ovAddToSeries: andRefresh(addToSeries),
-      ovRemoveFromSeries: andRefresh(removeFromSeries),
-      ovReorder: andRefresh(reorderSeries),
-      ovEpisodeName: andRefresh(setEpisodeLabel),
-      ovUpdateSeries: andRefresh(updateSeries),
+      ovAddToSeries: andReload(['series'], addToSeries),
+      ovRemoveFromSeries: andReload(['series'], removeFromSeries),
+      ovReorder: andReload(['series'], reorderSeries),
+      ovEpisodeName: andReload(['series'], setEpisodeLabel),
+      ovUpdateSeries: andReload(['series'], updateSeries),
       ovSeriesCover: async (id, from) => {
         const ok = await setSeriesCover(id, from);
-        await refresh();
+        await reload(['series']);
         return ok;
       },
-      ovDeleteSeries: andRefresh(deleteSeries),
-      ovUpdateKept: andRefresh(updateKept),
+      ovDeleteSeries: andReload(['series'], deleteSeries),
+      ovUpdateKept: andReload(['series'], updateKept),
       ovKeptCover: async (id) => {
         const ok = await pickKeptCover(id);
-        await refresh();
+        await reload(['series']);
         return ok;
       },
-      ovForget: andRefresh(forgetKept),
+      ovForget: andReload(['series'], forgetKept),
       loadOvExtra: async () => parseOvExtra(await getSetting(OV_EXTRA_KEY)),
       saveOvExtra: async (x) => {
         await setSetting(OV_EXTRA_KEY, JSON.stringify(x));
       },
     }),
-    [onImport, onImportFolder, onImportLink, runImport, refresh, andRefresh, andPatch, counts, tagNamesById, membership, byId, resolve]
+    [onImport, onImportFolder, onImportLink, runImport, refresh, reload, andRefresh, andReload, andPatch, counts, tagNamesById, membership, byId, resolve]
   );
 
   const inside = useInside(videos, true);
