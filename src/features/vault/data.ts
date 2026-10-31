@@ -259,7 +259,10 @@ export type VaultData = {
   /** Picture fingerprints by video id (app build 18 on), for Similar. */
   prints: Map<string, string[]>;
   /** What the phone saw inside the videos, for search. */
-  sceneRows: SceneRow[];
+  /** What was seen inside videos (one list kept aside; read `.current`). */
+  sceneRows: { current: SceneRow[] };
+  /** Changes when sceneRows does. */
+  sceneVersion: number;
   /** How far the look inside your videos has got (null before it starts). */
   insideProgress: InsideProgress | null;
   deletedItems: VaultItem[];
@@ -287,6 +290,8 @@ export type VaultData = {
   members: OvMember[];
 };
 
+/** Files whose length or fingerprint could not be read, and when (tried again after a week). */
+const PROBE_FAILED_KEY = 'vault.probeFailed';
 const PREFS_KEY = 'vault.prefs';
 
 /** The shape the pure recap helpers read. */
@@ -557,19 +562,37 @@ export function useVaultData(): VaultData {
       const purged = await purgeExpired(Date.now(), savedPrefs.trashDays);
       if (purged) console.log(`[PURGE] ${purged} expired videos removed`);
 
-      const missing = await videosMissingDuration();
+      // Files that could not be read are tried again after a week, not on every launch.
+      let failed: Record<string, number> = {};
+      try {
+        failed = JSON.parse((await getSetting(PROBE_FAILED_KEY)) ?? '{}') ?? {};
+      } catch {
+        failed = {};
+      }
+      const now = Date.now();
+      const due = (id: string, kind: string) => !failed[`${kind}:${id}`] || now - failed[`${kind}:${id}`] > 7 * 86_400_000;
+      let failedChanged = false;
+      const fail = (id: string, kind: string) => {
+        failed[`${kind}:${id}`] = now;
+        failedChanged = true;
+      };
+
+      const missing = (await videosMissingDuration()).filter((v) => due(v.id, 'd'));
       if (missing.length) console.log(`[DURATION] backfilling ${missing.length}`);
       for (const v of missing) {
         const ms = await probeDurationMs(v.uri);
         if (ms) await setDuration(v.id, ms);
+        else fail(v.id, 'd');
       }
 
-      const unkeyed = await videosMissingContentKey();
+      const unkeyed = (await videosMissingContentKey()).filter((v) => due(v.id, 'k'));
       if (unkeyed.length) console.log(`[DUP] fingerprinting ${unkeyed.length}`);
       for (const v of unkeyed) {
         const key = await contentKeyOf(v.uri);
         if (key) await setContentKey(v.id, key);
+        else fail(v.id, 'k');
       }
+      if (failedChanged) await setSetting(PROBE_FAILED_KEY, JSON.stringify(failed)).catch(() => undefined);
 
       const unread = await videosMissingMeta();
       if (unread.length) console.log(`[META] reading ${unread.length} files`);
@@ -588,10 +611,18 @@ export function useVaultData(): VaultData {
     return m;
   }, [tagMap]);
 
-  const items = useMemo(
-    () => videos.map((v) => toVaultItem(v, counts, tagNamesById, membership)),
-    [videos, counts, tagNamesById, membership]
-  );
+  // A video that did not change keeps the same item (its tile is not redrawn after a rating elsewhere).
+  const itemCache = useRef<{ key: unknown[]; map: WeakMap<Video, VaultItem> }>({ key: [], map: new WeakMap() });
+  const items = useMemo(() => {
+    const key = [counts, tagNamesById, membership];
+    if (itemCache.current.key.some((k, i) => k !== key[i]) || itemCache.current.key.length !== key.length) itemCache.current = { key, map: new WeakMap() };
+    const c = itemCache.current.map;
+    return videos.map((v) => {
+      let it = c.get(v);
+      if (!it) c.set(v, (it = toVaultItem(v, counts, tagNamesById, membership)));
+      return it;
+    });
+  }, [videos, counts, tagNamesById, membership]);
   const deletedItems = useMemo(
     () => deleted.map((v) => toVaultItem(v, counts, tagNamesById, membership)),
     [deleted, counts, tagNamesById, membership]
@@ -788,6 +819,24 @@ export function useVaultData(): VaultData {
     }
   }, [runImport]);
 
+  /**
+   * A write that only changes fields of the videos themselves (rating, status, flag, tray): the
+   * videos are updated in place instead of reloading the whole library (12 queries and every
+   * screen). Sorted by rating, the order may change, so that one still reloads.
+   */
+  const andPatch = useCallback(
+    <A extends unknown[]>(job: (...args: A) => Promise<unknown>, patch: (...args: A) => { ids: string[]; set: Partial<Video> }) =>
+      async (...args: A) => {
+        await job(...args);
+        const { ids, set } = patch(...args);
+        if ('rating' in set && sortRef.current === 'rating') return refresh();
+        const want = new Set(ids);
+        setVideos((vs) => vs.map((v) => (want.has(v.id) ? { ...v, ...set } : v)));
+        setDeleted((vs) => (vs.some((v) => want.has(v.id)) ? vs.map((v) => (want.has(v.id) ? { ...v, ...set } : v)) : vs));
+      },
+    [refresh]
+  );
+
   /** Run a write, then reload everything. */
   const andRefresh = useCallback(
     <A extends unknown[]>(job: (...args: A) => Promise<unknown>) =>
@@ -826,7 +875,7 @@ export function useVaultData(): VaultData {
         const v = byId(item.id);
         return v ? ensureFilmstrip(v) : [];
       },
-      onRate: andRefresh((id: string, rating: number) => saveRating(id, rating)),
+      onRate: andPatch((id: string, rating: number) => saveRating(id, rating), (id, rating) => ({ ids: [id], set: { rating } })),
       onAddTag: andRefresh((id: string, name: string) => addTagToVideo(id, name)),
       onRemoveTag: andRefresh((id: string, tagId: number) => removeTagFromVideo(id, tagId)),
       onPinTag: andRefresh(setTagPinned),
@@ -855,11 +904,11 @@ export function useVaultData(): VaultData {
         await purgeVideos(resolve(list));
         await refresh();
       },
-      onRateMany: andRefresh(setRatingMany),
+      onRateMany: andPatch(setRatingMany, (ids, rating) => ({ ids, set: { rating } })),
       onAddTagMany: andRefresh(addTagMany),
-      onSetStatus: andRefresh(setStatusMany),
-      onSetFlag: andRefresh(setFlagMany),
-      onSetTray: andRefresh(setTrayMany),
+      onSetStatus: andPatch(setStatusMany, (ids, status) => ({ ids, set: { status } })),
+      onSetFlag: andPatch(setFlagMany, (ids, flag) => ({ ids, set: { flag } })),
+      onSetTray: andPatch(setTrayMany, (ids, inTray) => ({ ids, set: { inTray } })),
       onClearTray: andRefresh(clearTray),
       onSetText: andRefresh(setTextMany),
       onAdjustDates: andRefresh(adjustDates),
@@ -1139,7 +1188,7 @@ export function useVaultData(): VaultData {
         await setSetting(OV_EXTRA_KEY, JSON.stringify(x));
       },
     }),
-    [onImport, onImportFolder, onImportLink, runImport, refresh, andRefresh, counts, tagNamesById, membership, byId, resolve]
+    [onImport, onImportFolder, onImportLink, runImport, refresh, andRefresh, andPatch, counts, tagNamesById, membership, byId, resolve]
   );
 
   const inside = useInside(videos, true);
@@ -1153,6 +1202,7 @@ export function useVaultData(): VaultData {
       items,
       prints: inside.prints,
       sceneRows: inside.rows,
+      sceneVersion: inside.version,
       insideProgress: inside.progress,
       deletedItems,
       duplicateGroups,
@@ -1178,6 +1228,6 @@ export function useVaultData(): VaultData {
       members,
     }),
     // prettier-ignore
-    [items, inside.prints, inside.rows, inside.progress, deletedItems, duplicateGroups, smartFilters, albums, folders, viewOptions, allTags, tagMap, freeGb, busy, status, actions, duplicateAsk, resume, prefs, wrappedRequest, clearWrappedRequest, openRequest, clearOpenRequest, kept, series, members]
+    [items, inside.prints, inside.rows, inside.version, inside.progress, deletedItems, duplicateGroups, smartFilters, albums, folders, viewOptions, allTags, tagMap, freeGb, busy, status, actions, duplicateAsk, resume, prefs, wrappedRequest, clearWrappedRequest, openRequest, clearOpenRequest, kept, series, members]
   );
 }

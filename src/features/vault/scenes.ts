@@ -74,9 +74,15 @@ async function lookInside(v: Video): Promise<{ prints: string[]; rows: SceneRow[
  * What the phone has seen inside your videos, kept up to date: new videos are
  * looked at in the background (one at a time, only while the app is open).
  */
-export function useInside(videos: Video[], enabled: boolean): { prints: Map<string, string[]>; rows: SceneRow[]; progress: InsideProgress | null } {
+export function useInside(
+  videos: Video[],
+  enabled: boolean
+): { prints: Map<string, string[]>; rows: { current: SceneRow[] }; version: number; progress: InsideProgress | null } {
   const [prints, setPrints] = useState<Map<string, string[]>>(new Map());
-  const [rows, setRows] = useState<SceneRow[]>([]);
+  // What was seen inside videos: one list kept aside (not in screen state, never copied whole);
+  // `version` changes when it does, for the few screens that search it.
+  const rows = useRef<SceneRow[]>([]);
+  const [version, setVersion] = useState(0);
   const [progress, setProgress] = useState<InsideProgress | null>(null);
   const scanned = useRef<Set<string> | null>(null);
   const videosRef = useRef(videos);
@@ -98,7 +104,8 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
       .then((all) => {
         scanned.current = all.scanned;
         setPrints(all.prints);
-        setRows(all.rows);
+        rows.current = all.rows;
+        setVersion((n) => n + 1);
       })
       .catch((e) => console.log(`[INSIDE] load failed: ${String(e)}`));
   }, []);
@@ -127,7 +134,10 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
             for (const [k, v] of p) out.set(k, v);
             return out;
           });
-          setRows((list) => [...list.filter((x) => !p.has(x.videoId)), ...r]);
+          // Videos looked at again replace their old rows; the rest stays where it is.
+          if ([...p.keys()].some((id) => rows.current.some((x) => x.videoId === id))) rows.current = rows.current.filter((x) => !p.has(x.videoId));
+          rows.current.push(...r);
+          setVersion((n) => n + 1);
         };
         while (alive.current && enabledRef.current) {
           const next = todo()[0];
@@ -165,5 +175,5 @@ export function useInside(videos: Video[], enabled: boolean): { prints: Map<stri
     return () => clearTimeout(t);
   }, [enabled, videos.length]);
 
-  return { prints, rows, progress };
+  return { prints, rows, version, progress };
 }
