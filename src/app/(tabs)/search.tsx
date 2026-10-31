@@ -95,9 +95,12 @@ export default function SearchRoute() {
     const resume = [...vault.resume].map(([id, ms]) => ({ id, ms, at: resumeSavedAt(id) }));
     // Moments inside your videos: "scene:<video id>:<ms>" so opening one starts there.
     const shownVideos = new Map(vault.items.filter((v) => !v.isPrivate && !v.deletedAt).map((v) => [v.id, v]));
-    const sceneRows = vault.sceneRows.filter((r) => shownVideos.has(r.videoId));
+    // Searched only when you type (not filtered whole every time a list changes); private ones left out.
     const scenes = (q: string) =>
-      findScenes(sceneRows, q, 20).map((h, n) => {
+      findScenes(vault.sceneRows.current, q, 60)
+        .filter((h) => shownVideos.has(h.videoId))
+        .slice(0, 20)
+        .map((h, n) => {
         const v = shownVideos.get(h.videoId)!;
         return {
           kind: 'video' as const,
@@ -134,7 +137,7 @@ export default function SearchRoute() {
       remember: (q) => saveRecent(rememberSearch(recentRef.current, q)),
       clearRecent: () => saveRecent([]),
     };
-  }, [vault.items, vault.resume, vault.sceneRows, audio.items, manga.items, simkl.items, router, week, recent, saveRecent]);
+  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, audio.items, manga.items, simkl.items, router, week, recent, saveRecent]);
 
   return (
     <ThemeContext.Provider value={palette}>
