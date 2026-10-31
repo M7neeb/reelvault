@@ -37,6 +37,7 @@ import type { Memory } from '../memories';
 import { highlightAt, monthRanges, storyFacts, yearRange, type RRange, type StoryFacts } from '../recap';
 import { fmtBytes, fmtDay, fmtMs, presetRange, recentWeeks, wrapped as buildWrapped, type Range, type VaultPlay, type Wrapped } from '../stats';
 import { friendlyName } from '../names';
+import { useAudioPlaybackOptional } from './audio/playback';
 import { CLUBS, clubJourney, clubOf, quizFrom, rewatchMeter, videoAge, type ClubKey } from '../wrappedExtras';
 import Fade from './Fade';
 import { aspectOf, Backdrop, fitFor } from './frame';
@@ -693,6 +694,18 @@ export function WrappedStory({
   /** Moves to the next card (set below, used by the quiz). */
   const advance = useRef<() => void>(() => undefined);
   const endLogged = useRef(false);
+  // Your audiobook pauses while the story plays videos with sound, and carries on when it closes.
+  const app = useAudioPlaybackOptional();
+  const appRef = useRef(app);
+  appRef.current = app;
+  useEffect(() => {
+    if (!enableVideo) return;
+    const was = appRef.current?.playing ?? false;
+    if (was) appRef.current?.pause();
+    return () => {
+      if (was) appRef.current?.resume();
+    };
+  }, [enableVideo]);
 
   const cards = useMemo<StoryCard[]>(() => {
     const out: StoryCard[] = [];
