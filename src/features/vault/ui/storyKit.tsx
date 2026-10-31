@@ -232,10 +232,10 @@ export function Rays({ color = '#ffffff', size, count = 14, opacity = 0.16 }: { 
   const half = size / 2;
   const base = (Math.PI * size) / count / 2.2;
   return (
-    <Animated.View pointerEvents="none" style={[{ position: 'absolute', width: size, height: size, opacity }, spin]}>
+    <Animated.View pointerEvents="none" style={[{ position: 'absolute', width: size, height: size }, spin]}>
       {Array.from({ length: count }, (_, i) => (
         <View key={i} style={{ position: 'absolute', width: size, height: size, alignItems: 'center', transform: [{ rotate: `${(360 / count) * i}deg` }] }}>
-          <View style={{ width: 0, height: 0, borderLeftWidth: base / 2, borderRightWidth: base / 2, borderTopWidth: half, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: color }} />
+          <View style={{ width: 0, height: 0, borderLeftWidth: base / 2, borderRightWidth: base / 2, borderTopWidth: half, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: color.startsWith('#') ? hexA(color, opacity) : color }} />
         </View>
       ))}
     </Animated.View>

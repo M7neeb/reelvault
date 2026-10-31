@@ -75,7 +75,10 @@ export function readingIn(series: MangaSeries[], reads: MangaRead[], start: numb
   for (const r of rs) hours[new Date(r.startedAt).getHours()] += r.readMs;
   const g = new Map<string, number>();
   for (const id of per.keys()) for (const t of live.find((s) => s.id === id)?.tags ?? []) g.set(t, (g.get(t) ?? 0) + 1);
-  const firstRead = (s: MangaSeries) => Math.min(...s.chapters.map((c) => c.readAt ?? Infinity), ...reads.filter((r) => r.seriesId === s.id).map((r) => r.startedAt));
+  // When each title was first read, in one pass (not a search through every read per title).
+  const firstBy = new Map<string, number>();
+  for (const r of reads) if (r.readMs > 0) firstBy.set(r.seriesId, Math.min(firstBy.get(r.seriesId) ?? Infinity, r.startedAt));
+  const firstRead = (s: MangaSeries) => s.chapters.reduce((m, c) => (c.readAt && c.readAt < m ? c.readAt : m), firstBy.get(s.id) ?? Infinity);
   return {
     start,
     end,
@@ -86,7 +89,8 @@ export function readingIn(series: MangaSeries[], reads: MangaRead[], start: numb
     titles: per.size,
     top: [...per.entries()]
       .map(([id, v]) => ({ id, ...v }))
-      .sort((a, b) => b.ms - a.ms || b.chapters - a.chapters)
+      // Time, or chapters as five minutes each where no time was kept (backups): a 10-minute title never beats 300 chapters.
+      .sort((a, b) => Math.max(b.ms, b.chapters * 300_000) - Math.max(a.ms, a.chapters * 300_000) || b.ms - a.ms)
       .slice(0, 5),
     busiestDay,
     busiestMonth: bm.month >= 0 ? bm : null,
@@ -136,20 +140,29 @@ const KIND_LABEL = { manga: 'Manga', manhwa: 'Manhwa', comic: 'Comics' } as cons
 export const kindLabel = (k: keyof typeof KIND_LABEL) => KIND_LABEL[k];
 
 /** Everything else the reading Wrapped shows, for a range (see readingIn for the basics). */
-export function wrappedMore(series: MangaSeries[], reads: MangaRead[], start: number, end: number): WrappedMore {
+/**
+ * `prevStart`: where the period before begins (last week's Monday, last
+ * month's 1st, last year's 1 January); it is compared over the same length of
+ * time as this one (so far), so "this week until Tuesday" meets "last week
+ * until Tuesday".
+ */
+export function wrappedMore(series: MangaSeries[], reads: MangaRead[], start: number, end: number, prevStart?: number): WrappedMore {
   const y = readingIn(series, reads, start, end);
   const live = series.filter((s) => !s.deletedAt);
   const ids = new Set(live.map((s) => s.id));
   const inside = (t: number | null | undefined) => typeof t === 'number' && t >= start && t < end;
   const rs = reads.filter((r) => counted(ids, r.seriesId) && inside(r.startedAt) && r.readMs > 0);
   const len = end - start;
-  const p = readingIn(series, reads, start - len, start);
+  const from = prevStart ?? start - len;
+  const p = readingIn(series, reads, from, Math.min(start, from + len));
 
   const total = y.hours.reduce((a, b) => a + b, 0);
-  const peak = total ? y.hours.indexOf(Math.max(...y.hours)) : -1;
   const sum = (from: number, to: number) => y.hours.slice(from, to).reduce((a, b) => a + b, 0);
   const parts = { morning: sum(5, 12), afternoon: sum(12, 17), evening: sum(17, 22), night: sum(22, 24) + sum(0, 5) };
   const partOfDay = total ? (Object.entries(parts).sort((a, b) => b[1] - a[1])[0][0] as WrappedMore['partOfDay']) : null;
+  // The peak hour is taken inside your part of the day, so "a night owl" never sits next to "peak: 6 PM".
+  const span = partOfDay === 'morning' ? [5, 6, 7, 8, 9, 10, 11] : partOfDay === 'afternoon' ? [12, 13, 14, 15, 16] : partOfDay === 'evening' ? [17, 18, 19, 20, 21] : [22, 23, 0, 1, 2, 3, 4];
+  const peak = total ? span.reduce((b, h) => (y.hours[h] > y.hours[b] ? h : b), span[0]) : -1;
 
   // Days of the week (Monday first) and the days you read, by time and chapters.
   const wd = Array.from({ length: 7 }, () => ({ ms: 0, chapters: 0 }));
@@ -212,7 +225,10 @@ export function wrappedMore(series: MangaSeries[], reads: MangaRead[], start: nu
   const favourite = fav ? { id: fav.id, rating: fav.rating } : null;
 
   // A title you came back to: read now, and first read at least six months before.
-  const firstRead = (s: MangaSeries) => Math.min(...s.chapters.map((c) => c.readAt ?? Infinity), ...reads.filter((r) => r.seriesId === s.id).map((r) => r.startedAt));
+  // When each title was first read, in one pass (not a search through every read per title).
+  const firstBy = new Map<string, number>();
+  for (const r of reads) if (r.readMs > 0) firstBy.set(r.seriesId, Math.min(firstBy.get(r.seriesId) ?? Infinity, r.startedAt));
+  const firstRead = (s: MangaSeries) => s.chapters.reduce((m, c) => (c.readAt && c.readAt < m ? c.readAt : m), firstBy.get(s.id) ?? Infinity);
   const back = readList
     .map((s) => ({ id: s.id, since: firstRead(s) }))
     .filter((x) => Number.isFinite(x.since) && x.since < start - 180 * DAY)

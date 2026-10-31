@@ -26,14 +26,15 @@ export function monthWrapRange(year: number, month: number): WrapRange {
   return { start: new Date(year, month, 1).getTime(), end: new Date(year, month + 1, 1).getTime(), label: `${MONTHS[month]} ${year}`, kind: 'month' };
 }
 
-export type TopTitle = { simklId: number; title: string; poster: string | null; type: SimklType; minutes: number; count: number; rating: number | null };
+/** `fanart`: the title's wide background picture (Simkl's), when known. */
+export type TopTitle = { simklId: number; title: string; poster: string | null; fanart?: string | null; type: SimklType; minutes: number; count: number; rating: number | null };
 
 /** Who the numbers say you are (one, the strongest). */
 export type WatcherKind = 'binger' | 'nightOwl' | 'weekender' | 'explorer' | 'loyal' | 'steady' | 'cinephile' | 'otaku';
 
 export const WATCHER: Record<WatcherKind, { name: string; line: string }> = {
   binger: { name: 'The Binger', line: 'One more episode was never just one more.' },
-  nightOwl: { name: 'The Night Owl', line: 'Most of it happened after 10 at night.' },
+  nightOwl: { name: 'The Night Owl', line: 'More of it happened after 10 pm than at any other time.' },
   weekender: { name: 'The Weekender', line: 'Saturdays and Sundays were for watching.' },
   explorer: { name: 'The Explorer', line: 'Always something new: lots of different titles.' },
   loyal: { name: 'The Loyal Fan', line: 'One title had most of your heart.' },
@@ -121,7 +122,7 @@ export function simklWrap(events: WatchEvent[], items: SimklItem[], meta: Map<nu
   const asTop = (id: number): TopTitle => {
     const i = byId.get(id)!;
     const c = per.get(id) ?? { minutes: 0, count: 0 };
-    return { simklId: id, title: i.title, poster: i.poster, type: i.type, minutes: c.minutes, count: c.count, rating: ratingOf(i) };
+    return { simklId: id, title: i.title, poster: i.poster, fanart: meta.get(id)?.fanart ?? null, type: i.type, minutes: c.minutes, count: c.count, rating: ratingOf(i) };
   };
   const top = [...per.keys()].map(asTop).sort((a, b) => b.minutes - a.minutes || b.count - a.count);
 

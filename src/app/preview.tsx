@@ -50,6 +50,50 @@ import SearchScreen from '@/features/simkl/ui/SearchScreen';
 import type { LocalSearch } from '@/features/simkl/ui/EverythingParts';
 import { findEverything, jumpBackIn, type FindInput } from '@/features/home/everything';
 import SimklScreen from '@/features/simkl/ui/SimklScreen';
+import SimklWrapped from '@/features/simkl/ui/SimklWrapped';
+import type { SimklWrap } from '@/features/simkl/simklWrapped';
+
+/** A made-up year of watching for the Simkl Wrapped in the preview (posters are not reachable here). */
+function previewSimklWrap(): SimklWrap {
+  const y = new Date().getFullYear();
+  const top = FIXTURE_SIMKL.slice(0, 5).map((t, i) => ({ simklId: t.simklId, title: t.title, poster: null, type: t.type, minutes: 900 - i * 120, count: 30 - i * 4, rating: 9 - i * 0.5 }));
+  return {
+    range: { start: new Date(y, 0, 1).getTime(), end: new Date(y + 1, 0, 1).getTime(), label: String(y), kind: 'year' },
+    minutes: 5400,
+    episodes: 160,
+    movies: 12,
+    titles: 24,
+    rewatches: 3,
+    activeDays: 140,
+    previousMinutes: 4100,
+    byType: [
+      { type: 'show', minutes: 3200, count: 120 },
+      { type: 'anime', minutes: 1500, count: 40 },
+      { type: 'movie', minutes: 700, count: 12 },
+    ],
+    top,
+    topGenres: [
+      { genre: 'Drama', minutes: 2100, share: 0.39 },
+      { genre: 'Comedy', minutes: 1300, share: 0.24 },
+      { genre: 'Action', minutes: 900, share: 0.17 },
+    ],
+    buckets: ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'].map((label, i) => ({ label, minutes: [300, 420, 380, 510, 600, 450, 700, 820, 560, 660, 0, 0][i] })),
+    busiest: { label: 'August', minutes: 820 },
+    biggestDay: { day: new Date(y, 7, 14).getTime(), minutes: 340, count: 8 },
+    binge: { title: top[0]?.title ?? 'A show', poster: null, count: 8, day: new Date(y, 7, 14).getTime() },
+    longestStreak: 12,
+    favouriteWeekday: { name: 'Saturday', share: 0.24 },
+    peakHour: 22,
+    nightShare: 0.42,
+    weekendShare: 0.38,
+    discoveries: top.slice(1, 4),
+    finished: top.slice(0, 3).map((t) => ({ simklId: t.simklId, title: t.title, poster: null, rating: t.rating })),
+    bestRated: top.slice(0, 3).map((t) => ({ simklId: t.simklId, title: t.title, poster: null, rating: t.rating ?? 8 })),
+    first: { title: top[2]?.title ?? 'A show', at: new Date(y, 0, 2).getTime() },
+    last: { title: top[0]?.title ?? 'A show', at: new Date(y, 9, 20).getTime() },
+    watcher: 'nightOwl',
+  };
+}
 import { Text, View } from 'react-native';
 import { TabBarSpace } from '@/features/vault/ui/chrome';
 import Icon from '@/features/vault/ui/Icon';
@@ -638,6 +682,7 @@ export default function PreviewRoute() {
       <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
         <AudioPlaybackProvider items={audioData.items} actions={audioData.actions} enabled={false}>
         {view?.startsWith('audio-player') || view === 'audio-read' ? <AudioPreviewStart book={view === 'audio-read'} items={audioData.items} /> : null}
+        {view === 'simkl-wrapped' ? <SimklWrapped wrap={previewSimklWrap()} onClose={() => undefined} /> : null}
         <VaultScreen
           audio={audioData}
           manga={mangaData}

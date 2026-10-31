@@ -46,6 +46,7 @@ import IconButton from './IconButton';
 import { gradient, iconOr, Medallion } from './insightParts';
 import { DUR, EASE_OUT, enterUp, PressableScale, SPRING, useReducedMotion } from './motion';
 import { Segment } from './sheets';
+import { FilmStrips, ImageRiver, Tint } from './scenes';
 import { Aurora, Confetti, CountUp, CoverWall, Float, GrowBar, GrowColumn, hexA, Marquee, Pulse, Rays, Tilt, Words } from './storyKit';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
@@ -421,6 +422,8 @@ type StoryCard = {
   interactive?: boolean;
   /** 'words' cards carry their own pictures (lists, grids): the video behind them stays dim. */
   focus?: 'words';
+  /** Where its video starts, as a share of the video (0.15 = 15% in): a random part instead of the usual moment. */
+  startFrac?: number;
 };
 
 export type StoryInput = {
@@ -497,7 +500,7 @@ function StoryMedia({
       .replaceAsync({ uri: item.uri })
       .then(() => {
         if (!live) return;
-        player.currentTime = (starts.get(item.id) ?? highlightAt(item.durationMs)) / 1000;
+        player.currentTime = (card.startFrac !== undefined && item.durationMs ? item.durationMs * card.startFrac : (starts.get(item.id) ?? highlightAt(item.durationMs))) / 1000;
         if (!paused) player.play();
         // Fade the sound in instead of cutting in.
         let v = 0;
@@ -1684,6 +1687,16 @@ export function WrappedStory({
         </>
       ),
     });
+    // Every card plays one of your videos: the ones without their own get your most watched in turn,
+    // each from a different, random-looking part (so it is never the same opening twice).
+    const pool = [...new Set([...top.map((x) => x.id), ...(input.subject ? [] : [...items.keys()])])].filter((id) => items.has(id)).slice(0, 24);
+    let k = 0;
+    for (const c of out) {
+      if (c.media.some((id) => items.has(id)) || !pool.length) continue;
+      c.media = [pool[k % pool.length]];
+      c.startFrac = 0.15 + (((k * 37 + c.key.length * 11) % 60) / 100);
+      k++;
+    }
     return out;
   }, [input, thumbs, width, height, reduce, memories]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1779,6 +1792,19 @@ export function WrappedStory({
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }, { scale: 1 - Math.min(0.1, ty.value / 3000) }], borderRadius: Math.min(30, ty.value / 4) }));
 
   const hasMedia = card.media.some((id) => items.has(id));
+  // Cards without a video of their own: your videos as rolling film or a flowing wall, in the card's colours.
+  const sceneSources = useMemo(() => [...thumbs.values()].filter(Boolean).slice(0, 30) as NonNullable<VaultItem['thumbSource']>[], [thumbs]);
+  // Built once per card (the deck re-renders often for its progress bar).
+  const scene = useMemo(
+    () =>
+      !hasMedia && sceneSources.length > 0 ? (
+        <Animated.View key={`sc${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
+          {i % 3 === 1 ? <ImageRiver sources={sceneSources} columns={2} aspect={0.62} tilt={-8} speed={1.2} /> : <FilmStrips sources={sceneSources} count={i % 3 === 0 ? 3 : 2} frame={i % 3 === 0 ? 84 : 110} />}
+          <Tint colors={card.colors} strength={0.62} />
+        </Animated.View>
+      ) : null,
+    [hasMedia, sceneSources, i, card.colors]
+  );
   // A card with a video shows it: light scrims only, the words at the bottom.
   const videoFirst = hasMedia && card.focus !== 'words';
   const [nowId, setNowId] = useState<string | null>(null);
@@ -1791,21 +1817,20 @@ export function WrappedStory({
             <Animated.View key={`bg${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill}>
               <Aurora colors={card.colors} width={width} height={height} />
             </Animated.View>
+            {scene}
             <StoryMedia card={card} items={items} starts={starts} enableVideo={enableVideo} muted={muted} paused={paused} onCurrent={setNowId} />
             {videoFirst && (
               <View
                 pointerEvents="none"
                 style={[
                   StyleSheet.absoluteFill,
-                  gradient(
-                    `linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 18%, ${hexA(card.colors[0], 0.06)} 42%, ${hexA(card.colors[1], 0.78)} 72%, ${hexA(card.colors[1], 0.96)} 100%)`,
-                    'rgba(0,0,0,0.25)'
-                  ),
+                  // A plain dark shade where the words sit: the video keeps its own colours.
+                  gradient('linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 18%, rgba(0,0,0,0.05) 42%, rgba(0,0,0,0.62) 72%, rgba(0,0,0,0.85) 100%)', 'rgba(0,0,0,0.25)'),
                 ]}
               />
             )}
             {hasMedia && !videoFirst && (
-              <View style={[StyleSheet.absoluteFill, gradient(`linear-gradient(170deg, ${hexA(card.colors[0], 0.4)} 0%, ${hexA(card.colors[1], 0.7)} 55%, rgba(0,0,0,0.88) 100%)`, hexA(card.colors[1], 0.6))]} />
+              <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.82) 100%)', 'rgba(0,0,0,0.55)')]} />
             )}
             {card.backdrop && (
               <Animated.View key={`bd${i}`} entering={FadeIn.duration(DUR.slow)} style={StyleSheet.absoluteFill} pointerEvents="none">
