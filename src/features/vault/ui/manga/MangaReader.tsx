@@ -276,6 +276,8 @@ export default function MangaReader({
         if (!live) return;
         const at = resume.current ? Math.min(chapter.lastPage, Math.max(0, pages.length - 1)) : 0;
         firstPage.current = at;
+        moved.current = false;
+        atEnd.current = false;
         session.current = { startedAt: Date.now(), pages: new Set([at]) };
         setPage(at);
         setLoaded({ chapterId: chapter.id, pages });
@@ -307,6 +309,14 @@ export default function MangaReader({
   const scrolledAt = useRef(0);
   const listRef = useRef<FlatList<Item>>(null);
   const atEnd = useRef(false);
+  /**
+   * The long strip has been moved by you (a drag, auto-scroll, volume keys). Until then what is
+   * "on screen" means nothing: the pages are not measured yet, so the whole chapter, end card
+   * included, counts as visible, which would mark it read and lose your page the moment it opens.
+   */
+  const moved = useRef(false);
+  /** Saves where you are right now (set below; used when the app goes to the background). */
+  const saveNowRef = useRef<() => void>(() => undefined);
   const session = useRef({ startedAt: Date.now(), pages: new Set<number>([0]) });
   const pageRef = useRef(0);
   pageRef.current = page;
@@ -382,6 +392,7 @@ export default function MangaReader({
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
       if (st === 'background' && !away.current) {
+        saveNowRef.current();
         endSession();
         away.current = true;
       } else if (st === 'active' && away.current) {
@@ -425,12 +436,16 @@ export default function MangaReader({
     };
   }, [count, page, next?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reached the end card, then left (Close or Next) before the save ran: it still counts as read.
-  const saveIfFinished = () => {
-    if (atEnd.current && count) actions.saveProgress(series.id, chapter.id, count - 1, true).catch(() => undefined);
+  // Leaving (Close, another chapter, the app going away): where you are is saved at once, not after
+  // the usual short wait (which a quick close would cut off). Read only if you reached the end.
+  const saveNow = () => {
+    if (!count || loaded?.chapterId !== chapter.id) return;
+    const finished = pageRef.current >= count - 1 || atEnd.current;
+    actions.saveProgress(series.id, chapter.id, finished ? count - 1 : Math.min(pageRef.current, count - 1), finished).catch(() => undefined);
   };
+  saveNowRef.current = saveNow;
   const close = () => {
-    saveIfFinished();
+    saveNow();
     endSession();
     onClose();
   };
@@ -438,13 +453,15 @@ export default function MangaReader({
   const openChapter = (c: MangaChapter | null, startAt: 'start' | 'end' = 'start') => {
     if (!c) return;
     tick();
-    saveIfFinished();
+    saveNow();
     endSession();
     // A new session now, so leaving before the next chapter loads does not count this time twice.
     session.current = { startedAt: Date.now(), pages: new Set([0]) };
     void startAt;
-    resume.current = false;
+    // A chapter you had started (and not finished) opens where you left it.
+    resume.current = !c.readAt && c.lastPage > 0;
     atEnd.current = false;
+    moved.current = false;
     firstPage.current = 0;
     setAspects({});
     setPage(0);
@@ -475,6 +492,7 @@ export default function MangaReader({
   // Auto-scroll: the strip moves down by itself; touching it stops it.
   useEffect(() => {
     if (!auto || mode !== 'webtoon') return;
+    moved.current = true;
     const pxPerSec = AUTO_SCROLL_SPEEDS[prefs.autoSpeed - 1] ?? 60;
     let last = Date.now();
     const id = setInterval(() => {
@@ -538,6 +556,7 @@ export default function MangaReader({
       last = now;
       // The first press already jumped; scrolling runs once the button is clearly held.
       if (!h.held || now >= h.until) return;
+      moved.current = true;
       offset.current = Math.max(0, offset.current + (h.dir * pxPerSec * dt) / 1000);
       listRef.current?.scrollToOffset({ offset: offset.current, animated: false });
     }, 16);
@@ -548,6 +567,8 @@ export default function MangaReader({
 
   const goTo = useCallback(
     (index: number, animated = true) => {
+      // Pages not here yet: nothing to go to (and "page 0 of 0" must not count as the end).
+      if (!count) return;
       const i = Math.max(0, Math.min(count, index));
       if (mode === 'webtoon') {
         if (i >= count) listRef.current?.scrollToEnd({ animated });
@@ -593,6 +614,7 @@ export default function MangaReader({
       }
       const left = x <= 0.3;
       const forward = (rtl ? left : !left) !== prefs.tapInvert;
+      moved.current = true;
       setChrome(false);
       const at = slotOf(page);
       goTo(forward ? (slots[at + 1]?.[0] ?? count) : (slots[at - 1]?.[0] ?? 0));
@@ -601,6 +623,7 @@ export default function MangaReader({
   );
   const toggleChrome = useCallback(() => setChrome((c) => !c), []);
   volumeTurn.current = (forward: boolean) => {
+    moved.current = true;
     const at = slotOf(page);
     goTo(forward ? (slots[at + 1]?.[0] ?? count) : (slots[at - 1]?.[0] ?? 0));
   };
@@ -621,6 +644,7 @@ export default function MangaReader({
 
   // Webtoon: the page at the top of the screen is the one you are on.
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken<Item>[] }) => {
+    if (!moved.current) return;
     const first = viewableItems.find((v) => v.item && v.item.img);
     const last = viewableItems[viewableItems.length - 1];
     atEnd.current = !!(last?.item && last.item.img === null);
@@ -764,6 +788,7 @@ export default function MangaReader({
             }}
             scrollEventThrottle={32}
             onScrollBeginDrag={() => {
+              moved.current = true;
               setChrome(false);
               setAuto(false);
             }}
