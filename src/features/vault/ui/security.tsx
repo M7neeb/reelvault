@@ -217,6 +217,7 @@ export function SettingsSheet({
   onImportFolder,
   onExportBackup,
   onExportSpreadsheet,
+  onExportAllData,
   onImportBackup,
   canMakeSmaller,
   importQuality,
@@ -246,6 +247,7 @@ export function SettingsSheet({
   onImportFolder: () => void;
   onExportBackup: () => void;
   onExportSpreadsheet?: () => void;
+  onExportAllData?: () => void;
   onImportBackup: () => void;
   canMakeSmaller: boolean;
   /** Make Smaller quality for every import; null = off. */
@@ -343,6 +345,13 @@ export function SettingsSheet({
         <Row icon="history" tint="#FF9F0A" title="Restore from a file" onPress={onImportBackup} />
         {onExportSpreadsheet && <Row icon="list" tint="#5E5CE6" title="Export a spreadsheet (CSV)" onPress={onExportSpreadsheet} />}
       </Rows>
+      {onExportAllData && (
+        <Rows
+          label="Your data"
+          footer="Everything in one ZIP for your own stats: videos, movies, shows, anime, audio, manga and every watch, listen and reading session, as spreadsheets (CSV) plus one JSON file. Private items are left out.">
+          <Row icon="stats" tint="#FF9F0A" title="Export all data" sub="For spreadsheets or your own Wrapped" onPress={onExportAllData} />
+        </Rows>
+      )}
       {backups && <AutoBackups backups={backups} />}
 
       {pick === 'passcode' && (

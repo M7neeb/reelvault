@@ -33,6 +33,7 @@ import { getDb } from '@/db';
 import { CLOUD } from '@/features/vault/cloud/cloudLogic';
 import { cloudConfigured, cloudConnected, cloudDownload, cloudList, cloudSignIn, cloudSignOut } from '@/features/vault/cloud/cloud';
 import { autoBackup, exportLibraryInfo, exportSpreadsheet, importLibraryInfo, listAutoBackups } from '@/features/vault/backup';
+import { exportAllData } from '@/features/vault/dataExport';
 import { appStorage, recoverInbox, tidy } from '@/features/vault/housekeeping';
 import { incomingName, onIncoming } from '@/features/vault/incoming';
 import { contentKeyOf } from '@/features/vault/contentKey';
@@ -1125,6 +1126,11 @@ export function useVaultData(): VaultData {
       onExportSpreadsheet: async () => {
         const n = await exportSpreadsheet();
         setStatus(`A spreadsheet of ${n} videos exported`);
+      },
+      onExportAllData: async () => {
+        setStatus('Gathering your data…');
+        const { items, sessions } = await exportAllData();
+        setStatus(`${items} titles and ${sessions} sessions exported`);
       },
       onImportBackup: async () => {
         try {

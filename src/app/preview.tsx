@@ -557,6 +557,7 @@ export default function PreviewRoute() {
       onOpenMap: () => {},
       onExportBackup: noop,
       onExportSpreadsheet: noop,
+      onExportAllData: noop,
       onImportBackup: noop,
       getSecurity: async () => security,
       setPasscode: async (kind) => setSecurity((s) => ({ ...s, passcodeKind: kind })),

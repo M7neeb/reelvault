@@ -1775,6 +1775,7 @@ function VaultScreenBody({
           }}
           onExportBackup={() => actions.onExportBackup().catch(fail('BACKUP'))}
           onExportSpreadsheet={() => actions.onExportSpreadsheet().catch(fail('CSV'))}
+          onExportAllData={() => actions.onExportAllData().catch(fail('EXPORT'))}
           onImportBackup={() => actions.onImportBackup().catch(fail('BACKUP'))}
           backups={{ list: actions.listAutoBackups, now: actions.backupNow, restore: actions.restoreAutoBackup }}
           canMakeSmaller={actions.canMakeSmaller()}

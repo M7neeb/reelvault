@@ -497,6 +497,8 @@ export type VaultActions = {
   onExportBackup: () => Promise<void>;
   /** Your library as a spreadsheet (CSV) to share or save. */
   onExportSpreadsheet: () => Promise<void>;
+  /** Every section (videos, movies, shows, anime, audio, manga, history) as CSV tables in one ZIP. */
+  onExportAllData: () => Promise<void>;
   /** Dropbox and OneDrive. */
   cloud?: CloudBridge;
   onImportBackup: () => Promise<void>;
