@@ -104,6 +104,8 @@ import type { Category, SimklItem, SimklScreenProps } from '@/features/simkl/ui/
 import { resolveScheme } from '@/features/vault/ui/logic';
 import { themeFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
 import { fixtureAudioData } from '@/features/vault/ui/audio/audioFixtures';
+import { fixtureBooksData } from '@/features/vault/ui/books/bookFixtures';
+import { parseReaderPrefs, type ReaderPrefs } from '@/features/vault/books/bookLogic';
 import { fixtureMangaData } from '@/features/vault/ui/manga/mangaFixtures';
 import { AudioPlaybackProvider, useAudioPlayback } from '@/features/vault/ui/audio/playback';
 
@@ -359,6 +361,9 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'audio-info': { audio: { info: true } },
   'audio-stats': { audio: { dashboard: true } },
   'audio-deleted': { audio: { deleted: true } },
+  books: {},
+  'books-empty': {},
+  'books-read': { books: { reader: true } },
   manga: {},
   'manga-detail': { manga: { detail: true } },
   'manga-reader': { manga: { reader: true } },
@@ -426,7 +431,9 @@ function optionsFromUrl(params: Record<string, string | undefined>): ViewOptions
 }
 
 export default function PreviewRoute() {
-  const { view, theme, layout, size, info, group, cat, sview, look, accent, q } = useLocalSearchParams<{
+  const { view, theme, layout, size, info, group, cat, sview, look, accent, q, reader: readerParam } = useLocalSearchParams<{
+    /** Books reader look as JSON, e.g. {"theme":"paper"}. */
+    reader?: string;
     /** Search tab: words already typed. */
     q?: string;
     look?: string;
@@ -445,7 +452,7 @@ export default function PreviewRoute() {
   const [prefs, setPrefs] = useState<VaultPrefs>({
     ...DEFAULT_VAULT_PREFS,
     ratingLabels: SUGGESTED_LABELS,
-    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : view?.startsWith('audio') ? 'audio' : view?.startsWith('manga') ? 'manga' : 'watch',
+    videosMode: view === 'ov' || view?.startsWith('ov-') ? 'overview' : view?.startsWith('audio') ? 'audio' : view?.startsWith('manga') ? 'manga' : view?.startsWith('books') ? 'books' : 'watch',
     // `badges-new` shows the reveal of newly earned badges.
     badgesSeen: view === 'badges-new' ? [] : null,
     events: [
@@ -666,6 +673,11 @@ export default function PreviewRoute() {
   const bridge = useMemo(() => fixtureBridge(first), []);
   const audioData = useMemo(() => fixtureAudioData(), []);
   const mangaData = useMemo(() => fixtureMangaData(), []);
+  const [readerPrefs, setReaderPrefs] = useState<ReaderPrefs>(() => parseReaderPrefs(readerParam ?? null));
+  const booksData = useMemo(() => {
+    const d = fixtureBooksData(view === 'books-empty');
+    return { ...d, reader: readerPrefs, actions: { ...d.actions, setReader: async (r: ReaderPrefs) => setReaderPrefs(r) } };
+  }, [view, readerPrefs]);
 
   if (!inBrowser) return null;
 
@@ -689,6 +701,7 @@ export default function PreviewRoute() {
         <VaultScreen
           audio={audioData}
           manga={mangaData}
+          books={booksData}
           items={items}
           allTags={FIXTURE_TAGS}
           tagMap={FIXTURE_TAG_MAP}

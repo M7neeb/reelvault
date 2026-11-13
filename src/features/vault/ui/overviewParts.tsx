@@ -15,7 +15,6 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-na
 
 import { tick } from './haptics';
 import { SPRING } from './motion';
-import Icon from './Icon';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 
@@ -58,21 +57,29 @@ export function toOvVideo(v: VaultItem): OvVideo {
 }
 
 /** Watch ⟷ Overview, at the top of the Videos tab in both modes. The pill slides across. */
-export type VideosMode = 'watch' | 'overview' | 'audio' | 'manga';
+export type VideosMode = 'books' | 'watch' | 'overview' | 'audio' | 'manga';
 
-/** Watch · Overview · Audio · Manga: the four ways of the Videos tab. */
+/** Books · Watch · Overview · Audio · Manga: the five ways of the Videos tab. */
+// Five across a phone leaves no room for icons next to the names.
+const ITEMS = [
+  ['books', 'Books'],
+  ['watch', 'Watch'],
+  ['overview', 'Overview'],
+  ['audio', 'Audio'],
+  ['manga', 'Manga'],
+] as const;
+
 export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m: VideosMode) => void }) {
   const styles = useStyles(makeStyles);
-  const p = usePalette();
   const [sizes, setSizes] = useState<{ x: number; w: number }[]>([]);
-  const index = mode === 'watch' ? 0 : mode === 'overview' ? 1 : mode === 'audio' ? 2 : 3;
+  const index = ITEMS.findIndex(([key]) => key === mode);
   const x = useSharedValue(0);
   const w = useSharedValue(0);
   useEffect(() => {
     const s = sizes[index];
     if (!s) return;
     // The other side starts where the pill was, so switching slides it across.
-    const other = mode === 'watch' ? sizes[1] : sizes[0];
+    const other = index === 0 ? sizes[1] : sizes[0];
     if (other && w.value === 0) {
       x.value = other.x;
       w.value = other.w;
@@ -81,16 +88,10 @@ export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m:
     w.value = withSpring(s.w, SPRING);
   }, [index, sizes]); // eslint-disable-line react-hooks/exhaustive-deps
   const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }], width: w.value }));
-  const items = [
-    ['watch', 'Watch', 'play'],
-    ['overview', 'Overview', 'star'],
-    ['audio', 'Audio', 'headphones'],
-    ['manga', 'Manga', 'book'],
-  ] as const;
   return (
     <View style={styles.mode} accessibilityRole="tablist">
       <Animated.View pointerEvents="none" style={[styles.modePill, pill]} />
-      {items.map(([key, label, icon], i) => {
+      {ITEMS.map(([key, label], i) => {
         const on = mode === key;
         return (
           <TouchableOpacity
@@ -111,7 +112,6 @@ export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m:
             }}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}>
-            <Icon name={icon} size={12} color={on ? '#fff' : p.textSecondary} />
             <Text style={[styles.modeText, on && styles.modeTextOn]}>{label}</Text>
           </TouchableOpacity>
         );
@@ -165,6 +165,6 @@ const makeStyles = (p: Palette) =>
     mode: { flexDirection: 'row', alignSelf: 'stretch', maxWidth: 460, backgroundColor: p.elevated, borderRadius: 999, padding: 3 },
     modeItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 4, paddingVertical: 7, borderRadius: 999 },
     modePill: { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 999, backgroundColor: p.accent },
-    modeText: { color: p.textSecondary, fontSize: 13.5, fontWeight: '700' },
+    modeText: { color: p.textSecondary, fontSize: 13, fontWeight: '700' },
     modeTextOn: { color: '#fff' },
   });

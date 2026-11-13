@@ -110,6 +110,7 @@ import { friendlyName } from '../names';
 import { DuplicatePrompt } from './dupPrompt';
 import AudioSection from './audio/AudioSection';
 import MangaSection from './manga/MangaSection';
+import BooksSection from './books/BooksSection';
 import type { MixVideos } from './manga/MangaWrapped';
 import { useAudioControlsOptional } from './audio/playback';
 
@@ -165,6 +166,7 @@ function VaultScreenBody({
   duplicateAsk = null,
   audio,
   manga,
+  books,
   enableVideo = true,
   simkl,
   resume = EMPTY_RESUME,
@@ -326,6 +328,10 @@ function VaultScreenBody({
   useEffect(() => {
     if (audioBusy && prefs.videosMode !== 'audio') actions.setPrefs({ ...prefs, videosMode: 'audio' }).catch(() => undefined);
   }, [audioBusy]); // eslint-disable-line react-hooks/exhaustive-deps
+  const booksBusy = books?.busy ?? false;
+  useEffect(() => {
+    if (booksBusy && prefs.videosMode !== 'books') actions.setPrefs({ ...prefs, videosMode: 'books' }).catch(() => undefined);
+  }, [booksBusy]); // eslint-disable-line react-hooks/exhaustive-deps
   // Cards on the home rows play their video (the one most in view); everything stops while something opens on top.
   const live = useLiveScope({
     enableVideo,
@@ -457,7 +463,7 @@ function VaultScreenBody({
       if (!v && !items.length) return;
       setJump(null);
       if (!v) return;
-      if (prefs.videosMode === 'audio' || prefs.videosMode === 'manga') switchMode('watch');
+      if (prefs.videosMode === 'audio' || prefs.videosMode === 'manga' || prefs.videosMode === 'books') switchMode('watch');
       setStartAt(jump.atMs ?? null);
       setPlaying(v);
       return;
@@ -1790,6 +1796,12 @@ function VaultScreenBody({
           }}
           onClose={() => setSettingsOpen(false)}
         />
+      )}
+
+      {videosMode === 'books' && books && (
+        <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
+          <BooksSection data={books} onMode={switchMode} dev={dev?.books} />
+        </Animated.View>
       )}
 
       {videosMode === 'manga' && manga && (

@@ -14,6 +14,7 @@ import type { SimklType } from '@/features/simkl/ui/types';
 import { useVaultData } from '@/features/vault/data';
 import { useAudioData } from '@/features/vault/audio/audioData';
 import { useMangaData } from '@/features/vault/manga/mangaData';
+import { useBooksData } from '@/features/vault/books/bookData';
 import { resolveScheme } from '@/features/vault/ui/logic';
 import { themeFor, type Palette } from '@/features/vault/ui/theme';
 import { setRotateEverywhere } from '@/features/vault/rotate';
@@ -25,6 +26,8 @@ type Home = {
   audio: ReturnType<typeof useAudioData>;
   /** The Manga section (in the Videos tab). */
   manga: ReturnType<typeof useMangaData>;
+  /** Books to read (in the Videos tab). */
+  books: ReturnType<typeof useBooksData>;
   palette: Palette;
 };
 
@@ -41,6 +44,7 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
   const simkl = useSimklData();
   const audio = useAudioData();
   const manga = useMangaData();
+  const books = useBooksData();
   const system = useColorScheme();
   const palette = useMemo(() => themeFor(resolveScheme(vault.viewOptions.theme, system), vault.viewOptions), [vault.viewOptions, system]);
   const router = useRouter();
@@ -55,7 +59,7 @@ export function HomeDataProvider({ children }: { children: React.ReactNode }) {
     if (simkl.openRequest) router.navigate(ROUTE_FOR[simkl.openRequest.type] as Href);
   }, [simkl.openRequest, router]);
 
-  const value = useMemo(() => ({ vault, simkl, audio, manga, palette }), [vault, simkl, audio, manga, palette]);
+  const value = useMemo(() => ({ vault, simkl, audio, manga, books, palette }), [vault, simkl, audio, manga, books, palette]);
   return <HomeContext.Provider value={value}>{children}</HomeContext.Provider>;
 }
 

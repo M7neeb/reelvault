@@ -353,7 +353,7 @@ function parsePrefs(json: string | null): VaultPrefs {
       ratingLabels: parseRatingLabels(JSON.stringify(r?.ratingLabels ?? {})),
       resumeEnabled: typeof r?.resumeEnabled === 'boolean' ? r.resumeEnabled : DEFAULT_VAULT_PREFS.resumeEnabled,
       holdForSpeed: typeof r?.holdForSpeed === 'boolean' ? r.holdForSpeed : DEFAULT_VAULT_PREFS.holdForSpeed,
-      videosMode: r?.videosMode === 'overview' || r?.videosMode === 'audio' || r?.videosMode === 'manga' ? r.videosMode : 'watch',
+      videosMode: ['books', 'overview', 'audio', 'manga'].includes(r?.videosMode) ? r.videosMode : 'watch',
       keepUnrated: typeof r?.keepUnrated === 'boolean' ? r.keepUnrated : DEFAULT_VAULT_PREFS.keepUnrated,
       hiddenSuggestions: Array.isArray(r?.hiddenSuggestions) ? r.hiddenSuggestions.filter((x: unknown) => typeof x === 'string').slice(0, 200) : [],
       showcase: Array.isArray(r?.showcase) ? r.showcase.filter((x: unknown) => typeof x === 'string').slice(0, 3) : [],
@@ -420,8 +420,9 @@ export function useVaultData(): VaultData {
   const [members, setMembers] = useState<OvMember[]>([]);
 
   useEffect(() => {
+    // A fresh start of the app always opens on Books; switching later is remembered while it runs.
     getSetting(PREFS_KEY)
-      .then((v) => setPrefsState(parsePrefs(v)))
+      .then((v) => setPrefsState({ ...parsePrefs(v), videosMode: 'books' }))
       .catch(() => undefined);
     resumePoints()
       .then(setResume)

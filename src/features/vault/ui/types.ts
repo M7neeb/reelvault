@@ -622,7 +622,7 @@ export type VaultPrefs = {
   holdForSpeed: boolean;
   /** The Videos tab: watch your videos, or rate and track them (Overview). */
   /** Watch (the grid), Overview (rate and track), Audio (your audio files and books) or Manga. */
-  videosMode: 'watch' | 'overview' | 'audio' | 'manga';
+  videosMode: 'books' | 'watch' | 'overview' | 'audio' | 'manga';
   /** Keep the info of removed videos you never rated too (not only rated ones). */
   keepUnrated: boolean;
   /** Series suggestions you dismissed (by their name). */
@@ -712,7 +712,7 @@ export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   ratingLabels: {},
   resumeEnabled: true,
   holdForSpeed: true,
-  videosMode: 'watch',
+  videosMode: 'books',
   keepUnrated: true,
   hiddenSuggestions: [],
   showcase: [],
@@ -785,6 +785,8 @@ export type VaultScreenProps = {
   audio?: import('./audio/audioTypes').AudioData;
   /** The Manga section (manga, manhwa, comics). */
   manga?: import('./manga/mangaTypes').MangaData;
+  /** Books to read (EPUB), the first mode of this tab. */
+  books?: import('./books/bookTypes').BooksData;
   /**
    * Mount the real <VideoView>. Off in the browser preview, where fixture
    * videos have no playable source - the stage is black either way.
@@ -843,6 +845,7 @@ export type VaultScreenProps = {
     /** Audio mode: open the player, an item's details, the stats or Recently Deleted. */
     audio?: import('./audio/AudioSection').AudioDev;
     manga?: import('./manga/MangaSection').MangaDev;
+    books?: { reader?: boolean };
     metaImportOpen?: boolean;
     wifiOpen?: boolean;
     historyStats?: boolean;

@@ -17,7 +17,7 @@ import VaultScreen from '@/features/vault/ui/VaultScreen';
 import { AudioPlaybackProvider } from '@/features/vault/ui/audio/playback';
 
 export default function VideosRoute() {
-  const { vault, simkl, audio, manga, palette } = useHome();
+  const { vault, simkl, audio, manga, books, palette } = useHome();
   const insets = useSafeAreaInsets();
   return (
     <ThemeContext.Provider value={palette}>
@@ -27,6 +27,7 @@ export default function VideosRoute() {
       <VaultScreen
         audio={audio}
         manga={manga}
+        books={books}
         items={vault.items}
         allTags={vault.allTags}
         tagMap={vault.tagMap}

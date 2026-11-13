@@ -1,14 +1,14 @@
 /**
  * Addresses the app is opened with. A video sent from another app arrives as
  * a file:// address: it goes to the import queue and the app opens normally on
- * the library (instead of trying to show the file as a page). The quick links
- * Audio files and EPUB books go to the Audio section the same way. The quick links
+ * the library (instead of trying to show the file as a page). EPUB books go
+ * to Books and audio files to the Audio section the same way. The quick links
  * for a Control Center button (reelvault://favourite, memory, random) open
  * the library, which then plays what was asked for. Everything else (the
  * Simkl sign-in) passes through unchanged.
  */
 
-import { pushIncoming, pushIncomingAudio, isIncomingAudio, isIncomingVideo } from '@/features/vault/incoming';
+import { pushIncoming, pushIncomingAudio, pushIncomingBook, isIncomingAudio, isIncomingBook, isIncomingVideo } from '@/features/vault/incoming';
 import { pushQuick, quickKind } from '@/features/vault/quickOpen';
 
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
@@ -16,7 +16,10 @@ export function redirectSystemPath({ path }: { path: string; initial: boolean })
     pushIncoming(path);
     return '/';
   }
-  // Audio and EPUB books go to the Audio section.
+  if (isIncomingBook(path)) {
+    pushIncomingBook(path);
+    return '/';
+  }
   if (isIncomingAudio(path)) {
     pushIncomingAudio(path);
     return '/';

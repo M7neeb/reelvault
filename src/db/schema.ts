@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 15;
 
 export type Migration = {
   version: number;
@@ -581,6 +581,32 @@ export const MIGRATIONS: Migration[] = [
         words    TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_video_scenes_video ON video_scenes(video_id);
+    `,
+  },
+  {
+    version: 15,
+    sql: `
+      -- Books to read (EPUB), unpacked into Documents/books/<id>/. One row per book, with where you stopped.
+      CREATE TABLE IF NOT EXISTS books (
+        id            TEXT PRIMARY KEY,
+        folder        TEXT NOT NULL,
+        filename      TEXT NOT NULL,
+        size          INTEGER NOT NULL DEFAULT 0,
+        title         TEXT,
+        author        TEXT,
+        language      TEXT,
+        description   TEXT,
+        cover         TEXT,
+        chapter_sizes TEXT NOT NULL DEFAULT '[]',
+        content_key   TEXT,
+        chapter       INTEGER NOT NULL DEFAULT 0,
+        block         INTEGER NOT NULL DEFAULT 0,
+        chapter_frac  REAL NOT NULL DEFAULT 0,
+        read_ms       INTEGER NOT NULL DEFAULT 0,
+        last_read_at  INTEGER,
+        finished_at   INTEGER,
+        added_at      INTEGER NOT NULL
+      );
     `,
   },
 ];

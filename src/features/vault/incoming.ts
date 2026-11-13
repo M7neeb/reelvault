@@ -44,13 +44,13 @@ export function pushIncoming(path: string): void {
   }
 }
 
-/* ------------------------------------------------- audio and EPUB books */
+/* --------------------------------------------------------- audio */
 
-const AUDIO = /\.(mp3|m4a|m4b|aac|wav|aif|aiff|aifc|caf|flac|alac|opus|oga|ogg|mp2|amr|3ga|epub)$/i;
+const AUDIO = /\.(mp3|m4a|m4b|aac|wav|aif|aiff|aifc|caf|flac|alac|opus|oga|ogg|mp2|amr|3ga)$/i;
 const audioQueue: string[] = [];
 const audioListeners = new Set<(uris: string[]) => void>();
 
-/** True for a file address that looks like audio or an EPUB book (for the Audio section). */
+/** True for a file address that looks like audio (for the Audio section). */
 export function isIncomingAudio(path: string | null | undefined): boolean {
   if (!path || !/^file:\/\//i.test(path)) return false;
   try {
@@ -84,5 +84,39 @@ export function onIncoming(fn: (uris: string[]) => void): () => void {
   if (queue.length) fn(queue.splice(0));
   return () => {
     listeners.delete(fn);
+  };
+}
+
+/* ----------------------------------------------------- EPUB books */
+
+const BOOK = /\.epub$/i;
+const bookQueue: string[] = [];
+const bookListeners = new Set<(uris: string[]) => void>();
+
+/** True for a file address that looks like an EPUB book (for Books). */
+export function isIncomingBook(path: string | null | undefined): boolean {
+  if (!path || !/^file:\/\//i.test(path)) return false;
+  try {
+    return BOOK.test(decodeURIComponent(path.split('?')[0]));
+  } catch {
+    return BOOK.test(path.split('?')[0]);
+  }
+}
+
+export function pushIncomingBook(path: string): void {
+  if (bookQueue.includes(path)) return;
+  bookQueue.push(path);
+  if (bookListeners.size) {
+    const batch = bookQueue.splice(0);
+    for (const fn of bookListeners) fn(batch);
+  }
+}
+
+/** Get every book sent in so far, and the ones that come later. */
+export function onIncomingBook(fn: (uris: string[]) => void): () => void {
+  bookListeners.add(fn);
+  if (bookQueue.length) fn(bookQueue.splice(0));
+  return () => {
+    bookListeners.delete(fn);
   };
 }

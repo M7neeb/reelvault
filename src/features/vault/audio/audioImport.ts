@@ -157,7 +157,7 @@ function blankItem(id: string, kind: 'audio' | 'book', filename: string, now: nu
  * Unpacks an EPUB into `folder` (one piece at a time), reads it and writes
  * .book.json. Returns the book. Throws with a readable reason.
  */
-async function unpackBook(epub: File, folder: string, onStep?: (text: string) => void): Promise<BookJson> {
+export async function unpackBook(epub: File, folder: string, onStep?: (text: string) => void): Promise<BookJson> {
   const src = openSource(epub);
   try {
     const entries = readZipIndex(src).filter((e) => !e.isDir);
