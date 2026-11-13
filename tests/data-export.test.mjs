@@ -158,7 +158,7 @@ test('tables: per-item totals, summary line per section and an Everything line',
 
 test('an empty library still gives every file with headers', () => {
   const tables = exportTables(empty());
-  assert.equal(tables.length, 12);
+  assert.equal(tables.length, 14);
   for (const t of tables) assert.ok(tableCsv(t).startsWith('﻿' + t.columns[0]));
   assert.match(readme(tables, empty().exportedAt), /activity\.csv\s+0 rows\./);
 });
@@ -177,4 +177,24 @@ test('CSV and JSON carry the same rows; text that looks like a formula is made s
   assert.equal(json.tables.activity[0].Source, 'ReelVault');
   assert.equal(Date.parse(json.tables.activity[0].Timestamp), json.tables.activity[0]['Unix ms']);
   assert.equal(json.tables.summary.at(-1).Section, 'Everything');
+});
+
+test('books and their sittings go into the export', () => {
+  const input = {
+    ...empty(),
+    books: [{ id: 'cp', title: 'Crime and Punishment', filename: 'cp.epub', author: 'Fyodor Dostoevsky', language: 'en', chapters: 53, progress: 0.1234, addedAt: 1_000, lastReadAt: 9_000, finishedAt: null }],
+    bookReads: [
+      { bookId: 'cp', startedAt: 5_000, readMs: 30 * 60_000, progressFrom: 0, progressTo: 0.06 },
+      { bookId: 'gone', startedAt: 6_000, readMs: 60_000, progressFrom: 0, progressTo: 0.1 },
+    ],
+  };
+  const tables = exportTables(input);
+  const acts = tables.find((t) => t.file === 'activity.csv').rows;
+  assert.equal(acts.length, 1);
+  assert.equal(acts[0][9], 'Book');
+  assert.equal(acts[0][12], '0% to 6%');
+  const books = tables.find((t) => t.file === 'books.csv').rows;
+  assert.deepEqual([books[0][1], books[0][5], books[0][12], books[0][13]], ['Crime and Punishment', 12.3, 1, 30]);
+  const sum = tables.find((t) => t.file === 'summary.csv').rows.find((r) => r[0] === 'Book');
+  assert.equal(sum[1], 1);
 });

@@ -11,6 +11,7 @@ import { getDb } from '@/db';
 
 import { openSink } from './audio/audioFiles';
 import { zipWriter } from './audio/zip';
+import { progressAt } from './books/bookLogic';
 import { exportTables, myRating, readme, tableCsv, tablesJson, type ExportInput } from './dataExportFormat';
 import { shareFile } from './share';
 
@@ -117,8 +118,32 @@ async function collect(): Promise<ExportInput> {
     'SELECT series_id, chapter_id, started_at, read_ms, pages FROM manga_reads ORDER BY started_at;'
   );
 
+  const books = await rows<{
+    id: string; title: string | null; filename: string; author: string | null; language: string | null; chapter_sizes: string; chapter: number; chapter_frac: number;
+    added_at: number; last_read_at: number | null; finished_at: number | null; rating: number; status: string | null;
+  }>('SELECT * FROM books WHERE deleted_at IS NULL AND is_private = 0 ORDER BY added_at;');
+  const bookTags = groupNames(await rows<{ book_id: string; name: string }>('SELECT book_id, name FROM book_tags;'), 'book_id');
+  const bookMarks = await rows<{ book_id: string; kind: string; chapter: number; text: string | null; note: string | null; created_at: number }>(
+    "SELECT book_id, kind, chapter, text, note, created_at FROM book_marks WHERE kind = 'highlight' ORDER BY book_id, chapter, block;"
+  );
+  const bookReads = await rows<{ book_id: string; started_at: number; read_ms: number; progress_from: number; progress_to: number }>('SELECT * FROM book_reads ORDER BY started_at;');
+
   return {
     exportedAt: Date.now(),
+    books: books.map((b) => {
+      let sizes: number[] = [];
+      try {
+        sizes = JSON.parse(b.chapter_sizes);
+      } catch {
+        // none
+      }
+      return {
+        id: b.id, title: b.title, filename: b.filename, author: b.author, language: b.language, chapters: sizes.length, progress: progressAt(sizes, b.chapter, b.chapter_frac),
+        addedAt: b.added_at, lastReadAt: b.last_read_at, finishedAt: b.finished_at, rating: b.rating, status: b.status, keywords: bookTags.get(b.id) ?? [],
+      };
+    }),
+    highlights: bookMarks.map((m) => ({ bookId: m.book_id, chapter: m.chapter, text: m.text ?? '', note: m.note, createdAt: m.created_at })),
+    bookReads: bookReads.map((r) => ({ bookId: r.book_id, startedAt: r.started_at, readMs: r.read_ms, progressFrom: r.progress_from, progressTo: r.progress_to })),
     videos: videos.map((v) => ({
       id: v.id,
       title: v.title,
@@ -249,6 +274,6 @@ export async function exportAllData(): Promise<{ sessions: number; items: number
   }
   sink.close();
   await shareFile(file.uri);
-  const items = input.videos.length + input.titles.length + input.audio.length + input.manga.length;
+  const items = input.videos.length + input.titles.length + input.audio.length + input.manga.length + (input.books?.length ?? 0);
   return { sessions: tables.find((t) => t.file === 'activity.csv')?.rows.length ?? 0, items };
 }

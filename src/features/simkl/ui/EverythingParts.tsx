@@ -41,7 +41,8 @@ export type LocalSearch = {
 export const KIND_ICON: Record<FindKind, IconName> = {
   video: 'videos',
   audio: 'headphones',
-  book: 'book',
+  book: 'headphones',
+  ebook: 'book',
   manga: 'bookOpen',
   movie: 'movie',
   show: 'tv',
@@ -71,7 +72,7 @@ export function JumpShelf({ local, onTitle }: { local: LocalSearch; onTitle: (si
       <Text style={styles.section}>Jump back in</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
         {local.jump.map((j) => {
-          const tall = isTitle(j.kind) || j.kind === 'manga' || j.kind === 'book';
+          const tall = isTitle(j.kind) || j.kind === 'manga' || j.kind === 'book' || j.kind === 'ebook';
           return (
             <PressableScale
               key={`${j.kind}:${j.id}`}
@@ -97,7 +98,7 @@ export function JumpShelf({ local, onTitle }: { local: LocalSearch; onTitle: (si
                   </Text>
                 </View>
                 <View style={styles.playDot}>
-                  <Icon name={j.kind === 'manga' || j.kind === 'book' ? 'bookOpen' : isTitle(j.kind) ? 'check' : 'play'} size={13} color="#fff" />
+                  <Icon name={j.kind === 'manga' || j.kind === 'book' || j.kind === 'ebook' ? 'bookOpen' : isTitle(j.kind) ? 'check' : 'play'} size={13} color="#fff" />
                 </View>
               </View>
               {j.progress !== null && (
@@ -113,8 +114,8 @@ export function JumpShelf({ local, onTitle }: { local: LocalSearch; onTitle: (si
   );
 }
 
-const ORDER: FindKind[] = ['video', 'audio', 'book', 'manga', 'show', 'movie', 'anime'];
-const PLURAL: Record<FindKind, string> = { video: 'Videos', audio: 'Audio', book: 'Books', manga: 'Manga', show: 'Shows', movie: 'Movies', anime: 'Anime' };
+const ORDER: FindKind[] = ['ebook', 'video', 'audio', 'book', 'manga', 'show', 'movie', 'anime'];
+const PLURAL: Record<FindKind, string> = { video: 'Videos', audio: 'Audio', book: 'Audiobooks', ebook: 'Books', manga: 'Manga', show: 'Shows', movie: 'Movies', anime: 'Anime' };
 
 /** Your library's matches, with a chip per kind when there are several kinds. */
 export function LocalResults({
@@ -165,7 +166,7 @@ export function LocalResults({
       )}
       <View style={styles.list}>
         {shown.slice(0, max).map((f) => {
-          const tall = isTitle(f.kind) || f.kind === 'manga' || f.kind === 'book';
+          const tall = isTitle(f.kind) || f.kind === 'manga' || f.kind === 'book' || f.kind === 'ebook';
           return (
             <TouchableOpacity
               key={`${f.kind}:${f.id}`}
@@ -281,6 +282,7 @@ export function WeekCard({ week }: { week: WeekSummary | null }) {
       before: b.watchMs,
     });
   if (week.chapters || b.chapters) tiles.push({ key: 'm', icon: 'bookOpen', label: 'Manga', value: `${week.chapters} ${week.chapters === 1 ? 'chapter' : 'chapters'}`, now: week.chapters, before: b.chapters });
+  if (week.readMs || b.readMs) tiles.push({ key: 'r', icon: 'book', label: 'Reading', value: fmtTime(week.readMs), now: week.readMs, before: b.readMs });
   if (week.listenMs || b.listenMs) tiles.push({ key: 'a', icon: 'headphones', label: 'Listening', value: fmtTime(week.listenMs), now: week.listenMs, before: b.listenMs });
   if (!tiles.length) return null;
   return (

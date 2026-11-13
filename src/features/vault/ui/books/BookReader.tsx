@@ -9,7 +9,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, type ViewToken } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, type ViewToken } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,11 @@ import { chapterBlocks, type Block } from '../../audio/epub';
 import {
   chapterLabel,
   countedMs,
+  findInBlocks,
+  highlightRuns,
+  sentencesOf,
+  type BookHit,
+  type BookMark,
   displayTitle,
   fmtLeft,
   fmtProgress,
@@ -35,13 +40,13 @@ import Icon from '../Icon';
 import { GatedModal as Modal, useWindowDimensions } from '../screen';
 import type { BookActions, BookUi, OpenedBook } from './bookTypes';
 
-type Ink = { bg: string; text: string; soft: string; faint: string; rule: string; accent: string; bar: string; dark: boolean };
+type Ink = { bg: string; text: string; soft: string; faint: string; rule: string; accent: string; bar: string; mark: string; dark: boolean };
 
 /** Warm, low-glare page colours; night is never pure white on pure black. */
 export const INKS: Record<ReaderTheme, Ink> = {
-  paper: { bg: '#FAF7F0', text: '#221E19', soft: '#6E665B', faint: '#A69E92', rule: '#E4DDD0', accent: '#A4522C', bar: '#F3EFE6', dark: false },
-  sepia: { bg: '#F2E8D3', text: '#3A2E20', soft: '#7A6A52', faint: '#AE9E84', rule: '#DFD1B4', accent: '#9A4F24', bar: '#EADFC7', dark: false },
-  night: { bg: '#141312', text: '#DAD4C8', soft: '#948C80', faint: '#5E5850', rule: '#2A2826', accent: '#D69467', bar: '#1C1B19', dark: true },
+  paper: { bg: '#FAF7F0', text: '#221E19', soft: '#6E665B', faint: '#A69E92', rule: '#E4DDD0', accent: '#A4522C', bar: '#F3EFE6', mark: '#F2DE9C', dark: false },
+  sepia: { bg: '#F2E8D3', text: '#3A2E20', soft: '#7A6A52', faint: '#AE9E84', rule: '#DFD1B4', accent: '#9A4F24', bar: '#EADFC7', mark: '#E6C97F', dark: false },
+  night: { bg: '#141312', text: '#DAD4C8', soft: '#948C80', faint: '#5E5850', rule: '#2A2826', accent: '#D69467', bar: '#1C1B19', mark: '#5B4618', dark: true },
 };
 const THEME_NAMES: Record<ReaderTheme, string> = { paper: 'Paper', sepia: 'Sepia', night: 'Night' };
 
@@ -50,9 +55,9 @@ const MAX_MEASURE = 620;
 
 type Shown = { index: number; blocks: Block[]; ids: Record<string, number> };
 
-type BlockProps = { block: Block; ink: Ink; prefs: ReaderPrefs; uriOf: (p: string) => string; first: boolean };
+type BlockProps = { block: Block; ink: Ink; prefs: ReaderPrefs; uriOf: (p: string) => string; first: boolean; highlights?: string[]; marked?: boolean; onHold?: () => void };
 
-const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first }: BlockProps) {
+const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first, highlights, marked, onHold }: BlockProps) {
   const [ratio, setRatio] = useState(1.5);
   const family = prefs.font === 'serif' ? SERIF : undefined;
   if (b.k === 'hr') return <View style={[styles.hr, { backgroundColor: ink.faint }]} />;
@@ -76,8 +81,11 @@ const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first }
   const scale = b.k === 'h1' ? 1.45 : b.k === 'h2' ? 1.28 : head ? 1.1 : b.k === 'cap' ? 0.84 : 1;
   const fs = Math.round(size * scale);
   const lh = head ? Math.round(fs * 1.25) : lineHeightFor(fs, prefs.spacing);
-  return (
+  const runs = highlights?.length ? highlightRuns(b.runs, highlights) : b.runs;
+  const text = (
     <Text
+      onLongPress={onHold}
+      suppressHighlighting
       style={[
         {
           color: b.k === 'cap' ? ink.soft : ink.text,
@@ -93,14 +101,40 @@ const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first }
         b.k === 'pre' && { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: Math.round(size * 0.82) },
       ]}>
       {b.k === 'li' ? '•  ' : ''}
-      {b.runs.map((r, n) => (
-        <Text key={n} style={[r.b && styles.bold, r.i && styles.italic]}>
+      {runs.map((r, n) => (
+        <Text key={n} style={[r.b && styles.bold, r.i && styles.italic, 'hl' in r && r.hl ? { backgroundColor: ink.mark } : null]}>
           {r.t}
         </Text>
       ))}
     </Text>
   );
+  if (!marked) return text;
+  // A bookmarked paragraph: a ribbon in the margin beside it.
+  return (
+    <View>
+      <View style={[styles.ribbon, { backgroundColor: ink.accent }]} />
+      {text}
+    </View>
+  );
 });
+
+/** Contents · Bookmarks and highlights, at the top of the panel. */
+function PanelTabs({ ink, tab, onTab, marks }: { ink: Ink; tab: 'contents' | 'marks'; onTab: (t: 'contents' | 'marks') => void; marks: number }) {
+  return (
+    <View style={[styles.tabs, { borderBottomColor: ink.rule }]}>
+      {(
+        [
+          ['contents', 'Contents'],
+          ['marks', marks ? `Marks · ${marks}` : 'Marks'],
+        ] as const
+      ).map(([k, label]) => (
+        <TouchableOpacity key={k} onPress={() => onTab(k)} style={[styles.tab, tab === k && { borderBottomColor: ink.accent }]} accessibilityState={{ selected: tab === k }}>
+          <Text style={[styles.tabText, { color: tab === k ? ink.text : ink.soft }]}>{label}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
 
 export default function BookReader({
   book,
@@ -108,12 +142,15 @@ export default function BookReader({
   prefs,
   onPrefs,
   onClose,
+  startAt,
 }: {
   book: BookUi;
   actions: BookActions;
   prefs: ReaderPrefs;
   onPrefs: (p: ReaderPrefs) => void;
   onClose: () => void;
+  /** Open here instead of the saved place (a bookmark or highlight). */
+  startAt?: { chapter: number; block: number } | null;
 }) {
   const ink = INKS[prefs.theme];
   const insets = useSafeAreaInsets();
@@ -124,10 +161,15 @@ export default function BookReader({
 
   const [opened, setOpened] = useState<OpenedBook | null>(null);
   const [failed, setFailed] = useState(false);
-  const [chapter, setChapter] = useState(book.lastReadAt ? book.chapter : 0);
+  const [chapter, setChapter] = useState(startAt ? startAt.chapter : book.lastReadAt ? book.chapter : 0);
   const [shown, setShown] = useState<Shown | null>(null);
   const [chrome, setChrome] = useState(!book.lastReadAt);
-  const [panel, setPanel] = useState<'contents' | 'look' | null>(null);
+  const [panel, setPanel] = useState<'contents' | 'marks' | 'search' | 'look' | 'hold' | null>(null);
+  const [marks, setMarks] = useState<BookMark[]>([]);
+  const [held, setHeld] = useState<{ chapter: number; block: number; text: string } | null>(null);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<{ q: string; list: BookHit[]; done: number } | null>(null);
   const [placed, setPlaced] = useState(false);
   const [topBlock, setTopBlock] = useState(0);
   const [finished, setFinished] = useState(!!book.finishedAt);
@@ -135,7 +177,7 @@ export default function BookReader({
   const list = useRef<FlatList<Block>>(null);
   const cache = useRef(new Map<number, Shown>());
   /** Where to land once a chapter is shown: a paragraph, or an element id from the contents. */
-  const landing = useRef<{ block: number } | { id: string } | null>(book.lastReadAt ? { block: book.block } : null);
+  const landing = useRef<{ block: number } | { id: string } | null>(startAt ? { block: startAt.block } : book.lastReadAt ? { block: book.block } : null);
   const place = useRef({ chapter, block: 0 });
   const dirty = useRef(false);
   const lastMove = useRef(Date.now());
@@ -262,6 +304,126 @@ export default function BookReader({
     setChapter(c);
   };
 
+  /* ------------------------------------------- bookmarks and highlights */
+
+  useEffect(() => {
+    actions
+      .loadMarks(book.id)
+      .then(setMarks)
+      .catch(() => undefined);
+  }, [book.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const here = shown?.index ?? chapter;
+  const { hlBy, bookmarked, marksKey } = useMemo(() => {
+    const hl = new Map<number, string[]>();
+    const bm = new Set<number>();
+    for (const m of marks) {
+      if (m.chapter !== here) continue;
+      if (m.kind === 'bookmark') bm.add(m.block);
+      else if (m.text) hl.set(m.block, [...(hl.get(m.block) ?? []), m.text]);
+    }
+    return { hlBy: hl, bookmarked: bm, marksKey: `${prefs.theme}${prefs.size}${prefs.font}${prefs.spacing}:${marks.length}:${marks.map((m) => m.id).join(',')}` };
+  }, [marks, here, prefs]);
+  const hereMark = marks.find((m) => m.kind === 'bookmark' && m.chapter === here && Math.abs(m.block - topBlock) <= 1) ?? null;
+
+  const toggleBookmark = (at?: number) => {
+    tick();
+    const block = typeof at === 'number' ? at : topBlock;
+    const existing = marks.find((m) => m.kind === 'bookmark' && m.chapter === here && (typeof at === 'number' ? m.block === at : Math.abs(m.block - topBlock) <= 1));
+    if (existing) {
+      removeMark(existing, true);
+      return;
+    }
+    const b = shown?.blocks[block];
+    const text = b && 'runs' in b ? b.runs.map((r) => r.t).join('').slice(0, 160) : null;
+    actions
+      .addMark({ bookId: book.id, kind: 'bookmark', chapter: here, block, text, note: null, createdAt: Date.now() })
+      .then((m) => setMarks((l) => [...l, m].sort((x, y) => x.chapter - y.chapter || x.block - y.block)))
+      .catch(() => undefined);
+    if (panel === 'hold') setPanel(null);
+  };
+
+  const removeMark = (m: BookMark, quiet = false) => {
+    if (!quiet) tick();
+    setMarks((l) => l.filter((x) => x.id !== m.id));
+    actions.deleteMark(m.id).catch(() => undefined);
+  };
+
+  const hold = (block: number, text: string) => {
+    if (!text.trim()) return;
+    tick();
+    setHeld({ chapter: here, block, text });
+    setPicked(new Set());
+    setPanel('hold');
+  };
+
+  const addHighlight = (whole: boolean) => {
+    if (!held) return;
+    const full = held.text;
+    // Where each sentence sits in the paragraph, found in order so a repeated phrase can't match early.
+    const spans: [number, number][] = [];
+    let cursor = 0;
+    for (const t of sentencesOf(full)) {
+      const at = full.indexOf(t, cursor);
+      spans.push(at >= 0 ? [at, at + t.length] : [cursor, cursor]);
+      cursor = at >= 0 ? at + t.length : cursor;
+    }
+    // Sentences next to each other become one highlight; gaps make separate ones.
+    const runs: string[] = [];
+    if (whole) runs.push(full.trim());
+    else {
+      let start = -1;
+      let end = -1;
+      spans.forEach(([a, z], i) => {
+        if (picked.has(i)) {
+          if (start < 0) start = a;
+          end = z;
+        } else if (start >= 0) {
+          runs.push(full.slice(start, end));
+          start = -1;
+        }
+      });
+      if (start >= 0) runs.push(full.slice(start, end));
+    }
+    for (const text of runs) {
+      actions
+        .addMark({ bookId: book.id, kind: 'highlight', chapter: held.chapter, block: held.block, text, note: null, createdAt: Date.now() })
+        .then((m) => setMarks((l) => [...l, m].sort((x, y) => x.chapter - y.chapter || x.block - y.block)))
+        .catch(() => undefined);
+    }
+    tick();
+    setPanel(null);
+  };
+
+  /* ------------------------------------------------- search in the book */
+
+  const searchRun = useRef(0);
+  const runSearch = (q: string) => {
+    if (!opened || q.trim().length < 2) return;
+    const run = ++searchRun.current;
+    const found: BookHit[] = [];
+    setHits({ q: q.trim(), list: [], done: 0 });
+    (async () => {
+      for (let c = 0; c < opened.chapters.length; c++) {
+        if (run !== searchRun.current) return;
+        let parsed = cache.current.get(c);
+        if (!parsed) {
+          const xhtml = await opened.chapterText(c).catch(() => null);
+          parsed = { index: c, ...chapterBlocks(xhtml ?? '', opened.chapters[c]?.href ?? '') };
+        }
+        const paras = parsed.blocks.flatMap((b, i) => ('runs' in b ? [{ block: i, text: b.runs.map((r) => r.t).join('') }] : []));
+        found.push(...findInBlocks(paras, c, q, 300 - found.length));
+        // Let the screen breathe between chapters.
+        if (c % 4 === 3 || found.length >= 300) {
+          setHits({ q: q.trim(), list: [...found], done: c + 1 });
+          await new Promise((r) => setTimeout(r, 0));
+        }
+        if (found.length >= 300) break;
+      }
+      if (run === searchRun.current) setHits({ q: q.trim(), list: found, done: opened.chapters.length });
+    })().catch(() => undefined);
+  };
+
   // Leaving the app or closing the book keeps your place.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
@@ -348,8 +510,20 @@ export default function BookReader({
               key={`${shown.index}`}
               data={blocks}
               keyExtractor={(_, i) => `${i}`}
-              renderItem={({ item, index }) => <BlockView block={item} ink={ink} prefs={prefs} uriOf={opened!.uriOf} first={index === 0} />}
-              extraData={prefs}
+              renderItem={({ item, index }) => (
+                <BlockView
+                  block={item}
+                  ink={ink}
+                  prefs={prefs}
+                  uriOf={opened!.uriOf}
+                  first={index === 0}
+                  highlights={hlBy.get(index)}
+                  marked={bookmarked.has(index)}
+                  onHold={'runs' in item ? () => hold(index, item.runs.map((r) => r.t).join('')) : undefined}
+                />
+              )}
+              extraData={marksKey}
+              // prefs are read by every paragraph
               style={{ opacity: placed ? 1 : 0 }}
               contentContainerStyle={{ paddingHorizontal: side, paddingTop: 18, paddingBottom: 40 }}
               ListFooterComponent={footer}
@@ -423,8 +597,14 @@ export default function BookReader({
                 </Text>
               )}
             </View>
-            <TouchableOpacity onPress={() => setPanel((x) => (x === 'contents' ? null : 'contents'))} style={styles.topBtn} accessibilityLabel="Contents" hitSlop={8}>
-              <Icon name="list" size={20} color={panel === 'contents' ? ink.accent : ink.text} />
+            <TouchableOpacity onPress={() => toggleBookmark()} style={styles.topBtn} accessibilityLabel={hereMark ? 'Remove the bookmark' : 'Bookmark this page'} hitSlop={8}>
+              <Icon name={hereMark ? 'bookmark' : 'bookmarkAdd'} size={19} color={hereMark ? ink.accent : ink.text} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPanel((x) => (x === 'search' ? null : 'search'))} style={styles.topBtn} accessibilityLabel="Search in the book" hitSlop={8}>
+              <Icon name="search" size={19} color={panel === 'search' ? ink.accent : ink.text} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setPanel((x) => (x === 'contents' || x === 'marks' ? null : 'contents'))} style={styles.topBtn} accessibilityLabel="Contents, bookmarks and highlights" hitSlop={8}>
+              <Icon name="list" size={20} color={panel === 'contents' || panel === 'marks' ? ink.accent : ink.text} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setPanel((x) => (x === 'look' ? null : 'look'))} style={styles.topBtn} accessibilityLabel="Text size and page colour" hitSlop={8}>
               <Icon name="textSize" size={20} color={panel === 'look' ? ink.accent : ink.text} />
@@ -454,7 +634,7 @@ export default function BookReader({
 
         {panel === 'contents' && opened && (
           <Animated.View entering={SlideInDown.duration(220)} exiting={SlideOutDown.duration(180)} style={[styles.panel, { top: insets.top + 60, backgroundColor: ink.bar, borderColor: ink.rule }]}>
-            <Text style={[styles.panelTitle, { color: ink.text }]}>Contents</Text>
+            <PanelTabs ink={ink} tab="contents" onTab={setPanel} marks={marks.length} />
             <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
               {(opened.toc.length ? opened.toc : opened.chapters.map((c, i) => ({ title: c.title, chapter: i, id: null as string | null, depth: 0 }))).map((t, n) => {
                 const here = t.chapter === chapter && (!t.id || n === opened.toc.findIndex((x) => x.chapter === chapter));
@@ -474,6 +654,142 @@ export default function BookReader({
                 );
               })}
             </ScrollView>
+          </Animated.View>
+        )}
+
+        {panel === 'marks' && (
+          <Animated.View entering={FadeIn.duration(120)} style={[styles.panel, { top: insets.top + 60, backgroundColor: ink.bar, borderColor: ink.rule }]}>
+            <PanelTabs ink={ink} tab="marks" onTab={setPanel} marks={marks.length} />
+            <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+              {!marks.length && <Text style={[styles.panelEmpty, { color: ink.soft }]}>No bookmarks or highlights yet. Tap the ribbon at the top to bookmark a page, or hold a paragraph to highlight it.</Text>}
+              {marks.map((m) => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={[styles.markRow, { borderBottomColor: ink.rule }]}
+                  onPress={() => {
+                    setPanel(null);
+                    setChrome(false);
+                    goChapter(m.chapter, { block: m.block });
+                  }}
+                  onLongPress={() => removeMark(m)}
+                  accessibilityLabel={`${m.kind === 'highlight' ? 'Highlight' : 'Bookmark'}. Hold to remove`}>
+                  <View style={[styles.markRule, { backgroundColor: m.kind === 'highlight' ? ink.mark : ink.accent }]} />
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={[styles.markWhere, { color: ink.soft }]} numberOfLines={1}>
+                      {opened ? chapterLabel(opened.toc, m.chapter, book.title, `Chapter ${m.chapter + 1}`) : `Chapter ${m.chapter + 1}`}
+                    </Text>
+                    <Text style={[styles.markText, { color: ink.text, fontFamily: SERIF }]} numberOfLines={3}>
+                      {m.text ?? 'Bookmark'}
+                    </Text>
+                    {!!m.note && <Text style={[styles.markWhere, { color: ink.soft, fontStyle: 'italic' }]}>{m.note}</Text>}
+                  </View>
+                </TouchableOpacity>
+              ))}
+              {marks.length > 0 && <Text style={[styles.panelEmpty, { color: ink.faint }]}>Hold one to remove it. Notes are added on the book's page.</Text>}
+            </ScrollView>
+          </Animated.View>
+        )}
+
+        {panel === 'search' && (
+          <Animated.View entering={SlideInDown.duration(220)} exiting={SlideOutDown.duration(180)} style={[styles.panel, { top: insets.top + 60, backgroundColor: ink.bar, borderColor: ink.rule }]}>
+            <View style={[styles.searchBox, { borderColor: ink.rule }]}>
+              <Icon name="search" size={15} color={ink.soft} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                onSubmitEditing={() => runSearch(query)}
+                placeholder="A word or a name, e.g. Sonia"
+                placeholderTextColor={ink.faint}
+                style={[styles.searchInput, { color: ink.text }]}
+                returnKeyType="search"
+                autoFocus
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+                keyboardAppearance={ink.dark ? 'dark' : 'light'}
+              />
+            </View>
+            {hits && (
+              <Text style={[styles.panelEmpty, { color: ink.soft, paddingTop: 4 }]}>
+                {hits.done < count ? `Looking… chapter ${hits.done} of ${count}` : hits.list.length ? `${hits.list.length >= 300 ? '300+' : hits.list.length} ${hits.list.length === 1 ? 'place' : 'places'}` : `“${hits.q}” is not in this book.`}
+              </Text>
+            )}
+            <FlatList
+              data={hits?.list ?? []}
+              keyExtractor={(h, i) => `${h.chapter}:${h.block}:${i}`}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+              renderItem={({ item: h }) => (
+                <TouchableOpacity
+                  style={[styles.markRow, { borderBottomColor: ink.rule }]}
+                  onPress={() => {
+                    setPanel(null);
+                    setChrome(false);
+                    goChapter(h.chapter, { block: h.block });
+                  }}>
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={[styles.markWhere, { color: ink.soft }]} numberOfLines={1}>
+                      {opened ? chapterLabel(opened.toc, h.chapter, book.title, `Chapter ${h.chapter + 1}`) : ''}
+                    </Text>
+                    <Text style={[styles.markText, { color: ink.soft, fontFamily: SERIF }]} numberOfLines={3}>
+                      {h.before}
+                      <Text style={{ color: ink.text, backgroundColor: ink.mark }}>{h.match}</Text>
+                      {h.after}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </Animated.View>
+        )}
+
+        {panel === 'hold' && held && (
+          <Animated.View entering={SlideInDown.duration(220)} exiting={SlideOutDown.duration(180)} style={[styles.holdPanel, { paddingBottom: insets.bottom + 14, backgroundColor: ink.bar, borderColor: ink.rule }]}>
+            <Text style={[styles.holdHint, { color: ink.soft }]}>Tap the sentences to highlight, then Highlight.</Text>
+            <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ gap: 6 }}>
+              {sentencesOf(held.text).map((t, i) => {
+                const on = picked.has(i);
+                const already = (hlBy.get(held.block) ?? []).some((h) => h.includes(t) || t.includes(h));
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    onPress={() =>
+                      setPicked((s) => {
+                        const n = new Set(s);
+                        if (n.has(i)) n.delete(i);
+                        else n.add(i);
+                        return n;
+                      })
+                    }
+                    style={[styles.sentence, { borderColor: on ? ink.accent : ink.rule, backgroundColor: on || already ? ink.mark : 'transparent' }]}>
+                    <Text style={[styles.sentenceText, { color: ink.text, fontFamily: SERIF }]}>{t}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <View style={styles.holdRow}>
+              <TouchableOpacity style={[styles.holdBtn, { borderColor: ink.rule }]} onPress={() => addHighlight(true)}>
+                <Text style={[styles.holdBtnText, { color: ink.text }]}>Whole paragraph</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={!picked.size} style={[styles.holdBtn, { backgroundColor: picked.size ? ink.accent : 'transparent', borderColor: picked.size ? ink.accent : ink.rule }]} onPress={() => addHighlight(false)}>
+                <Text style={[styles.holdBtnText, { color: picked.size ? ink.bg : ink.faint }]}>{picked.size > 1 ? `Highlight ${picked.size}` : 'Highlight'}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.holdRow}>
+              <TouchableOpacity style={[styles.holdBtn, { borderColor: ink.rule }]} onPress={() => toggleBookmark(held.block)}>
+                <Text style={[styles.holdBtnText, { color: ink.text }]}>{bookmarked.has(held.block) ? 'Remove bookmark' : 'Bookmark it'}</Text>
+              </TouchableOpacity>
+              {(hlBy.get(held.block) ?? []).length > 0 && (
+                <TouchableOpacity
+                  style={[styles.holdBtn, { borderColor: ink.rule }]}
+                  onPress={() => {
+                    for (const m of marks.filter((x) => x.kind === 'highlight' && x.chapter === held.chapter && x.block === held.block)) removeMark(m, true);
+                    setPanel(null);
+                  }}>
+                  <Text style={[styles.holdBtnText, { color: ink.text }]}>Clear highlights</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </Animated.View>
         )}
 
@@ -581,6 +897,24 @@ const styles = StyleSheet.create({
   bottomText: { flex: 1, textAlign: 'center', fontSize: 13, fontVariant: ['tabular-nums'] },
   panel: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
   panelTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  ribbon: { position: 'absolute', left: -14, top: 4, bottom: 8, width: 3, borderRadius: 2 },
+  tabs: { flexDirection: 'row', gap: 22, paddingHorizontal: 20, paddingTop: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  tab: { paddingBottom: 10, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabText: { fontSize: 15, fontWeight: '700' },
+  panelEmpty: { fontSize: 14, lineHeight: 20, paddingHorizontal: 20, paddingVertical: 14 },
+  markRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  markRule: { width: 3, borderRadius: 2 },
+  markWhere: { fontSize: 12, fontWeight: '600' },
+  markText: { fontSize: 15, lineHeight: 21 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 14, marginBottom: 6, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, height: 42 },
+  searchInput: { flex: 1, fontSize: 16 },
+  holdPanel: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 16, paddingTop: 14, gap: 10 },
+  holdHint: { fontSize: 13 },
+  sentence: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  sentenceText: { fontSize: 15, lineHeight: 21 },
+  holdRow: { flexDirection: 'row', gap: 10 },
+  holdBtn: { flex: 1, height: 44, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  holdBtnText: { fontSize: 15, fontWeight: '700' },
   tocRow: { paddingVertical: 13, paddingRight: 20, borderBottomWidth: StyleSheet.hairlineWidth },
   tocText: { fontSize: 16 },
   lookPanel: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 20, paddingTop: 18, gap: 14 },

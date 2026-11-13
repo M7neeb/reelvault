@@ -105,7 +105,7 @@ import { resolveScheme } from '@/features/vault/ui/logic';
 import { themeFor, ThemeContext, usePalette } from '@/features/vault/ui/theme';
 import { fixtureAudioData } from '@/features/vault/ui/audio/audioFixtures';
 import { fixtureBooksData } from '@/features/vault/ui/books/bookFixtures';
-import { parseReaderPrefs, type ReaderPrefs } from '@/features/vault/books/bookLogic';
+import { parseReaderPrefs, progressOf, type ReaderPrefs } from '@/features/vault/books/bookLogic';
 import { fixtureMangaData } from '@/features/vault/ui/manga/mangaFixtures';
 import { AudioPlaybackProvider, useAudioPlayback } from '@/features/vault/ui/audio/playback';
 
@@ -271,12 +271,14 @@ function SearchPreview({ q, mine }: { q?: string; mine?: boolean }) {
   const local = useMemo<LocalSearch>(() => {
     const audio = fixtureAudioData().items;
     const manga = fixtureMangaData().items;
-    const input: FindInput = { videos: FIXTURE_ITEMS, audio, manga, titles: items };
+    const shelf = fixtureBooksData().items;
+    const input: FindInput = { videos: FIXTURE_ITEMS, audio, manga, titles: items, books: shelf.map((b) => ({ ...b, progress: progressOf(b) })) };
     const resume = FIXTURE_ITEMS.slice(0, 2).map((v, i) => ({ id: v.id, ms: (v.durationMs ?? 60_000) * 0.4, at: Date.now() - (i + 1) * 3_600_000 }));
     return {
       find: (s) => findEverything(s, input),
       jump: jumpBackIn({ ...input, resume }),
       thumb: (kind, id) =>
+        kind === 'ebook' ? (shelf.find((b) => b.id === id)?.coverUri ? { uri: shelf.find((b) => b.id === id)!.coverUri! } : null) :
         (kind === 'video' ? FIXTURE_ITEMS.find((v) => v.id === id)?.thumbSource : kind === 'manga' ? manga.find((m) => m.id === id)?.coverSource : audio.find((a) => a.id === id)?.coverSource) ?? null,
       poster: (id) => items.find((t) => t.simklId === id)?.poster ?? null,
       open: () => undefined,
@@ -287,8 +289,9 @@ function SearchPreview({ q, mine }: { q?: string; mine?: boolean }) {
         watchMs: 410 * 60_000,
         chapters: 23,
         listenMs: 7_400_000,
+        readMs: 5_300_000,
         activeDays: 5,
-        before: { videoMs: 3_100_000, episodes: 8, movies: 0, watchMs: 400 * 60_000, chapters: 9, listenMs: 0 },
+        before: { videoMs: 3_100_000, episodes: 8, movies: 0, watchMs: 400 * 60_000, chapters: 9, listenMs: 0, readMs: 3_900_000 },
       },
       recent: ['Harbour', 'Lighthouse', 'night walks'],
       remember: () => undefined,
@@ -364,6 +367,9 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   books: {},
   'books-empty': {},
   'books-read': { books: { reader: true } },
+  'books-stats': { books: { dashboard: true } },
+  'books-info': { books: { info: true } },
+  'books-deleted': { books: { deleted: true } },
   manga: {},
   'manga-detail': { manga: { detail: true } },
   'manga-reader': { manga: { reader: true } },

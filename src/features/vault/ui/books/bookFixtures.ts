@@ -3,7 +3,7 @@
  * domain novel, so the reader can be looked at without a phone.
  */
 
-import { DEFAULT_READER, type ReaderPrefs } from '../../books/bookLogic';
+import { DEFAULT_READER, type BookRead, type ReaderPrefs } from '../../books/bookLogic';
 import type { BookActions, BookUi, BooksData } from './bookTypes';
 
 const OPENING: string[] = [
@@ -40,6 +40,12 @@ const base = (id: string, title: string, author: string, over: Partial<BookUi>):
   lastReadAt: null,
   finishedAt: null,
   addedAt: Date.now() - 10 * day,
+  rating: 0,
+  status: null,
+  notes: null,
+  isPrivate: false,
+  deletedAt: null,
+  tags: [],
   ...over,
 });
 
@@ -48,9 +54,10 @@ export function fixtureBooksData(empty = false): BooksData {
   const items: BookUi[] = empty
     ? []
     : [
-        base('crime', 'Crime and Punishment', 'Fyodor Dostoevsky', { chapter: 7, block: 5, chapterFrac: 0.4, readMs: 3 * 3_600_000, lastReadAt: Date.now() - 3_600_000 }),
-        base('karamazov', 'The Brothers Karamazov', 'Fyodor Dostoevsky', { addedAt: Date.now() - day }),
-        base('notes', 'Notes from Underground', 'Fyodor Dostoevsky', { finishedAt: Date.now() - 20 * day, lastReadAt: Date.now() - 20 * day }),
+        base('crime', 'Crime and Punishment', 'Fyodor Dostoevsky', { tags: ['Russian', 'Classics'], notes: 'Pevear and Volokhonsky next time, to compare.', chapter: 7, block: 5, chapterFrac: 0.4, readMs: 3 * 3_600_000, lastReadAt: Date.now() - 3_600_000 }),
+        base('karamazov', 'The Brothers Karamazov', 'Fyodor Dostoevsky', { addedAt: Date.now() - day, tags: ['Russian', 'Classics'] }),
+        base('master', 'The Master and Margarita', 'Mikhail Bulgakov', { addedAt: Date.now() - 3 * day, tags: ['Russian'], status: 'want' }),
+        base('notes', 'Notes from Underground', 'Fyodor Dostoevsky', { rating: 9, tags: ['Russian'], finishedAt: new Date(new Date().getFullYear(), 1, 20).getTime(), lastReadAt: new Date(new Date().getFullYear(), 1, 20).getTime() }),
       ];
   const actions: BookActions = {
     importFiles: async () => undefined,
@@ -67,10 +74,62 @@ export function fixtureBooksData(empty = false): BooksData {
     }),
     savePlace: async () => undefined,
     setFinished: async () => undefined,
-    remove: async () => undefined,
+    rate: async () => undefined,
+    setStatus: async () => undefined,
+    addTag: async () => undefined,
+    removeTag: async () => undefined,
+    setPrivate: async () => undefined,
+    trash: async () => undefined,
+    restore: async () => undefined,
+    purge: async () => undefined,
+    edit: async () => undefined,
+    setNotes: async () => undefined,
+    setCover: async () => undefined,
+    loadMarks: async (id) =>
+      id === 'crime'
+        ? [
+            { id: 1, bookId: id, kind: 'bookmark', chapter: 7, block: 2, text: null, note: null, createdAt: Date.now() - 5 * day },
+            { id: 2, bookId: id, kind: 'highlight', chapter: 7, block: 5, text: 'Taking a new step, uttering a new word is what they fear most.', note: 'The whole book in one line?', createdAt: Date.now() - 2 * day },
+            { id: 3, bookId: id, kind: 'highlight', chapter: 7, block: 1, text: 'He had successfully avoided meeting his landlady on the staircase.', note: null, createdAt: Date.now() - day },
+          ]
+        : [],
+    addMark: async (m) => ({ ...m, id: Math.round(Math.random() * 1e6) }),
+    setMarkNote: async () => undefined,
+    deleteMark: async () => undefined,
+    loadReads: async () => (empty ? [] : fixtureReads()),
+    passage: async () => OPENING,
+    setSort: async () => undefined,
     setReader: async (p) => {
       reader = p;
     },
   };
-  return { items, loaded: true, status: '', busy: false, reader, actions };
+  const deleted = empty ? [] : [base('idiot', 'The Idiot', 'Fyodor Dostoevsky', { deletedAt: Date.now() - 4 * day })];
+  return { items, deleted, trashDays: 30, loaded: true, status: '', busy: false, reader, sort: 'shelf', actions };
+}
+
+/** Most evenings of this year, steady progress through the three books (seeded, so screenshots repeat). */
+function fixtureReads(): BookRead[] {
+  const out: BookRead[] = [];
+  const now = Date.now();
+  const year = new Date(now).getFullYear();
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const plan: [string, number, number][] = [
+    ['notes', new Date(year - 1, 10, 2).getTime(), new Date(year, 1, 20).getTime()],
+    ['crime', new Date(year, 2, 1).getTime(), now],
+  ];
+  for (const [id, from, to] of plan) {
+    let p = 0;
+    for (let d = from; d < to; d += day) {
+      if (rnd() < 0.35) continue;
+      const evening = rnd() < 0.7;
+      const start = new Date(d).setHours(evening ? 21 + Math.floor(rnd() * 3) : 7 + Math.floor(rnd() * 3), Math.floor(rnd() * 60));
+      if (start > now) break;
+      const ms = (10 + Math.floor(rnd() * 50)) * 60_000;
+      const step = id === 'notes' ? 0.012 : 0.0013;
+      out.push({ bookId: id, startedAt: start, endedAt: start + ms, ms, from: p, to: Math.min(1, p + step) });
+      p = Math.min(1, p + step);
+    }
+  }
+  return out.sort((a, b) => a.startedAt - b.startedAt);
 }

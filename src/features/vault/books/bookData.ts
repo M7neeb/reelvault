@@ -15,12 +15,36 @@ import { unpackBook } from '../audio/audioImport';
 import { fileIn, fileUri, readBookJson, readTextIn, removeFolder } from '../audio/audioFiles';
 import { contentKeyOf } from '../contentKey';
 import { onIncomingBook } from '../incoming';
+import { onBooksChanged } from './bookEvents';
 import { getSetting, setSetting } from '../library';
 import type { BookActions, BookUi, BooksData } from '../ui/books/bookTypes';
-import { DEFAULT_READER, displayTitle, parseReaderPrefs, type BookItem, type ReaderPrefs } from './bookLogic';
-import { deleteBook, findBookByKey, insertBook, listBooks, saveBookPlace, setBookFinished } from './bookStore';
+import { chapterBlocks } from '../audio/epub';
+import { BOOK_SORTS, cleanTag, DEFAULT_READER, displayTitle, parseReaderPrefs, progressAt, type BookItem, type BookSort, type ReaderPrefs } from './bookLogic';
+import { ReelVaultMedia } from '../../../../modules/reelvault-media';
+import {
+  addBookMark,
+  addBookTag,
+  deleteBook,
+  deleteBookMark,
+  expiredBooks,
+  findBookByKey,
+  insertBook,
+  listBookMarks,
+  listBookReads,
+  listBooks,
+  logBookRead,
+  removeBookTag,
+  saveBookPlace,
+  setBookCover,
+  setBookFinished,
+  setBookMarkNote,
+  setBookNotes,
+  setBooksField,
+  setBookText,
+} from './bookStore';
 
 const READER_KEY = 'books.reader';
+const SORT_KEY = 'books.sort';
 const onPhone = Platform.OS !== 'web';
 
 const asUi = (b: BookItem): BookUi => ({ ...b, coverUri: b.cover ? fileUri(b.folder, b.cover) : null });
@@ -67,6 +91,12 @@ async function addBook(uri: string, name: string, onStep: (t: string) => void): 
       lastReadAt: null,
       finishedAt: null,
       addedAt: Date.now(),
+      rating: 0,
+      status: null,
+      notes: null,
+      isPrivate: false,
+      deletedAt: null,
+      tags: [],
     };
     await insertBook(item, key);
     return item;
@@ -82,6 +112,8 @@ export function useBooksData(): BooksData {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [reader, setReaderState] = useState<ReaderPrefs>(DEFAULT_READER);
+  const [trashDays, setTrashDays] = useState(30);
+  const [sort, setSortState] = useState<BookSort>('shelf');
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -102,7 +134,29 @@ export function useBooksData(): BooksData {
     getSetting(READER_KEY)
       .then((j) => setReaderState(parseReaderPrefs(j)))
       .catch(() => undefined);
+    getSetting(SORT_KEY)
+      .then((v) => {
+        if (v && BOOK_SORTS.some((x) => x.key === v)) setSortState(v as BookSort);
+      })
+      .catch(() => undefined);
+    // Recently Deleted keeps books as long as videos (Settings), then they go for good.
+    (async () => {
+      const prefs = JSON.parse((await getSetting('vault.prefs')) ?? '{}');
+      const days = [1, 3, 7, 14, 30].includes(prefs?.trashDays) ? prefs.trashDays : 30;
+      setTrashDays(days);
+      const gone = await expiredBooks(days, Date.now());
+      for (const g of gone) {
+        await deleteBook(g.id);
+        removeFolder(g.folder);
+      }
+      if (gone.length) await refresh();
+    })().catch((e) => console.log(`[BOOKS] purge failed: ${String(e)}`));
   }, [refresh]);
+
+  const patch = useCallback((ids: string[], change: (b: BookItem) => BookItem) => {
+    const set = new Set(ids);
+    setItems((list) => list.map((b) => (set.has(b.id) ? change(b) : b)));
+  }, []);
 
   const add = useCallback(
     async (files: { uri: string; name: string }[]) => {
@@ -139,6 +193,8 @@ export function useBooksData(): BooksData {
     },
     [refresh]
   );
+
+  useEffect(() => onBooksChanged(() => void refresh()), [refresh]);
 
   // Books sent from another app ("Open in ReelVault" on an .epub).
   useEffect(
@@ -183,6 +239,11 @@ export function useBooksData(): BooksData {
       },
       savePlace: async (id, place, addMs) => {
         const at = Date.now();
+        const was = itemsRef.current.find((b) => b.id === id);
+        if (was && addMs > 0) {
+          const before = progressAt(was.chapterSizes, was.chapter, was.chapterFrac);
+          logBookRead(id, at, addMs, before, progressAt(was.chapterSizes, place.chapter, place.chapterFrac)).catch((e) => console.log(`[BOOKS] session not saved: ${String(e)}`));
+        }
         setItems((list) => list.map((b) => (b.id === id ? { ...b, ...place, readMs: b.readMs + addMs, lastReadAt: at } : b)));
         await saveBookPlace(id, place, addMs, at);
       },
@@ -191,22 +252,125 @@ export function useBooksData(): BooksData {
         setItems((list) => list.map((b) => (b.id === id ? { ...b, finishedAt: at } : b)));
         await setBookFinished(id, at);
       },
-      remove: async (id) => {
-        const b = itemsRef.current.find((x) => x.id === id);
-        await deleteBook(id);
-        if (b) removeFolder(b.folder);
-        setItems((list) => list.filter((x) => x.id !== id));
-        setStatus(b ? `Removed ${displayTitle(b)}` : '');
+      rate: async (ids, rating) => {
+        patch(ids, (b) => ({ ...b, rating }));
+        await setBooksField(ids, 'rating', rating);
+      },
+      setStatus: async (ids, st) => {
+        patch(ids, (b) => ({ ...b, status: st }));
+        await setBooksField(ids, 'status', st);
+      },
+      addTag: async (ids, name) => {
+        const t = cleanTag(name);
+        if (!t) return;
+        patch(ids, (b) => (b.tags.some((x) => x.toLowerCase() === t.toLowerCase()) ? b : { ...b, tags: [...b.tags, t].sort((x, y) => x.localeCompare(y)) }));
+        await addBookTag(ids, t);
+      },
+      removeTag: async (ids, name) => {
+        patch(ids, (b) => ({ ...b, tags: b.tags.filter((x) => x.toLowerCase() !== name.toLowerCase()) }));
+        await removeBookTag(ids, name);
+      },
+      setPrivate: async (ids, value) => {
+        patch(ids, (b) => ({ ...b, isPrivate: value }));
+        await setBooksField(ids, 'is_private', value ? 1 : 0);
+      },
+      trash: async (ids) => {
+        const at = Date.now();
+        patch(ids, (b) => ({ ...b, deletedAt: at }));
+        await setBooksField(ids, 'deleted_at', at);
+        setStatus(ids.length === 1 ? 'Moved to Recently Deleted' : `${ids.length} books moved to Recently Deleted`);
         setTimeout(() => setStatus(''), 4000);
+      },
+      restore: async (ids) => {
+        patch(ids, (b) => ({ ...b, deletedAt: null }));
+        await setBooksField(ids, 'deleted_at', null);
+      },
+      purge: async (ids) => {
+        for (const id of ids) {
+          const b = itemsRef.current.find((x) => x.id === id);
+          await deleteBook(id);
+          if (b) removeFolder(b.folder);
+        }
+        const set = new Set(ids);
+        setItems((list) => list.filter((x) => !set.has(x.id)));
+      },
+      edit: async (id, title, author) => {
+        const t = title?.trim() || null;
+        const a = author?.trim() || null;
+        patch([id], (b) => ({ ...b, title: t, author: a }));
+        await setBookText(id, t, a);
+      },
+      setNotes: async (id, notes) => {
+        const n = notes?.trim() ? notes : null;
+        patch([id], (b) => ({ ...b, notes: n }));
+        await setBookNotes(id, n);
+      },
+      setCover: async (id, own) => {
+        const b = itemsRef.current.find((x) => x.id === id);
+        if (!b) return;
+        let next: string | null;
+        if (own) {
+          next = readBookJson(b.folder)?.cover ?? null;
+        } else {
+          const picked = await DocumentPicker.getDocumentAsync({ type: 'image/*', copyToCacheDirectory: true, multiple: false });
+          if (picked.canceled || !picked.assets?.[0]) return;
+          next = `.cover-${Date.now()}.jpg`;
+          const dest = fileIn(b.folder, next);
+          await new File(picked.assets[0].uri).move(dest);
+          if (ReelVaultMedia) await ReelVaultMedia.shrinkImage(dest.uri, 900, 0.85).catch(() => -1);
+        }
+        // A cover you picked before goes; the book's own picture stays inside the book.
+        if (b.cover && /^\.cover-\d+\.jpg$/.test(b.cover) && b.cover !== next) {
+          try {
+            const old = fileIn(b.folder, b.cover);
+            if (old.exists) old.delete();
+          } catch {
+            // ignore
+          }
+        }
+        patch([id], (x) => ({ ...x, cover: next }));
+        await setBookCover(id, next);
+      },
+      loadMarks: async (id) => (onPhone ? listBookMarks(id) : []),
+      addMark: async (m) => {
+        const id = await addBookMark(m);
+        return { ...m, id };
+      },
+      setMarkNote: async (id, note) => setBookMarkNote(id, note?.trim() ? note : null),
+      deleteMark: async (id) => deleteBookMark(id),
+      loadReads: async () => (onPhone ? listBookReads() : []),
+      passage: async (id) => {
+        const b = itemsRef.current.find((x) => x.id === id);
+        const book = b ? readBookJson(b.folder) : null;
+        if (!b || !book) return [];
+        // Where you are, else the first chapter with real paragraphs in it.
+        const order = [b.chapter, ...book.chapters.map((_, i) => i).filter((i) => i > 2 && i !== b.chapter)].slice(0, 6);
+        for (const c of order) {
+          const ch = book.chapters[c];
+          const xhtml = ch ? readTextIn(b.folder, ch.href) : null;
+          if (!xhtml) continue;
+          const paras = chapterBlocks(xhtml, ch.href)
+            .blocks.filter((x) => x.k === 'p')
+            .map((x) => ('runs' in x ? x.runs.map((r) => r.t).join('') : ''))
+            .filter((t) => t.length > 80);
+          if (paras.length) return paras.slice(Math.max(0, Math.min(b.block, paras.length - 6)), Math.max(0, Math.min(b.block, paras.length - 6)) + 6);
+        }
+        return [];
+      },
+      setSort: async (s) => {
+        setSortState(s);
+        await setSetting(SORT_KEY, s);
       },
       setReader: async (prefs) => {
         setReaderState(prefs);
         await setSetting(READER_KEY, JSON.stringify(prefs));
       },
     }),
-    [add]
+    [add, patch]
   );
 
   const ui = useMemo(() => items.map(asUi), [items]);
-  return useMemo(() => ({ items: ui, loaded, status, busy, reader, actions }), [ui, loaded, status, busy, reader, actions]);
+  const live = useMemo(() => ui.filter((b) => !b.deletedAt), [ui]);
+  const deleted = useMemo(() => ui.filter((b) => b.deletedAt), [ui]);
+  return useMemo(() => ({ items: live, deleted, trashDays, loaded, status, busy, reader, sort, actions }), [live, deleted, trashDays, loaded, status, busy, reader, sort, actions]);
 }

@@ -117,6 +117,25 @@ export type ExportChapter = {
   scanlator: string | null;
 };
 
+export type ExportBook = {
+  id: string;
+  title: string | null;
+  filename: string;
+  author: string | null;
+  language: string | null;
+  chapters: number;
+  /** 0..1 */
+  progress: number;
+  addedAt: number;
+  lastReadAt: number | null;
+  finishedAt: number | null;
+  rating?: number;
+  status?: string | null;
+  keywords?: string[];
+};
+
+const BOOK_STATUS: Record<string, string> = { want: 'Want to read', reading: 'Reading', finished: 'Finished', dropped: 'Dropped' };
+
 export type ExportInput = {
   exportedAt: number;
   videos: ExportVideo[];
@@ -133,6 +152,10 @@ export type ExportInput = {
   manga: ExportManga[];
   chapters: ExportChapter[];
   mangaReads: { seriesId: string; chapterId: string | null; startedAt: number; readMs: number; pages: number }[];
+  /** Books (EPUB) and their reading sittings. */
+  books?: ExportBook[];
+  bookReads?: { bookId: string; startedAt: number; readMs: number; progressFrom: number; progressTo: number }[];
+  highlights?: { bookId: string; chapter: number; text: string; note: string | null; createdAt: number }[];
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -216,7 +239,7 @@ const chapterNo = (n: number | null) => (n === null || n < 0 ? null : n);
 
 export type ActivityRow = {
   at: number;
-  section: 'Video' | 'Movie' | 'Show' | 'Anime' | 'Audio' | 'Manga';
+  section: 'Video' | 'Movie' | 'Show' | 'Anime' | 'Audio' | 'Manga' | 'Book';
   itemId: string;
   title: string;
   detail: string | null;
@@ -279,6 +302,14 @@ export function activity(input: ExportInput): ActivityRow[] {
     const detail = c ? (no !== null ? `Chapter ${no}` : c.title) : null;
     out.push({ at: r.startedAt, section: 'Manga', itemId: r.seriesId, title, detail, ms: r.readMs || null, pages: r.pages || null });
   }
+
+  const bookTitle = new Map((input.books ?? []).map((b) => [b.id, b.title || b.filename]));
+  for (const r of input.bookReads ?? []) {
+    const title = bookTitle.get(r.bookId);
+    if (title === undefined) continue;
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    out.push({ at: r.startedAt, section: 'Book', itemId: r.bookId, title, detail: `${pct(r.progressFrom)} to ${pct(r.progressTo)}`, ms: r.readMs || null, pages: null });
+  }
   return out.sort((a, b) => a.at - b.at);
 }
 
@@ -328,6 +359,7 @@ export function summary(input: ExportInput, rows: ActivityRow[]): Table {
     }),
     { section: 'Audio', items: input.audio.length, ratings: input.audio.map((a) => a.rating), done: input.audio.filter((a) => a.status === 'finished' || a.finishedAt).length },
     { section: 'Manga', items: input.manga.length, ratings: input.manga.map((m) => m.rating), done: input.manga.filter((m) => m.status === 'completed').length },
+    { section: 'Book', items: (input.books ?? []).length, ratings: (input.books ?? []).map((b) => b.rating ?? 0), done: (input.books ?? []).filter((b) => b.finishedAt).length },
   ];
   const line = (s: SectionStats, acts: ActivityRow[]): Cell[] => {
     const rated = s.ratings.filter((r) => r > 0);
@@ -491,7 +523,28 @@ export function exportTables(input: ExportInput): Table[] {
       .map((c) => [c.seriesId, mangaTitle.get(c.seriesId)!, c.id, chapterNo(c.number), c.volume, c.title, c.pageCount || null, stamp(c.readAt), c.lastPage || null, stamp(c.uploadedAt), c.scanlator]),
   };
 
-  return [summary(input, acts), activityTable(acts), byMonth(acts), videos, removed, series, titles, episodes, lists, audio, manga, chapters];
+  const books: Table = {
+    file: 'books.csv',
+    about: 'Books (EPUB) to read, with how far you are.',
+    columns: ['Id', 'Title', 'Author', 'Language', 'Chapters', 'Percent read', 'Rating', 'Status', 'Keywords', 'Added', 'Last read', 'Finished', 'Sessions', 'Minutes read', 'Highlights'],
+    rows: (input.books ?? []).map((b) => {
+      const p = plays('Book', b.id);
+      return [
+        b.id, b.title || b.filename, b.author, b.language, b.chapters, b.finishedAt ? 100 : Math.round(b.progress * 1000) / 10, rating(b.rating ?? 0), BOOK_STATUS[b.status ?? ''] ?? null,
+        list(b.keywords ?? []), stamp(b.addedAt), stamp(b.lastReadAt), stamp(b.finishedAt), p?.n ?? 0, minutes(p?.ms) ?? 0, (input.highlights ?? []).filter((h) => h.bookId === b.id).length,
+      ];
+    }),
+  };
+
+  const bookTitle = new Map((input.books ?? []).map((b) => [b.id, b.title || b.filename]));
+  const highlights: Table = {
+    file: 'book_highlights.csv',
+    about: 'What you highlighted in your books, with your notes.',
+    columns: ['Book id', 'Book', 'Chapter', 'Highlight', 'Note', 'Made on'],
+    rows: (input.highlights ?? []).filter((h) => bookTitle.has(h.bookId)).map((h) => [h.bookId, bookTitle.get(h.bookId)!, h.chapter + 1, h.text, h.note, stamp(h.createdAt)]),
+  };
+
+  return [summary(input, acts), activityTable(acts), byMonth(acts), videos, removed, series, titles, episodes, lists, audio, manga, chapters, books, highlights];
 }
 
 /** A table as CSV: a byte-order mark so Excel reads accents and emoji, Windows line ends. */
@@ -526,7 +579,7 @@ export function readme(tables: Table[], exportedAt: number): string {
     '- Minutes for movies and episodes are the runtime Simkl lists, not timed by the app.',
     '- Ratings are 1 to 10; an empty cell means not rated.',
     '- To mix with other exports, use activity.csv: "Timestamp" is ISO 8601 with the time zone, "Unix ms" is the same moment as a number, "Source" is always ReelVault.',
-    '- Join tables on the id columns: activity "Item id" matches the Id of videos, audio and manga, and the Simkl id of movies, shows and anime.',
+    '- Join tables on the id columns: activity "Item id" matches the Id of videos, audio, manga and books, and the Simkl id of movies, shows and anime.',
     '',
   ].join('\r\n');
 }

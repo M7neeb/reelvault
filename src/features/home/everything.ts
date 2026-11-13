@@ -1,6 +1,6 @@
 /**
  * Search everything and "Jump back in": one search box over your videos,
- * audio and books, manga and comics, and the Simkl titles you follow, and
+ * audio and audiobooks, books to read, manga and comics, and the Simkl titles you follow, and
  * one row with what you were in the middle of in each section.
  *
  * Private and deleted things are never shown. Pure: no React, no database.
@@ -8,7 +8,7 @@
 
 import { fuzzyScore } from '../vault/fuzzy.ts';
 
-export type FindKind = 'video' | 'audio' | 'book' | 'manga' | 'movie' | 'show' | 'anime';
+export type FindKind = 'video' | 'audio' | 'book' | 'ebook' | 'manga' | 'movie' | 'show' | 'anime';
 
 export type FindVideo = {
   id: string;
@@ -65,6 +65,20 @@ export type FindManga = {
   chapters: { id: string; number: number | null; volume: number | null; title: string | null; readAt: number | null; lastPage: number; pageCount: number }[];
 };
 
+/** A book in Books (EPUB to read). */
+export type FindBook = {
+  id: string;
+  title: string | null;
+  filename: string;
+  author: string | null;
+  description: string | null;
+  chapter: number;
+  chapterSizes: number[];
+  progress: number;
+  lastReadAt: number | null;
+  finishedAt: number | null;
+};
+
 export type FindTitle = {
   simklId: number;
   type: 'movie' | 'show' | 'anime';
@@ -86,6 +100,7 @@ export type FindInput = {
   audio: FindAudio[];
   manga: FindManga[];
   titles: FindTitle[];
+  books?: FindBook[];
 };
 
 export type Found = {
@@ -105,7 +120,8 @@ export type Found = {
 const KIND_LABEL: Record<FindKind, string> = {
   video: 'Video',
   audio: 'Audio',
-  book: 'Book',
+  book: 'Audiobook',
+  ebook: 'Book',
   manga: 'Manga',
   movie: 'Movie',
   show: 'Show',
@@ -188,6 +204,21 @@ export function findEverything(query: string, input: FindInput, limit = 60): Fou
         score,
         rating: a.rating,
         exact: hasAllWords(q, [title, a.author, a.narrator, a.album, a.genre, a.notes, ...a.tags]),
+      });
+  }
+
+  for (const b of input.books ?? []) {
+    const title = b.title?.trim() || b.filename.replace(/\.epub$/i, '');
+    const score = scoreOf(q, title, [b.author ?? ''], [b.filename]);
+    if (score > 0)
+      out.push({
+        kind: 'ebook',
+        id: b.id,
+        title,
+        sub: join([b.author, b.finishedAt ? 'Finished' : b.lastReadAt ? `${Math.max(1, Math.round(b.progress * 100))}% read` : null]),
+        score,
+        rating: 0,
+        exact: hasAllWords(q, [title, b.author, b.filename]),
       });
   }
 
@@ -330,6 +361,18 @@ export function jumpBackIn(
     });
   }
 
+  for (const b of input.books ?? []) {
+    if (!b.lastReadAt || b.finishedAt) continue;
+    out.push({
+      kind: 'ebook',
+      id: b.id,
+      title: b.title?.trim() || b.filename.replace(/\.epub$/i, ''),
+      sub: `${Math.max(1, Math.min(99, Math.round(b.progress * 100)))}% · chapter ${b.chapter + 1} of ${Math.max(1, b.chapterSizes.length)}`,
+      progress: b.progress,
+      at: b.lastReadAt,
+    });
+  }
+
   for (const t of input.titles) {
     if (t.type === 'movie' || t.status !== 'watching' || !t.nextToWatch) continue;
     const at = Date.parse(t.lastWatchedAt ?? t.addedAt ?? '') || 0;
@@ -362,9 +405,11 @@ export type WeekInput = {
   /** When each manga chapter was finished. */
   chapterTimes: number[];
   audioPlays: { startedAt: number; listenedMs: number }[];
+  /** Reading sittings in Books. */
+  bookReads?: { startedAt: number; ms: number }[];
 };
 
-export type WeekPart = { videoMs: number; episodes: number; movies: number; watchMs: number; chapters: number; listenMs: number };
+export type WeekPart = { videoMs: number; episodes: number; movies: number; watchMs: number; chapters: number; listenMs: number; readMs: number };
 export type WeekSummary = WeekPart & {
   /** The 7 days before, to compare. */
   before: WeekPart;
@@ -386,6 +431,7 @@ export function weekSummary(i: WeekInput, now: number): WeekSummary {
       watchMs: w.reduce((a, x) => a + x.minutes * 60_000, 0),
       chapters: i.chapterTimes.filter(inR).length,
       listenMs: i.audioPlays.filter((x) => inR(x.startedAt)).reduce((a, x) => a + x.listenedMs, 0),
+      readMs: (i.bookReads ?? []).filter((x) => inR(x.startedAt)).reduce((a, x) => a + x.ms, 0),
     };
   };
   const from = now - 7 * DAY_MS;
@@ -399,6 +445,7 @@ export function weekSummary(i: WeekInput, now: number): WeekSummary {
   for (const x of i.watches) mark(x.at);
   for (const t of i.chapterTimes) mark(t);
   for (const x of i.audioPlays) if (x.listenedMs >= 30_000) mark(x.startedAt);
+  for (const x of i.bookReads ?? []) if (x.ms >= 30_000) mark(x.startedAt);
   return { ...part(from, now + 1), before: part(from - 7 * DAY_MS, from), activeDays: Math.min(7, days.size) };
 }
 

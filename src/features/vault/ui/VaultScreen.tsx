@@ -1800,7 +1800,15 @@ function VaultScreenBody({
 
       {videosMode === 'books' && books && (
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
-          <BooksSection data={books} onMode={switchMode} dev={dev?.books} />
+          <BooksSection
+            data={books}
+            onMode={switchMode}
+            showPrivate={privateOpen}
+            onUnlockPrivate={() => void requestUnlock(() => undefined)}
+            openRequest={sectionJump?.kind === 'books' ? sectionJump : null}
+            onOpenHandled={() => setSectionJump(null)}
+            dev={dev?.books}
+          />
         </Animated.View>
       )}
 

@@ -8,7 +8,8 @@
 export type JumpRequest =
   | { kind: 'video'; id: string; /** Start here (a moment found inside the video). */ atMs?: number }
   | { kind: 'audio'; id: string; /** true = carry on playing; false = its page. */ play: boolean }
-  | { kind: 'manga'; id: string; /** true = carry on reading; false = its page. */ read: boolean };
+  | { kind: 'manga'; id: string; /** true = carry on reading; false = its page. */ read: boolean }
+  | { kind: 'books'; id: string };
 
 let pending: JumpRequest | null = null;
 const listeners = new Set<(r: JumpRequest) => void>();

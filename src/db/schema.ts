@@ -3,7 +3,7 @@
  * Never edit an old migration once it has shipped: add a new one.
  */
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 17;
 
 export type Migration = {
   version: number;
@@ -607,6 +607,53 @@ export const MIGRATIONS: Migration[] = [
         finished_at   INTEGER,
         added_at      INTEGER NOT NULL
       );
+    `,
+  },
+  {
+    version: 16,
+    sql: `
+      -- Reading sessions in Books: one row per sitting (saves less than 10 minutes apart join up).
+      CREATE TABLE IF NOT EXISTS book_reads (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id       TEXT NOT NULL,
+        started_at    INTEGER NOT NULL,
+        ended_at      INTEGER NOT NULL,
+        read_ms       INTEGER NOT NULL DEFAULT 0,
+        progress_from REAL NOT NULL DEFAULT 0,
+        progress_to   REAL NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_book_reads_time ON book_reads(started_at);
+      CREATE INDEX IF NOT EXISTS idx_book_reads_book ON book_reads(book_id);
+    `,
+  },
+  {
+    version: 17,
+    sql: `
+      -- Books: your rating, status, notes, Private and Recently Deleted, keywords, bookmarks and highlights.
+      ALTER TABLE books ADD COLUMN rating INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE books ADD COLUMN status TEXT;
+      ALTER TABLE books ADD COLUMN notes TEXT;
+      ALTER TABLE books ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE books ADD COLUMN deleted_at INTEGER;
+
+      CREATE TABLE IF NOT EXISTS book_tags (
+        book_id TEXT NOT NULL,
+        name    TEXT NOT NULL,
+        PRIMARY KEY (book_id, name)
+      );
+
+      -- kind: bookmark | highlight. A highlight keeps the words it covers inside its paragraph.
+      CREATE TABLE IF NOT EXISTS book_marks (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_id    TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        chapter    INTEGER NOT NULL,
+        block      INTEGER NOT NULL,
+        text       TEXT,
+        note       TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_book_marks_book ON book_marks(book_id);
     `,
   },
 ];

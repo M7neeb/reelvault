@@ -20,12 +20,13 @@ import { SideSafe } from '@/features/vault/ui/screen';
 import { ThemeContext } from '@/features/vault/ui/theme';
 import { resumeSavedAt } from '@/features/vault/watching';
 import { findScenes } from '@/features/vault/sceneLogic';
+import { progressOf } from '@/features/vault/books/bookLogic';
 import { fmtClock } from '@/features/vault/stats';
 
 const RECENT_KEY = 'search.recent';
 
 export default function SearchRoute() {
-  const { vault, simkl, audio, manga, palette } = useHome();
+  const { vault, simkl, audio, manga, books, palette } = useHome();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
@@ -54,18 +55,19 @@ export default function SearchRoute() {
   const [week, setWeek] = useState<WeekSummary | null>(null);
   // Read through a ref: the summary is worked out when the tab opens, not again every time a list changes
   // (audio saves its place every 10 s, downloads change manga all the time).
-  const src = useRef({ vault, audio, manga, simkl });
-  src.current = { vault, audio, manga, simkl };
+  const src = useRef({ vault, audio, manga, simkl, books });
+  src.current = { vault, audio, manga, simkl, books };
   const loadWeek = useCallback(() => {
     let live = true;
-    const { vault, audio, manga, simkl } = src.current;
+    const { vault, audio, manga, simkl, books } = src.current;
     (async () => {
       const shown = new Set(vault.items.filter((v) => !v.isPrivate).map((v) => v.id));
       const privateAudio = new Set(audio.items.filter((a) => a.isPrivate).map((a) => a.id));
-      const [videoPlays, audioPlays, sk] = await Promise.all([
+      const [videoPlays, audioPlays, sk, bookReads] = await Promise.all([
         vault.actions.loadPlays().catch(() => []),
         audio.actions.loadPlays().catch(() => []),
         simkl.connected ? simkl.bridge.insights().catch(() => null) : Promise.resolve(null),
+        books.actions.loadReads().catch(() => []),
       ]);
       if (!live) return;
       setWeek(
@@ -75,6 +77,7 @@ export default function SearchRoute() {
             audioPlays: audioPlays.filter((x) => !privateAudio.has(x.itemId)),
             chapterTimes: manga.items.filter((m) => !m.isPrivate && !m.deletedAt).flatMap((m) => m.chapters.map((c) => c.readAt).filter((t): t is number => t !== null)),
             watches: (sk?.events ?? []).map((e) => ({ at: e.at, minutes: e.minutes, type: e.type })),
+            bookReads,
           },
           Date.now()
         )
@@ -87,7 +90,8 @@ export default function SearchRoute() {
   useFocusEffect(loadWeek);
 
   const local = useMemo<LocalSearch>(() => {
-    const input: FindInput = { videos: vault.items, audio: audio.items, manga: manga.items, titles: simkl.items };
+    const input: FindInput = { videos: vault.items, audio: audio.items, manga: manga.items, titles: simkl.items, books: books.items.filter((b) => !b.isPrivate).map((b) => ({ ...b, progress: progressOf(b) })) };
+    const bookCover = new Map(books.items.map((b) => [b.id, b.coverUri ? { uri: b.coverUri } : null]));
     const videoThumb = new Map(vault.items.map((v) => [v.id, v.thumbSource]));
     const audioThumb = new Map(audio.items.map((a) => [a.id, a.coverSource]));
     const mangaThumb = new Map(manga.items.map((m) => [m.id, m.coverSource]));
@@ -123,13 +127,14 @@ export default function SearchRoute() {
         return [...found, ...scenes(q).filter((s) => !titles.has(sceneOf(s.id)!.id))];
       },
       jump: jumpBackIn({ ...input, resume }),
-      thumb: (kind, id) => (kind === 'video' ? videoThumb.get(sceneOf(id)?.id ?? id) : kind === 'manga' ? mangaThumb.get(id) : audioThumb.get(id)) ?? null,
+      thumb: (kind, id) => (kind === 'ebook' ? bookCover.get(id) : kind === 'video' ? videoThumb.get(sceneOf(id)?.id ?? id) : kind === 'manga' ? mangaThumb.get(id) : audioThumb.get(id)) ?? null,
       poster: (simklId) => posters.get(simklId) ?? null,
       open: (kind, id, resume) => {
         router.navigate('/' as Href);
         const scene = sceneOf(id);
         if (kind === 'video') pushJump(scene ? { kind: 'video', id: scene.id, atMs: scene.atMs } : { kind: 'video', id });
         else if (kind === 'manga') pushJump({ kind: 'manga', id, read: resume });
+        else if (kind === 'ebook') pushJump({ kind: 'books', id });
         else pushJump({ kind: 'audio', id, play: resume });
       },
       week,
@@ -137,7 +142,7 @@ export default function SearchRoute() {
       remember: (q) => saveRecent(rememberSearch(recentRef.current, q)),
       clearRecent: () => saveRecent([]),
     };
-  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, audio.items, manga.items, simkl.items, router, week, recent, saveRecent]);
+  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, audio.items, manga.items, simkl.items, books.items, router, week, recent, saveRecent]);
 
   return (
     <ThemeContext.Provider value={palette}>

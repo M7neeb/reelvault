@@ -12,7 +12,8 @@ import { getDb } from '@/db';
 
 
 import { addToAlbums, createAlbum, createFolder, listAlbums, listFolders } from './albums';
-import { BACKUP_KIND, BACKUP_VERSION, matchAudio, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupAudio, type BackupMangaTitle, type BackupSeries } from './backupFormat';
+import { booksChanged } from './books/bookEvents';
+import { BACKUP_KIND, BACKUP_VERSION, matchAudio, matchBackup, mergePrefs, parseBackup, seriesEpisodes, type Backup, type BackupAudio, type BackupBook, type BackupMangaTitle, type BackupSeries } from './backupFormat';
 import { normTitle } from './manga/mangaLogic';
 import {
   addMangaTag,
@@ -169,6 +170,7 @@ async function buildBackup(): Promise<{ json: string; videos: number }> {
     overview,
     audio: await audioForBackup(),
     manga: await mangaForBackup(),
+    books: await booksForBackup(),
     albums: albums.map((a) => ({ name: a.name, folder: folderName(a.folder_id), pinned: a.pinned === 1 })),
     folders: folders.map((f) => f.name),
     smartFilters: smart.map((s) => ({
@@ -468,6 +470,11 @@ export async function importLibraryInfo(uri?: string): Promise<{ matched: number
   if (backup.audio?.length) playsAdded += await restoreAudio(backup.audio);
   // The Manga section.
   if (backup.manga?.length) await restoreManga(backup.manga);
+  // Books.
+  if (backup.books?.length) {
+    await restoreBooks(backup.books);
+    booksChanged();
+  }
 
   return { matched: matches.size, total: backup.videos.length, plays: playsAdded };
 }
@@ -568,6 +575,105 @@ async function restoreAudio(entries: BackupAudio[]): Promise<number> {
     }
   }
   return added;
+}
+
+/* ------------------------------------------------------------------ books */
+
+type BookRow = {
+  id: string;
+  content_key: string | null;
+  filename: string;
+  size: number;
+  title: string | null;
+  author: string | null;
+  chapter: number;
+  block: number;
+  chapter_frac: number;
+  read_ms: number;
+  last_read_at: number | null;
+  finished_at: number | null;
+  rating: number;
+  status: string | null;
+  notes: string | null;
+};
+
+async function booksForBackup(): Promise<BackupBook[]> {
+  const db = await getDb();
+  let rows: BookRow[] = [];
+  try {
+    rows = await db.getAllAsync<BookRow>('SELECT * FROM books WHERE deleted_at IS NULL AND is_private = 0;');
+  } catch {
+    return [];
+  }
+  const tags = await db.getAllAsync<{ book_id: string; name: string }>('SELECT book_id, name FROM book_tags;').catch(() => []);
+  const marks = await db
+    .getAllAsync<{ book_id: string; kind: string; chapter: number; block: number; text: string | null; note: string | null; created_at: number }>('SELECT * FROM book_marks ORDER BY id;')
+    .catch(() => []);
+  const reads = await db
+    .getAllAsync<{ book_id: string; started_at: number; ended_at: number; read_ms: number; progress_from: number; progress_to: number }>('SELECT * FROM book_reads ORDER BY started_at;')
+    .catch(() => []);
+  return rows.map((r) => ({
+    contentKey: r.content_key,
+    filename: r.filename,
+    size: r.size,
+    title: r.title,
+    author: r.author,
+    chapter: r.chapter,
+    block: r.block,
+    chapterFrac: r.chapter_frac,
+    readMs: r.read_ms,
+    lastReadAt: r.last_read_at,
+    finishedAt: r.finished_at,
+    reads: reads.filter((x) => x.book_id === r.id).map((x): [number, number, number, number, number] => [x.started_at, x.ended_at, x.read_ms, x.progress_from, x.progress_to]),
+    rating: r.rating,
+    status: r.status,
+    notes: r.notes,
+    keywords: tags.filter((t) => t.book_id === r.id).map((t) => t.name),
+    marks: marks
+      .filter((m) => m.book_id === r.id)
+      .map((m) => ({ kind: m.kind === 'highlight' ? ('highlight' as const) : ('bookmark' as const), chapter: m.chapter, block: m.block, text: m.text, note: m.note, createdAt: m.created_at })),
+  }));
+}
+
+/** Puts your place and reading back on the books you have now (matched like audio: fingerprint, else name and size). */
+async function restoreBooks(entries: BackupBook[]): Promise<void> {
+  const db = await getDb();
+  const library = await db.getAllAsync<BookRow>('SELECT * FROM books WHERE deleted_at IS NULL;');
+  const matches = matchAudio(entries, library.map((b) => ({ id: b.id, contentKey: b.content_key, filename: b.filename, size: b.size })));
+  for (const [i, id] of matches) {
+    const e = entries[i];
+    const now = library.find((x) => x.id === id);
+    const have = new Set((await db.getAllAsync<{ started_at: number }>('SELECT started_at FROM book_reads WHERE book_id = ?;', [id])).map((x) => x.started_at));
+    let added = 0;
+    for (const [start, end, ms, from, to] of e.reads) {
+      if (have.has(start)) continue;
+      await db.runAsync('INSERT INTO book_reads (book_id, started_at, ended_at, read_ms, progress_from, progress_to) VALUES (?, ?, ?, ?, ?, ?);', [id, start, end, ms, from, to]);
+      added += ms;
+    }
+    // Where you were: the backup's, when it is newer than what this phone has.
+    const newer = (e.lastReadAt ?? 0) > (now?.last_read_at ?? 0);
+    await db.runAsync(
+      `UPDATE books SET read_ms = read_ms + ?, finished_at = COALESCE(finished_at, ?)${newer ? ', chapter = ?, block = ?, chapter_frac = ?, last_read_at = ?' : ''} WHERE id = ?;`,
+      newer ? [added, e.finishedAt, e.chapter, e.block, e.chapterFrac, e.lastReadAt, id] : [added, e.finishedAt, id]
+    );
+    await db.runAsync('UPDATE books SET rating = CASE WHEN rating = 0 THEN ? ELSE rating END, status = COALESCE(status, ?), notes = COALESCE(notes, ?) WHERE id = ?;', [
+      e.rating ?? 0,
+      e.status ?? null,
+      e.notes ?? null,
+      id,
+    ]);
+    for (const k of e.keywords ?? []) {
+      const have = await db.getFirstAsync('SELECT 1 FROM book_tags WHERE book_id = ? AND name = ? COLLATE NOCASE;', [id, k]);
+      if (!have) await db.runAsync('INSERT INTO book_tags (book_id, name) VALUES (?, ?);', [id, k]);
+    }
+    const mine = new Set(
+      (await db.getAllAsync<{ kind: string; chapter: number; block: number; text: string | null }>('SELECT kind, chapter, block, text FROM book_marks WHERE book_id = ?;', [id])).map((m) => `${m.kind}|${m.chapter}|${m.block}|${m.text ?? ''}`)
+    );
+    for (const m of e.marks ?? []) {
+      if (mine.has(`${m.kind}|${m.chapter}|${m.block}|${m.text ?? ''}`)) continue;
+      await db.runAsync('INSERT INTO book_marks (book_id, kind, chapter, block, text, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);', [id, m.kind, m.chapter, m.block, m.text, m.note, m.createdAt ?? Date.now()]);
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ manga */

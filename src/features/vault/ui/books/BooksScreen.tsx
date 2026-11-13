@@ -1,23 +1,43 @@
 /**
  * The Books shelf: the book you are reading at the top, ready to carry on,
- * then everything else. Books are .epub files kept on the phone, so they read
- * with no connection. Hold a book to mark it finished or remove it.
+ * then everything else, with search, a row of chips (status and your
+ * keywords) and a choice of order. Tap a book to read it, hold it for its
+ * menu. Select several to rate, set a status, add a keyword, make Private
+ * or delete. Recently Deleted keeps books for the days set in Settings.
+ * Books are .epub files kept on the phone, so they read with no connection.
  * Presentational only (see the note at the top of types.ts).
  */
 
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Platform, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { displayTitle, fmtLeft, fmtProgress, isStarted, minutesLeft, progressOf, shelfOrder } from '../../books/bookLogic';
+import {
+  BOOK_SORTS,
+  BOOK_STATUSES,
+  daysLeft,
+  displayTitle,
+  fmtLeft,
+  fmtProgress,
+  isStarted,
+  matchesBook,
+  minutesLeft,
+  progressOf,
+  shelfTags,
+  sortBooks,
+  statusOf,
+  type BookFilter,
+  type BookSort,
+} from '../../books/bookLogic';
 import { useTabBarSpace } from '../chrome';
 import { tick } from '../haptics';
 import Icon from '../Icon';
 import IconButton from '../IconButton';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
-import { OptionsSheet } from '../prompts';
+import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
+import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { BookActions, BookUi } from './bookTypes';
 
@@ -55,48 +75,162 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
   );
 }
 
+type Menu = 'more' | 'sort' | 'status' | 'tag' | 'rate' | 'newTag' | null;
+
 export default function BooksScreen({
   items,
+  deleted,
+  trashDays,
   loaded,
   status,
   busy,
   actions,
+  showPrivate,
+  onUnlockPrivate,
+  sort,
+  onSort,
   onOpen,
+  onInfo,
   onMode,
+  onDashboard,
+  initialDeleted = false,
 }: {
   items: BookUi[];
+  deleted: BookUi[];
+  trashDays: number;
   loaded: boolean;
   status: string;
   busy: boolean;
   actions: BookActions;
+  showPrivate: boolean;
+  onUnlockPrivate?: () => void;
+  sort: BookSort;
+  onSort: (s: BookSort) => void;
   onOpen: (b: BookUi) => void;
+  onInfo: (b: BookUi) => void;
   onMode: (m: VideosMode) => void;
+  onDashboard: () => void;
+  initialDeleted?: boolean;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
   const [menuFor, setMenuFor] = useState<BookUi | null>(null);
+  const [menu, setMenu] = useState<Menu>(null);
+  const [filter, setFilter] = useState<BookFilter>(null);
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [inDeleted, setInDeleted] = useState(initialDeleted);
+  // Who the rating, status and keyword sheets act on: the selection, or the one book held.
+  const [target, setTarget] = useState<string[]>([]);
 
-  const shelf = useMemo(() => shelfOrder(items), [items]);
-  const current = shelf.find((b) => isStarted(b) && !b.finishedAt) ?? null;
-  const rest = current ? shelf.filter((b) => b.id !== current.id) : shelf;
+  const visible = useMemo(() => items.filter((b) => showPrivate || !b.isPrivate), [items, showPrivate]);
+  const privateCount = items.filter((b) => b.isPrivate).length;
+  const tags = useMemo(() => shelfTags(visible), [visible]);
+  const shown = useMemo(() => {
+    const base = inDeleted ? deleted.filter((b) => showPrivate || !b.isPrivate) : visible;
+    return sortBooks(
+      base.filter((b) => inDeleted || matchesBook(b, filter, query)),
+      inDeleted ? 'added' : sort
+    );
+  }, [inDeleted, deleted, visible, filter, query, sort, showPrivate]);
+  const plain = !inDeleted && !filter && !query.trim() && sort === 'shelf' && !selected;
+  const current = plain ? (shown.find((b) => isStarted(b) && !b.finishedAt && statusOf(b) === 'reading') ?? null) : null;
+  const rest = current ? shown.filter((b) => b.id !== current.id) : shown;
+
+  const ids = selected ? [...selected] : [];
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s ?? []);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const act = (ts: string[], m: Menu) => {
+    setTarget(ts);
+    setMenu(m);
+  };
+  const done = () => setSelected(null);
 
   const add = () => actions.importFiles().catch(failed);
+  const chips: { key: string; label: string; count: number; filter: BookFilter }[] = [
+    { key: 'all', label: 'All', count: visible.length, filter: null },
+    ...BOOK_STATUSES.map((s) => ({ key: s.key, label: s.label, count: visible.filter((b) => statusOf(b) === s.key).length, filter: { status: s.key } as BookFilter })).filter((c) => c.count > 0),
+    ...tags.map((t) => ({ key: `#${t.name}`, label: `#${t.name}`, count: t.count, filter: { tag: t.name } as BookFilter })),
+  ];
+  const chipOn = (f: BookFilter) => JSON.stringify(f) === JSON.stringify(filter);
+
+  const moreOptions: OptionItem[] = [
+    { label: 'Sort', hint: BOOK_SORTS.find((s) => s.key === sort)?.label, onPress: () => setTimeout(() => setMenu('sort'), 250) },
+    ...(visible.length ? [{ label: 'Select', onPress: () => setSelected(new Set()) }] : []),
+    { label: inDeleted ? 'Back to the shelf' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
+    ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
+    ...(visible.length ? [{ label: 'Reading stats and Wrapped', onPress: onDashboard }] : []),
+  ];
 
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Books</Text>
-        <IconButton icon="plus" label="Add a book" onPress={add} />
+        <Text style={styles.title}>{inDeleted ? 'Recently Deleted' : selected ? `${ids.length} selected` : 'Books'}</Text>
+        <View style={styles.buttons}>
+          {selected ? (
+            <>
+              <TouchableOpacity style={styles.pill} onPress={() => setSelected(ids.length === shown.length ? new Set() : new Set(shown.map((b) => b.id)))}>
+                <Text style={styles.pillText}>{ids.length === shown.length && shown.length ? 'None' : 'All'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.pill} onPress={done}>
+                <Text style={styles.pillText}>Done</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              {!inDeleted && <IconButton icon="plus" label="Add a book" onPress={add} />}
+              {!inDeleted && visible.length > 0 && <IconButton icon="stats" label="Reading stats and Wrapped" onPress={onDashboard} />}
+              <IconButton icon="more" label="More" onPress={() => setMenu('more')} />
+            </>
+          )}
+        </View>
       </View>
-      <View style={styles.modeRow}>
-        <ModeSwitch mode="books" onChange={onMode} />
-      </View>
+      {!inDeleted && !selected && (
+        <View style={styles.modeRow}>
+          <ModeSwitch mode="books" onChange={onMode} />
+        </View>
+      )}
       {!!status && (
         <Animated.Text entering={FadeIn} exiting={FadeOut} style={styles.status} numberOfLines={3}>
           {status}
         </Animated.Text>
+      )}
+      {inDeleted && <Text style={styles.status}>Books here are removed for good after {trashDays} {trashDays === 1 ? 'day' : 'days'}. Tap one to restore it.</Text>}
+
+      {!inDeleted && visible.length > 1 && (
+        <View style={styles.search}>
+          <Icon name="search" size={15} color={p.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Title, author, notes, keyword"
+            placeholderTextColor={p.textMuted}
+            style={styles.searchInput}
+            clearButtonMode="while-editing"
+            returnKeyType="search"
+          />
+        </View>
+      )}
+
+      {!inDeleted && chips.length > 2 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {chips.map((c) => {
+            const on = chipOn(c.filter);
+            return (
+              <TouchableOpacity key={c.key} style={[styles.chip, on && styles.chipOn]} onPress={() => setFilter(on && c.filter ? null : c.filter)}>
+                <Text style={[styles.chipText, on && styles.chipTextOn]}>{c.label}</Text>
+                <Text style={[styles.chipCount, on && styles.chipTextOn]}>{c.count}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       )}
 
       {current && (
@@ -129,11 +263,25 @@ export default function BooksScreen({
         </TouchableOpacity>
       )}
 
-      {rest.length > 0 && <Text style={styles.section}>{current ? 'On your shelf' : 'Your shelf'}</Text>}
+      {!inDeleted && rest.length > 0 && (
+        <TouchableOpacity style={styles.sectionRow} onPress={() => setMenu('sort')} accessibilityLabel="Change the order">
+          <Text style={styles.section}>{current ? 'On your shelf' : filter || query.trim() ? `${rest.length} ${rest.length === 1 ? 'book' : 'books'}` : 'Your shelf'}</Text>
+          <Text style={styles.sortText}>{BOOK_SORTS.find((s) => s.key === sort)?.label}</Text>
+          <Icon name="sort" size={12} color={p.textSecondary} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 
-  const empty = loaded ? (
+  const empty = !loaded ? null : inDeleted ? (
+    <View style={styles.empty}>
+      <Text style={styles.emptyText}>Nothing in Recently Deleted.</Text>
+    </View>
+  ) : visible.length && (filter || query.trim()) ? (
+    <View style={styles.empty}>
+      <Text style={styles.emptyText}>No book matches that.</Text>
+    </View>
+  ) : current ? null : (
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>No books yet</Text>
       <Text style={styles.emptyText}>
@@ -143,78 +291,204 @@ export default function BooksScreen({
         <Text style={styles.emptyBtnText}>Add a book</Text>
       </TouchableOpacity>
     </View>
-  ) : null;
+  );
 
+  const held = menuFor;
   return (
     <View style={styles.screen}>
       <FlatList
         data={rest}
         keyExtractor={(b) => b.id}
         ListHeaderComponent={header}
-        ListEmptyComponent={current ? null : empty}
-        contentContainerStyle={{ paddingBottom: tabSpace + 24 }}
+        ListEmptyComponent={empty}
+        contentContainerStyle={{ paddingBottom: tabSpace + (selected ? 90 : 24) }}
+        keyboardDismissMode="on-drag"
         renderItem={({ item: b }) => {
           const pr = progressOf(b);
+          const on = selected?.has(b.id) ?? false;
+          const st = statusOf(b);
+          const line = inDeleted
+            ? `${daysLeft(b.deletedAt ?? Date.now(), trashDays, Date.now())} days left`
+            : st === 'dropped'
+              ? 'Dropped'
+              : st === 'want' && !isStarted(b)
+                ? 'Want to read'
+                : fmtProgress(pr, isStarted(b));
           return (
             <TouchableOpacity
-              style={styles.row}
-              onPress={() => onOpen(b)}
+              style={[styles.row, on && styles.rowSel]}
+              onPress={() => (selected ? toggle(b.id) : inDeleted ? setMenuFor(b) : onOpen(b))}
               onLongPress={() => {
                 tick();
-                setMenuFor(b);
+                if (selected) toggle(b.id);
+                else setMenuFor(b);
               }}
-              accessibilityLabel={`${displayTitle(b)}${b.author ? ` by ${b.author}` : ''}, ${fmtProgress(pr, isStarted(b))}`}>
+              accessibilityLabel={`${displayTitle(b)}${b.author ? ` by ${b.author}` : ''}, ${line}`}>
+              {selected && (
+                <View style={[styles.check, on && styles.checkOn]}>{on && <Icon name="check" size={12} color="#fff" />}</View>
+              )}
               <BookCover book={b} width={52} radius={3} />
               <View style={styles.rowText}>
-                <Text style={styles.rowTitle} numberOfLines={2}>
-                  {displayTitle(b)}
-                </Text>
+                <View style={styles.rowHead}>
+                  <Text style={styles.rowTitle} numberOfLines={2}>
+                    {displayTitle(b)}
+                  </Text>
+                  {b.isPrivate && <Icon name="lock" size={12} color={p.textMuted} />}
+                </View>
                 {!!b.author && (
                   <Text style={styles.author} numberOfLines={1}>
                     {b.author}
                   </Text>
                 )}
-                <Text style={[styles.meta, b.finishedAt ? styles.done : null]}>{fmtProgress(pr, isStarted(b))}</Text>
+                <Text style={[styles.meta, st === 'finished' && !inDeleted ? styles.done : null]} numberOfLines={1}>
+                  {b.rating > 0 && <Text style={styles.rating}>★ {b.rating}  </Text>}
+                  {line}
+                  {b.tags.length > 0 && <Text style={styles.tags}>{`  ${b.tags.map((t) => `#${t}`).join(' ')}`}</Text>}
+                </Text>
               </View>
-              <Icon name="forward" size={14} color={p.textMuted} />
+              {!selected && <Icon name="forward" size={14} color={p.textMuted} />}
             </TouchableOpacity>
           );
         }}
         ItemSeparatorComponent={() => <View style={styles.sep} />}
       />
 
-      {menuFor && (
+      {selected && (
+        <Animated.View entering={FadeInDown} exiting={FadeOut} style={[styles.selectBar, { bottom: tabSpace + 10 }]}>
+          {inDeleted ? (
+            <>
+              <TouchableOpacity disabled={!ids.length} onPress={() => void actions.restore(ids).then(done)} style={[styles.selectBtn, { flex: 1 }]}>
+                <Text style={styles.selectBtnText}>Restore</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={!ids.length} onPress={() => confirmPurge(ids, () => void actions.purge(ids).then(done))} style={[styles.selectBtn, { flex: 1 }]}>
+                <Text style={[styles.selectBtnText, { color: p.danger }]}>Delete for good</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity disabled={!ids.length} onPress={() => act(ids, 'rate')} style={styles.selectBtn}>
+                <Text style={[styles.selectBtnText, !ids.length && styles.off]}>Rate</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={!ids.length} onPress={() => act(ids, 'status')} style={styles.selectBtn}>
+                <Text style={[styles.selectBtnText, !ids.length && styles.off]}>Status</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={!ids.length} onPress={() => act(ids, 'tag')} style={styles.selectBtn} accessibilityLabel="Add a keyword">
+                <Icon name="tag" size={15} color={ids.length ? p.text : p.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={!ids.length}
+                onPress={() => {
+                  const allPrivate = ids.every((id) => items.find((b) => b.id === id)?.isPrivate);
+                  void actions.setPrivate(ids, !allPrivate).then(done);
+                }}
+                style={styles.selectBtn}
+                accessibilityLabel="Private">
+                <Icon name="lock" size={15} color={ids.length ? p.text : p.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity disabled={!ids.length} onPress={() => void actions.trash(ids).then(done)} style={styles.selectBtn} accessibilityLabel="Delete">
+                <Icon name="trash" size={15} color={ids.length ? p.danger : p.textMuted} />
+              </TouchableOpacity>
+            </>
+          )}
+        </Animated.View>
+      )}
+
+      {held && !inDeleted && (
         <OptionsSheet
-          title={displayTitle(menuFor)}
+          title={displayTitle(held)}
           onClose={() => setMenuFor(null)}
           options={[
-            { label: 'Read', onPress: () => onOpen(menuFor) },
-            menuFor.finishedAt
-              ? { label: 'Mark as not finished', onPress: () => void actions.setFinished(menuFor.id, false).catch(failed) }
-              : { label: 'Mark as finished', onPress: () => void actions.setFinished(menuFor.id, true).catch(failed) },
-            {
-              label: 'Remove from the phone',
-              danger: true,
-              onPress: () =>
-                Alert.alert(`Remove ${displayTitle(menuFor)}?`, 'The book and your place in it are deleted from this phone. You can add the .epub again later.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Remove', style: 'destructive', onPress: () => void actions.remove(menuFor.id).catch(failed) },
-                ]),
-            },
+            { label: isStarted(held) ? 'Carry on reading' : 'Start reading', onPress: () => onOpen(held) },
+            { label: 'Details, notes and highlights', onPress: () => onInfo(held) },
+            { label: 'Rate', hint: held.rating ? `★ ${held.rating}` : undefined, onPress: () => act([held.id], 'rate') },
+            { label: 'Status', hint: BOOK_STATUSES.find((s) => s.key === statusOf(held))?.label, onPress: () => act([held.id], 'status') },
+            { label: 'Add a keyword', onPress: () => act([held.id], 'tag') },
+            { label: held.isPrivate ? 'Take out of Private' : 'Move to Private', onPress: () => void actions.setPrivate([held.id], !held.isPrivate).catch(failed) },
+            { label: 'Delete', danger: true, hint: `Kept ${trashDays} days`, onPress: () => void actions.trash([held.id]).catch(failed) },
           ]}
+        />
+      )}
+      {held && inDeleted && (
+        <OptionsSheet
+          title={displayTitle(held)}
+          onClose={() => setMenuFor(null)}
+          options={[
+            { label: 'Restore', onPress: () => void actions.restore([held.id]).catch(failed) },
+            { label: 'Delete for good', danger: true, hint: 'Removes the book and your highlights', onPress: () => confirmPurge([held.id], () => void actions.purge([held.id]).catch(failed)) },
+          ]}
+        />
+      )}
+
+      {menu === 'more' && <OptionsSheet title="Books" options={moreOptions} onClose={() => setMenu(null)} />}
+      {menu === 'sort' && (
+        <OptionsSheet title="Order" options={BOOK_SORTS.map((s) => ({ label: s.label, hint: s.key === sort ? '✓' : undefined, onPress: () => onSort(s.key) }))} onClose={() => setMenu(null)} />
+      )}
+      {menu === 'status' && (
+        <OptionsSheet
+          title={target.length === 1 ? 'Status' : `Status of ${target.length}`}
+          options={[
+            ...BOOK_STATUSES.map((s) => ({ label: s.label, onPress: () => void actions.setStatus(target, s.key).then(done) })),
+            { label: 'From my reading', hint: 'Reading once started, finished at the end', onPress: () => void actions.setStatus(target, null).then(done) },
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu === 'tag' && (
+        <OptionsSheet
+          title="Add a keyword"
+          options={[
+            ...tags.map((t) => ({ label: `#${t.name}`, hint: `${t.count}`, onPress: () => void actions.addTag(target, t.name).then(done) })),
+            { label: 'New keyword…', onPress: () => setTimeout(() => setMenu('newTag'), 250) },
+          ]}
+          onClose={() => setMenu((m) => (m === 'tag' ? null : m))}
+        />
+      )}
+      {menu === 'newTag' && (
+        <PromptSheet
+          title="New keyword"
+          placeholder="e.g. Russian, classics, book club"
+          confirmLabel="Add"
+          onSubmit={(t) => void actions.addTag(target, t).then(done)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu === 'rate' && (
+        <RatingPicker
+          title={target.length === 1 ? 'Your rating' : `Rate ${target.length}`}
+          value={target.length === 1 ? (items.find((b) => b.id === target[0])?.rating ?? null) : null}
+          onPick={(r) => void actions.rate(target, r ?? 0).then(done)}
+          onClose={() => setMenu(null)}
         />
       )}
     </View>
   );
 }
 
+function confirmPurge(ids: string[], go: () => void) {
+  Alert.alert(ids.length === 1 ? 'Delete this book for good?' : `Delete ${ids.length} books for good?`, 'The book, your place in it, your bookmarks and highlights are removed from this phone.', [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete', style: 'destructive', onPress: go },
+  ]);
+}
+
 const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
-    titleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SIDE, paddingTop: 6 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SIDE, paddingTop: 6, minHeight: 46 },
     title: { flex: 1, color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },
+    buttons: { flexDirection: 'row', gap: 8 },
+    pill: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 14, height: 34, justifyContent: 'center' },
+    pillText: { color: p.text, fontSize: 15, fontWeight: '700' },
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
     status: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
+    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 14, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+    searchInput: { flex: 1, color: p.text, fontSize: 16 },
+    chips: { gap: 8, paddingHorizontal: SIDE, paddingTop: 12 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
+    chipOn: { backgroundColor: p.text },
+    chipText: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
+    chipCount: { color: p.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    chipTextOn: { color: p.bg },
     current: { flexDirection: 'row', gap: 16, marginHorizontal: SIDE, marginTop: 22, paddingBottom: 22, borderBottomWidth: 1, borderBottomColor: p.separator },
     currentText: { flex: 1, paddingTop: 2 },
     currentLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -224,12 +498,20 @@ const makeStyles = (p: Palette) =>
     barFill: { height: 3, borderRadius: 2, backgroundColor: p.accent },
     meta: { color: p.textSecondary, fontSize: 13, marginTop: 6, fontVariant: ['tabular-nums'] },
     done: { color: p.success },
+    rating: { color: p.rating, fontWeight: '800' },
+    tags: { color: p.link },
     carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9, marginTop: 14 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
-    section: { color: p.text, fontSize: 20, fontWeight: '800', paddingHorizontal: SIDE, marginTop: 24, marginBottom: 6 },
+    sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SIDE, marginTop: 22, marginBottom: 4 },
+    section: { flex: 1, color: p.text, fontSize: 20, fontWeight: '800' },
+    sortText: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: SIDE, paddingVertical: 12 },
+    rowSel: { backgroundColor: p.accentSoft },
     rowText: { flex: 1 },
-    rowTitle: { color: p.text, fontSize: 16, fontWeight: '700', lineHeight: 21 },
+    rowHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    rowTitle: { flexShrink: 1, color: p.text, fontSize: 16, fontWeight: '700', lineHeight: 21 },
+    check: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: p.textMuted, alignItems: 'center', justifyContent: 'center' },
+    checkOn: { backgroundColor: p.accent, borderColor: p.accent },
     sep: { height: 1, backgroundColor: p.separator, marginLeft: SIDE + 52 + 14 },
     cover: { overflow: 'hidden', backgroundColor: p.tile },
     plainCover: { backgroundColor: p.elevated, borderWidth: 1, borderColor: p.border, justifyContent: 'space-between' },
@@ -237,7 +519,11 @@ const makeStyles = (p: Palette) =>
     plainSmall: { alignItems: 'center', justifyContent: 'center' },
     plainInitial: { color: p.textSecondary, fontWeight: '600', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
     plainAuthor: { color: p.textSecondary },
-    empty: { paddingHorizontal: SIDE + 8, paddingTop: 48, gap: 12 },
+    selectBar: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 18, padding: 8, borderWidth: 1, borderColor: p.border },
+    selectBtn: { flex: 1, backgroundColor: p.card, borderRadius: 12, height: 38, alignItems: 'center', justifyContent: 'center' },
+    selectBtnText: { color: p.text, fontSize: 15, fontWeight: '700' },
+    off: { color: p.textMuted },
+    empty: { paddingHorizontal: SIDE + 8, paddingTop: 40, gap: 12 },
     emptyTitle: { color: p.text, fontSize: 22, fontWeight: '800' },
     emptyText: { color: p.textSecondary, fontSize: 15, lineHeight: 22 },
     emptyBtn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 12, marginTop: 8 },

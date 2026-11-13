@@ -121,3 +121,22 @@ test('recent searches', async () => {
   assert.deepEqual(rememberSearch(['a1'], 'x'), ['a1']);
   assert.equal(rememberSearch(Array.from({ length: 8 }, (_, i) => `q${i}`), 'new').length, 8);
 });
+
+test('books to read show in search and in Jump back in', async () => {
+  const { findEverything, jumpBackIn, kindLabel, weekSummary } = await import('../src/features/home/everything.ts');
+  const books = [
+    { id: 'cp', title: 'Crime and Punishment', filename: 'cp.epub', author: 'Fyodor Dostoevsky', description: null, chapter: 7, chapterSizes: new Array(53).fill(1), progress: 0.14, lastReadAt: 5_000, finishedAt: null },
+    { id: 'nu', title: 'Notes from Underground', filename: 'nu.epub', author: 'Fyodor Dostoevsky', description: null, chapter: 0, chapterSizes: [1], progress: 1, lastReadAt: 4_000, finishedAt: 4_000 },
+  ];
+  const input = { videos: [], audio: [], manga: [], titles: [], books };
+  const found = findEverything('dostoevsky', input);
+  assert.deepEqual(found.map((f) => f.kind), ['ebook', 'ebook']);
+  assert.equal(found.find((f) => f.id === 'cp').sub, 'Fyodor Dostoevsky · 14% read');
+  assert.equal(kindLabel('ebook'), 'Book');
+  const jump = jumpBackIn({ ...input, resume: [] });
+  assert.deepEqual(jump.map((j) => [j.id, j.sub]), [['cp', '14% · chapter 8 of 53']]);
+  const now = 10 * 86_400_000;
+  const week = weekSummary({ videoPlays: [], watches: [], chapterTimes: [], audioPlays: [], bookReads: [{ startedAt: now - 3_600_000, ms: 1_800_000 }] }, now);
+  assert.equal(week.readMs, 1_800_000);
+  assert.equal(week.activeDays, 1);
+});

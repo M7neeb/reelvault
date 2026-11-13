@@ -88,6 +88,28 @@ export type BackupAudio = {
   bookmarks: { track: number; atMs: number; label: string | null; createdAt: number }[];
 };
 
+/** A book in Books: where you are and your reading (the .epub itself is not in the backup). */
+export type BackupBook = {
+  contentKey: string | null;
+  filename: string;
+  size: number;
+  title: string | null;
+  author: string | null;
+  chapter: number;
+  block: number;
+  chapterFrac: number;
+  readMs: number;
+  lastReadAt: number | null;
+  finishedAt: number | null;
+  /** [started at, ended at, read ms, progress from, progress to] */
+  reads: [number, number, number, number, number][];
+  rating?: number;
+  status?: string | null;
+  notes?: string | null;
+  keywords?: string[];
+  marks?: { kind: 'bookmark' | 'highlight'; chapter: number; block: number; text: string | null; note: string | null; createdAt: number }[];
+};
+
 export type Backup = {
   kind: typeof BACKUP_KIND;
   version: number;
@@ -107,6 +129,8 @@ export type Backup = {
   audio?: BackupAudio[];
   /** The Manga section: each title's info, its chapters' read marks and where they come from, and your reading sessions. */
   manga?: BackupMangaTitle[];
+  /** Books: your place in each book, finished dates and reading sittings. */
+  books?: BackupBook[];
 };
 
 export type BackupMangaChapter = {
@@ -189,6 +213,20 @@ export function parseBackup(json: string): Backup | null {
             bookmarks: Array.isArray(a.bookmarks) ? a.bookmarks.filter((m) => m && typeof m.atMs === 'number') : [],
           }))
       : [],
+    books: Array.isArray(b.books)
+      ? b.books
+          .filter((x) => x && typeof x.filename === 'string')
+          .map((x) => ({
+            ...x,
+            chapter: typeof x.chapter === 'number' ? x.chapter : 0,
+            block: typeof x.block === 'number' ? x.block : 0,
+            chapterFrac: typeof x.chapterFrac === 'number' ? x.chapterFrac : 0,
+            readMs: typeof x.readMs === 'number' ? x.readMs : 0,
+            reads: Array.isArray(x.reads) ? x.reads.filter((r) => Array.isArray(r) && r.length === 5 && r.every((n) => typeof n === 'number')) : [],
+            keywords: Array.isArray(x.keywords) ? x.keywords.filter((k) => typeof k === 'string') : [],
+            marks: Array.isArray(x.marks) ? x.marks.filter((m) => m && typeof m.chapter === 'number' && typeof m.block === 'number') : [],
+          }))
+      : [],
     series: Array.isArray(b.series)
       ? b.series
           .filter((x) => x && typeof x.name === 'string' && Array.isArray(x.episodes))
@@ -223,7 +261,7 @@ export function matchBackup(backup: Backup, library: Target[]): Map<number, stri
 }
 
 /** Which audio item each backed-up entry belongs to (index -> item id): by fingerprint, else by file name and size, else by a file name only one item has. */
-export function matchAudio(entries: BackupAudio[], library: Target[]): Map<number, string> {
+export function matchAudio(entries: Pick<BackupAudio, 'contentKey' | 'filename' | 'size'>[], library: Target[]): Map<number, string> {
   const byKey = new Map<string, string>();
   const byNameSize = new Map<string, string>();
   const byName = new Map<string, string[]>();

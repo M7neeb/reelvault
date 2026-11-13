@@ -845,7 +845,7 @@ export type VaultScreenProps = {
     /** Audio mode: open the player, an item's details, the stats or Recently Deleted. */
     audio?: import('./audio/AudioSection').AudioDev;
     manga?: import('./manga/MangaSection').MangaDev;
-    books?: { reader?: boolean };
+    books?: import('./books/BooksSection').BooksDev;
     metaImportOpen?: boolean;
     wifiOpen?: boolean;
     historyStats?: boolean;
