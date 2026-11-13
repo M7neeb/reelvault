@@ -9,7 +9,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, type ViewToken } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Platform, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View, type ViewToken } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -141,6 +141,10 @@ export default function BookReader({
   const lastMove = useRef(Date.now());
   const pendingMs = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A tap on the text shows or hides the bar. Read from the list's own touches: a tap area wrapped
+  // around the list took the finger before the list could scroll on the iPhone.
+  const touch = useRef<{ x: number; y: number; at: number; still: boolean } | null>(null);
+  const scrolledAt = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -338,7 +342,7 @@ export default function BookReader({
             <ActivityIndicator color={ink.soft} />
           </View>
         ) : (
-          <Pressable focusable={false} style={[styles.fill, { marginTop: topBand, marginBottom: bottomBand }]} onPress={() => (panel ? setPanel(null) : setChrome((c) => !c))} accessibilityLabel="Tap to show or hide the reading controls">
+          <View style={[styles.fill, { marginTop: topBand, marginBottom: bottomBand }]}>
             <FlatList
               ref={list}
               key={`${shown.index}`}
@@ -369,8 +373,25 @@ export default function BookReader({
                 if (panel) setPanel(null);
               }}
               indicatorStyle={ink.dark ? 'white' : 'black'}
+              onScroll={() => {
+                scrolledAt.current = Date.now();
+              }}
+              scrollEventThrottle={100}
+              onTouchStart={(e) => {
+                const { pageX, pageY } = e.nativeEvent;
+                touch.current = { x: pageX, y: pageY, at: Date.now(), still: Date.now() - scrolledAt.current > 200 };
+              }}
+              onTouchEnd={(e) => {
+                const t = touch.current;
+                touch.current = null;
+                if (!t || !t.still) return;
+                const { pageX, pageY } = e.nativeEvent;
+                if (Math.abs(pageX - t.x) > 8 || Math.abs(pageY - t.y) > 8 || Date.now() - t.at > 350) return;
+                if (panel) setPanel(null);
+                else setChrome((c) => !c);
+              }}
             />
-          </Pressable>
+          </View>
         )}
 
         {/* Where you are, quietly, in the margins the text never runs into. */}
