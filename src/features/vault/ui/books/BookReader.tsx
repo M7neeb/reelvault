@@ -24,6 +24,7 @@ import {
   type BookHit,
   type BookMark,
   displayTitle,
+  chapterMinutesLeft,
   fmtLeft,
   fmtProgress,
   fracOfBlock,
@@ -457,6 +458,7 @@ export default function BookReader({
 
   const progress = progressAt(book.chapterSizes, shown?.index ?? chapter, fracOfBlock(topBlock, blocks.length));
   const left = minutesLeft({ ...book, chapter: shown?.index ?? chapter, chapterFrac: fracOfBlock(topBlock, blocks.length), finishedAt: null });
+  const chapterLeft = chapterMinutesLeft(book, shown?.index ?? chapter, fracOfBlock(topBlock, blocks.length));
   const isLast = !!opened && chapter >= opened.chapters.length - 1;
   const nextTitle = opened && !isLast ? chapterLabel(opened.toc, chapter + 1, book.title, opened.chapters[chapter + 1]?.title ?? '') : null;
 
@@ -577,7 +579,10 @@ export default function BookReader({
               </Text>
             </View>
             <View pointerEvents="none" style={[styles.band, { bottom: 0, height: bottomBand, paddingBottom: insets.bottom ? insets.bottom - 6 : 8, backgroundColor: ink.bg }]}>
-              <Text style={[styles.quietText, { color: ink.faint }]}>{fmtProgress(progress, true)}</Text>
+              <Text style={[styles.quietText, { color: ink.faint }]}>
+                {fmtProgress(progress, true)}
+                {chapterLeft !== null && !isLast ? ` · ${chapterLeft} min left in chapter` : ''}
+              </Text>
             </View>
           </>
         )}

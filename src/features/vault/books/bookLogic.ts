@@ -52,6 +52,22 @@ export function statusOf(b: Pick<BookItem, 'status' | 'finishedAt' | 'lastReadAt
   return b.finishedAt ? 'finished' : b.lastReadAt ? 'reading' : 'want';
 }
 
+/**
+ * Status and the finished date have to tell the same story, whichever one you
+ * change: a book set to Finished gets its date (stats and Wrapped count by it),
+ * any other status takes the date away again.
+ */
+export function withStatus(b: Pick<BookItem, 'status' | 'finishedAt'>, status: BookStatus | null, now: number): Pick<BookItem, 'status' | 'finishedAt'> {
+  if (status === null) return { status, finishedAt: b.finishedAt };
+  return { status, finishedAt: status === 'finished' ? (b.finishedAt ?? now) : null };
+}
+
+/** "Mark as finished" at the end of a book (or its undo): a status set by hand must not contradict it. */
+export function withFinished(b: Pick<BookItem, 'status' | 'finishedAt'>, finished: boolean, now: number): Pick<BookItem, 'status' | 'finishedAt'> {
+  if (finished) return { status: b.status === 'finished' ? b.status : null, finishedAt: now };
+  return { status: b.status === 'finished' ? null : b.status, finishedAt: null };
+}
+
 /** A bookmark (a paragraph) or a highlight (words inside one). */
 export type BookMark = { id: number; bookId: string; kind: 'bookmark' | 'highlight'; chapter: number; block: number; text: string | null; note: string | null; createdAt: number };
 
@@ -256,9 +272,9 @@ export function findInBlocks(paras: { block: number; text: string }[], chapter: 
   return out;
 }
 
-/** Shelf order: the book you read last first, then the ones never opened (newest first), finished last. */
+/** Shelf order: the book you read last first, then the ones never opened (newest first), then dropped, finished last. */
 export function shelfOrder<T extends BookItem>(books: T[]): T[] {
-  const rank = (b: BookItem) => (b.finishedAt ? 2 : b.lastReadAt ? 0 : 1);
+  const rank = (b: BookItem) => (b.finishedAt ? 3 : b.status === 'dropped' ? 2 : b.lastReadAt ? 0 : 1);
   return [...books].sort((a, b) => rank(a) - rank(b) || (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0) || b.addedAt - a.addedAt);
 }
 
@@ -267,6 +283,18 @@ export function minutesLeft(b: BookItem): number | null {
   const p = progressOf(b);
   if (p < 0.02 || p >= 1 || b.readMs < 10 * 60_000) return null;
   return Math.round(((b.readMs / p) * (1 - p)) / 60_000);
+}
+
+/** Minutes left in the chapter you are in, at your own pace through this book. */
+export function chapterMinutesLeft(b: Pick<BookItem, 'chapterSizes' | 'readMs'>, chapter: number, frac: number): number | null {
+  const sizes = b.chapterSizes;
+  if (!sizes.length || b.readMs < 10 * 60_000) return null;
+  const read = progressAt(sizes, chapter, frac);
+  if (read < 0.02) return null;
+  const c = Math.min(Math.max(0, Math.floor(chapter)), sizes.length - 1);
+  const total = sizes.reduce((a, x) => a + Math.max(1, x), 0);
+  const rest = ((Math.max(1, sizes[c]) / total) * (1 - Math.min(1, Math.max(0, frac)))) / read;
+  return Math.max(1, Math.round((b.readMs * rest) / 60_000));
 }
 
 export function fmtLeft(min: number): string {

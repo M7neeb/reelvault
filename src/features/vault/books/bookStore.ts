@@ -106,9 +106,11 @@ export async function saveBookPlace(id: string, place: BookPlace, addMs: number,
   ]);
 }
 
+/** Same rule as withFinished in bookLogic: a status set by hand gives way when it says otherwise. */
 export async function setBookFinished(id: string, at: number | null): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE books SET finished_at = ? WHERE id = ?;', [at, id]);
+  const status = at === null ? "CASE WHEN status = 'finished' THEN NULL ELSE status END" : "CASE WHEN status = 'finished' THEN status ELSE NULL END";
+  await db.runAsync(`UPDATE books SET finished_at = ?, status = ${status} WHERE id = ?;`, [at, id]);
 }
 
 export async function setBookText(id: string, title: string | null, author: string | null): Promise<void> {
@@ -131,6 +133,15 @@ export async function setBooksField(ids: string[], field: 'rating' | 'status' | 
   if (!ids.length) return;
   const db = await getDb();
   await db.runAsync(`UPDATE books SET ${field} = ? WHERE id IN (${marks(ids)});`, [value, ...ids]);
+}
+
+/** Same rule as withStatus in bookLogic: Finished keeps or gets its date, any other status clears it. */
+export async function setBooksStatus(ids: string[], status: string | null, at: number): Promise<void> {
+  if (!ids.length) return;
+  const db = await getDb();
+  if (status === null) await db.runAsync(`UPDATE books SET status = NULL WHERE id IN (${marks(ids)});`, ids);
+  else if (status === 'finished') await db.runAsync(`UPDATE books SET status = ?, finished_at = COALESCE(finished_at, ?) WHERE id IN (${marks(ids)});`, [status, at, ...ids]);
+  else await db.runAsync(`UPDATE books SET status = ?, finished_at = NULL WHERE id IN (${marks(ids)});`, [status, ...ids]);
 }
 
 export async function setBookNotes(id: string, notes: string | null): Promise<void> {

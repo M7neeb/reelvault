@@ -3,7 +3,7 @@
  * domain novel, so the reader can be looked at without a phone.
  */
 
-import { DEFAULT_READER, type BookRead, type ReaderPrefs } from '../../books/bookLogic';
+import { DEFAULT_READER, type BookMark, type BookRead, type ReaderPrefs } from '../../books/bookLogic';
 import type { BookActions, BookUi, BooksData } from './bookTypes';
 
 const OPENING: string[] = [
@@ -59,6 +59,24 @@ export function fixtureBooksData(empty = false): BooksData {
         base('master', 'The Master and Margarita', 'Mikhail Bulgakov', { addedAt: Date.now() - 3 * day, tags: ['Russian'], status: 'want' }),
         base('notes', 'Notes from Underground', 'Fyodor Dostoevsky', { rating: 9, tags: ['Russian'], finishedAt: new Date(new Date().getFullYear(), 1, 20).getTime(), lastReadAt: new Date(new Date().getFullYear(), 1, 20).getTime() }),
       ];
+  const marks: BookMark[] = empty
+    ? []
+    : [
+        { id: 1, bookId: 'crime', kind: 'bookmark', chapter: 7, block: 2, text: null, note: null, createdAt: Date.now() - 5 * day },
+        { id: 2, bookId: 'crime', kind: 'highlight', chapter: 7, block: 5, text: 'Taking a new step, uttering a new word is what they fear most.', note: 'The whole book in one line?', createdAt: Date.now() - 2 * day },
+        { id: 3, bookId: 'crime', kind: 'highlight', chapter: 7, block: 1, text: 'He had successfully avoided meeting his landlady on the staircase.', note: null, createdAt: Date.now() - day },
+        { id: 4, bookId: 'notes', kind: 'highlight', chapter: 2, block: 9, text: 'I say let the world go to hell, but I should always have my tea.', note: null, createdAt: Date.now() - 200 * day },
+        {
+          id: 5,
+          bookId: 'notes',
+          kind: 'highlight',
+          chapter: 1,
+          block: 3,
+          text: 'To be too conscious is an illness, a real thorough-going illness. For man’s everyday needs, it would have been quite enough to have the ordinary human consciousness, that is, half or a quarter of the amount which falls to the lot of a cultivated man of our unhappy nineteenth century.',
+          note: null,
+          createdAt: Date.now() - 230 * day,
+        },
+      ];
   const actions: BookActions = {
     importFiles: async () => undefined,
     open: async () => ({
@@ -85,14 +103,9 @@ export function fixtureBooksData(empty = false): BooksData {
     edit: async () => undefined,
     setNotes: async () => undefined,
     setCover: async () => undefined,
-    loadMarks: async (id) =>
-      id === 'crime'
-        ? [
-            { id: 1, bookId: id, kind: 'bookmark', chapter: 7, block: 2, text: null, note: null, createdAt: Date.now() - 5 * day },
-            { id: 2, bookId: id, kind: 'highlight', chapter: 7, block: 5, text: 'Taking a new step, uttering a new word is what they fear most.', note: 'The whole book in one line?', createdAt: Date.now() - 2 * day },
-            { id: 3, bookId: id, kind: 'highlight', chapter: 7, block: 1, text: 'He had successfully avoided meeting his landlady on the staircase.', note: null, createdAt: Date.now() - day },
-          ]
-        : [],
+    loadMarks: async (id) => marks.filter((m) => m.bookId === id),
+    loadAllMarks: async () => marks,
+    setGoals: async () => undefined,
     addMark: async (m) => ({ ...m, id: Math.round(Math.random() * 1e6) }),
     setMarkNote: async () => undefined,
     deleteMark: async () => undefined,
@@ -104,7 +117,7 @@ export function fixtureBooksData(empty = false): BooksData {
     },
   };
   const deleted = empty ? [] : [base('idiot', 'The Idiot', 'Fyodor Dostoevsky', { deletedAt: Date.now() - 4 * day })];
-  return { items, deleted, trashDays: 30, loaded: true, status: '', busy: false, reader, sort: 'shelf', actions };
+  return { items, deleted, trashDays: 30, loaded: true, status: '', busy: false, reader, goals: empty ? { dailyMin: 0, yearBooks: 0 } : { dailyMin: 20, yearBooks: 12 }, sort: 'shelf', actions };
 }
 
 /** Most evenings of this year, steady progress through the three books (seeded, so screenshots repeat). */

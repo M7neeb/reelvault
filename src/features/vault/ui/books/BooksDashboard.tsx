@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { dayGoal, daysMet, stepDaily, yearGoal, MAX_YEAR_BOOKS, type BookGoals } from '../../books/bookGoals';
 import { displayTitle, type BookRead } from '../../books/bookLogic';
 import { bookStats, bookYears, fmtTime } from '../../books/bookStats';
 import { monthRangesOf, recentWeekRanges, yearRangeOf, type ReadRange } from '../../manga/mangaInsights';
@@ -26,7 +27,7 @@ import type { BookActions, BookUi } from './bookTypes';
 
 const DAY = 86_400_000;
 
-export default function BooksDashboard({ items, actions, onOpen, onClose, initialReads }: { items: BookUi[]; actions: BookActions; onOpen: (b: BookUi) => void; onClose: () => void; initialReads?: BookRead[] }) {
+export default function BooksDashboard({ items, actions, goals, onOpen, onClose, initialReads }: { items: BookUi[]; actions: BookActions; goals: BookGoals; onOpen: (b: BookUi) => void; onClose: () => void; initialReads?: BookRead[] }) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -64,6 +65,11 @@ export default function BooksDashboard({ items, actions, onOpen, onClose, initia
         const b = top ? byId.get(top) : undefined;
         return { key: `${r.kind}${r.start}`, label: r.label, line: fmtTime(ms), top: b ? displayTitle(b) : undefined, source: b?.coverUri ? { uri: b.coverUri } : null, onPress: () => setWrapped(r) };
       });
+
+  const daily = st ? dayGoal(st.todayMs, goals.dailyMin) : null;
+  const metDays = reads ? daysMet(reads, goals.dailyMin, now) : 0;
+  const yearly = yearGoal(items, goals.yearBooks, now);
+  const setGoals = (g: BookGoals) => void actions.setGoals(g).catch(() => undefined);
 
   const thisYear = years[0];
   const prevOf = (r: ReadRange) => (r.kind === 'year' ? new Date(new Date(r.start).getFullYear() - 1, 0, 1).getTime() : r.kind === 'week' ? r.start - 7 * DAY : new Date(new Date(r.start).getFullYear(), new Date(r.start).getMonth() - 1, 1).getTime());
@@ -113,6 +119,53 @@ export default function BooksDashboard({ items, actions, onOpen, onClose, initia
                 <Text style={styles.tileLabel}>Finished</Text>
               </View>
             </View>
+
+            <Card index={1} title="Goals">
+              <View style={styles.goal}>
+                <View style={styles.goalHead}>
+                  <Text style={styles.goalName}>Reading a day</Text>
+                  <Stepper
+                    value={goals.dailyMin ? `${goals.dailyMin} min` : 'Off'}
+                    name="daily reading goal"
+                    onLess={goals.dailyMin > 0 ? () => setGoals({ ...goals, dailyMin: stepDaily(goals.dailyMin, -1) }) : undefined}
+                    onMore={stepDaily(goals.dailyMin, 1) !== goals.dailyMin ? () => setGoals({ ...goals, dailyMin: stepDaily(goals.dailyMin, 1) }) : undefined}
+                  />
+                </View>
+                {daily ? (
+                  <>
+                    <View style={styles.goalBar}>
+                      <View style={[styles.goalFill, daily.met && styles.goalDone, { width: `${Math.round(daily.ratio * 100)}%` }]} />
+                    </View>
+                    <Text style={styles.goalLine}>
+                      {daily.line} · {metDays} of the last 7 days
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.goalLine}>No daily goal. Tap + to set the minutes you want to read each day.</Text>
+                )}
+              </View>
+              <View style={[styles.goal, styles.goalNext]}>
+                <View style={styles.goalHead}>
+                  <Text style={styles.goalName}>Books this year</Text>
+                  <Stepper
+                    value={goals.yearBooks ? String(goals.yearBooks) : 'Off'}
+                    name="books a year goal"
+                    onLess={goals.yearBooks > 0 ? () => setGoals({ ...goals, yearBooks: goals.yearBooks - 1 }) : undefined}
+                    onMore={goals.yearBooks < MAX_YEAR_BOOKS ? () => setGoals({ ...goals, yearBooks: goals.yearBooks + 1 }) : undefined}
+                  />
+                </View>
+                {yearly ? (
+                  <>
+                    <View style={styles.goalBar}>
+                      <View style={[styles.goalFill, yearly.ratio >= 1 && styles.goalDone, { width: `${Math.round(yearly.ratio * 100)}%` }]} />
+                    </View>
+                    <Text style={styles.goalLine}>{yearly.line}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.goalLine}>No goal for the year. A book counts once you mark it finished.</Text>
+                )}
+              </View>
+            </Card>
 
             {thisYear && (
               <WrappedPoster
@@ -202,8 +255,37 @@ export default function BooksDashboard({ items, actions, onOpen, onClose, initia
   );
 }
 
+function Stepper({ value, name, onLess, onMore }: { value: string; name: string; onLess?: () => void; onMore?: () => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  return (
+    <View style={styles.stepper}>
+      <TouchableOpacity style={styles.step} hitSlop={8} onPress={onLess} disabled={!onLess} accessibilityLabel={`Lower the ${name}`}>
+        <Icon name="minus" size={13} color={onLess ? p.text : p.textMuted} weight="bold" />
+      </TouchableOpacity>
+      <Text style={styles.stepValue} accessibilityLabel={`${name}: ${value}`}>
+        {value}
+      </Text>
+      <TouchableOpacity style={styles.step} hitSlop={8} onPress={onMore} disabled={!onMore} accessibilityLabel={`Raise the ${name}`}>
+        <Icon name="plus" size={13} color={onMore ? p.text : p.textMuted} weight="bold" />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const makeStyles = (p: Palette) =>
   sheet({
+    goal: { gap: 8 },
+    goalNext: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: p.separator },
+    goalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    goalName: { color: p.text, fontSize: 16, fontWeight: '700' },
+    goalBar: { height: 6, borderRadius: 3, backgroundColor: p.bg, overflow: 'hidden' },
+    goalFill: { height: 6, borderRadius: 3, backgroundColor: p.accent },
+    goalDone: { backgroundColor: p.success },
+    goalLine: { color: p.textSecondary, fontSize: 13, lineHeight: 18, fontVariant: ['tabular-nums'] },
+    stepper: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    step: { width: 32, height: 32, borderRadius: 16, backgroundColor: p.bg, alignItems: 'center', justifyContent: 'center' },
+    stepValue: { minWidth: 62, textAlign: 'center', color: p.text, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
     screen: { flex: 1, backgroundColor: p.bg },
     header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 8 },
     circle: { width: 34, height: 34, borderRadius: 17, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },

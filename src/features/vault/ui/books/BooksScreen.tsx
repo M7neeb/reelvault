@@ -35,6 +35,7 @@ import { useTabBarSpace } from '../chrome';
 import { tick } from '../haptics';
 import Icon from '../Icon';
 import IconButton from '../IconButton';
+import { tidyQuote, type DayGoal, type Quote } from '../../books/bookGoals';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
 import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
@@ -93,6 +94,10 @@ export default function BooksScreen({
   onInfo,
   onMode,
   onDashboard,
+  onQuotes,
+  quote = null,
+  quoteCount = 0,
+  today = null,
   initialDeleted = false,
 }: {
   items: BookUi[];
@@ -108,6 +113,12 @@ export default function BooksScreen({
   onSort: (s: BookSort) => void;
   onOpen: (b: BookUi) => void;
   onInfo: (b: BookUi) => void;
+  onQuotes: () => void;
+  /** One of your highlights, shown on the shelf for the day. */
+  quote?: Quote | null;
+  quoteCount?: number;
+  /** Today against the daily reading goal, when one is set. */
+  today?: DayGoal | null;
   onMode: (m: VideosMode) => void;
   onDashboard: () => void;
   initialDeleted?: boolean;
@@ -167,6 +178,7 @@ export default function BooksScreen({
     { label: inDeleted ? 'Back to the shelf' : `Recently Deleted${deleted.length ? ` · ${deleted.length}` : ''}`, onPress: () => setInDeleted((x) => !x) },
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
     ...(visible.length ? [{ label: 'Reading stats and Wrapped', onPress: onDashboard }] : []),
+    ...(visible.length ? [{ label: quoteCount ? `Quotes · ${quoteCount}` : 'Quotes', onPress: onQuotes }] : []),
   ];
 
   const header = (
@@ -256,9 +268,26 @@ export default function BooksScreen({
                 return m !== null ? ` · ${fmtLeft(m)}` : '';
               })()}
             </Text>
+            {today && <Text style={[styles.meta, today.met && styles.done]}>{today.line}</Text>}
             <View style={styles.carryOn}>
               <Text style={styles.carryOnText}>Carry on</Text>
             </View>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {!inDeleted && !selected && plain && quote && (
+        <TouchableOpacity style={styles.quoteStrip} activeOpacity={0.7} onPress={onQuotes} accessibilityLabel={`A line you highlighted in ${quote.title}. Opens your quotes.`}>
+          <Text style={styles.quoteText} numberOfLines={4}>
+            {tidyQuote(quote.text)}
+          </Text>
+          <View style={styles.quoteFoot}>
+            <Text style={styles.quoteFrom} numberOfLines={1}>
+              {quote.title}
+            </Text>
+            <Text style={styles.quoteAll}>
+              {quoteCount === 1 ? 'Your quotes' : `All ${quoteCount} quotes`}
+            </Text>
           </View>
         </TouchableOpacity>
       )}
@@ -500,6 +529,11 @@ const makeStyles = (p: Palette) =>
     done: { color: p.success },
     rating: { color: p.rating, fontWeight: '800' },
     tags: { color: p.link },
+    quoteStrip: { marginHorizontal: SIDE, paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: p.separator },
+    quoteText: { color: p.textSoft, fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }), fontSize: 18, lineHeight: 27 },
+    quoteFoot: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 },
+    quoteFrom: { flex: 1, color: p.textSecondary, fontSize: 13, fontWeight: '600' },
+    quoteAll: { color: p.link, fontSize: 13, fontWeight: '600' },
     carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9, marginTop: 14 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SIDE, marginTop: 22, marginBottom: 4 },

@@ -370,6 +370,8 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'books-stats': { books: { dashboard: true } },
   'books-info': { books: { info: true } },
   'books-deleted': { books: { deleted: true } },
+  'books-quotes': { books: { quotes: true } },
+  'books-quote': { books: { quote: true } },
   manga: {},
   'manga-detail': { manga: { detail: true } },
   'manga-reader': { manga: { reader: true } },

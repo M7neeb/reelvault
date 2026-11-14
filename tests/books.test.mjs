@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  chapterMinutesLeft,
   countedMs,
   displayTitle,
   fmtProgress,
@@ -12,6 +13,9 @@ import {
   progressOf,
   safeBlock,
   shelfOrder,
+  statusOf,
+  withFinished,
+  withStatus,
 } from '../src/features/vault/books/bookLogic.ts';
 
 const book = (over = {}) => ({
@@ -177,4 +181,45 @@ test('sentences and searching inside a book', async () => {
   assert.equal(hits.length, 2);
   assert.deepEqual([hits[0].chapter, hits[0].block, hits[0].match, hits[0].before], [7, 3, 'Sonia', '']);
   assert.equal(findInBlocks([{ block: 0, text: 'x' }], 0, 'a').length, 0);
+});
+
+test('status and the finished date agree, whichever one is changed', () => {
+  const reading = { status: null, finishedAt: null };
+  assert.deepEqual(withStatus(reading, 'finished', 500), { status: 'finished', finishedAt: 500 });
+  // The day it was really finished is kept.
+  assert.deepEqual(withStatus({ status: null, finishedAt: 200 }, 'finished', 500), { status: 'finished', finishedAt: 200 });
+  assert.deepEqual(withStatus({ status: 'finished', finishedAt: 200 }, 'reading', 500), { status: 'reading', finishedAt: null });
+  assert.deepEqual(withStatus({ status: 'finished', finishedAt: 200 }, 'dropped', 500), { status: 'dropped', finishedAt: null });
+  assert.deepEqual(withStatus({ status: 'dropped', finishedAt: 200 }, null, 500), { status: null, finishedAt: 200 });
+
+  const done = withFinished({ status: 'reading', finishedAt: null }, true, 900);
+  assert.deepEqual(done, { status: null, finishedAt: 900 });
+  assert.equal(statusOf({ ...done, lastReadAt: 1 }), 'finished');
+  const undone = withFinished({ status: 'finished', finishedAt: 900 }, false, 950);
+  assert.deepEqual(undone, { status: null, finishedAt: null });
+  assert.equal(statusOf({ ...undone, lastReadAt: 1 }), 'reading');
+  assert.deepEqual(withFinished({ status: 'dropped', finishedAt: null }, false, 950), { status: 'dropped', finishedAt: null });
+});
+
+test('a dropped book sits below the unread ones, above the finished', () => {
+  const order = shelfOrder([
+    book({ id: 'fin', finishedAt: 5, lastReadAt: 5 }),
+    book({ id: 'drop', status: 'dropped', lastReadAt: 9 }),
+    book({ id: 'new', addedAt: 3 }),
+    book({ id: 'now', lastReadAt: 4 }),
+  ]).map((b) => b.id);
+  assert.deepEqual(order, ['now', 'new', 'drop', 'fin']);
+});
+
+test('minutes left in the chapter follow your pace through the book', () => {
+  // A tenth of the book in an hour: the second chapter (30% of the book) takes three hours.
+  const b = { chapterSizes: [100, 300, 600], readMs: 3_600_000 };
+  assert.equal(chapterMinutesLeft(b, 1, 0), 180);
+  // Halfway through it, a quarter of the book is read in that hour: 0.15 of the book is left of the chapter.
+  assert.equal(chapterMinutesLeft(b, 1, 0.5), 36);
+  assert.equal(chapterMinutesLeft(b, 1, 1), 1);
+  // Too little reading or too early in the book to tell.
+  assert.equal(chapterMinutesLeft({ ...b, readMs: 60_000 }, 1, 0.5), null);
+  assert.equal(chapterMinutesLeft(b, 0, 0.1), null);
+  assert.equal(chapterMinutesLeft({ chapterSizes: [], readMs: 3_600_000 }, 0, 0.5), null);
 });

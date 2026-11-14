@@ -19,7 +19,8 @@ import { onBooksChanged } from './bookEvents';
 import { getSetting, setSetting } from '../library';
 import type { BookActions, BookUi, BooksData } from '../ui/books/bookTypes';
 import { chapterBlocks } from '../audio/epub';
-import { BOOK_SORTS, cleanTag, DEFAULT_READER, displayTitle, parseReaderPrefs, progressAt, type BookItem, type BookSort, type ReaderPrefs } from './bookLogic';
+import { NO_GOALS, parseGoals, type BookGoals } from './bookGoals';
+import { BOOK_SORTS, cleanTag, DEFAULT_READER, displayTitle, parseReaderPrefs, progressAt, withFinished, withStatus, type BookItem, type BookSort, type ReaderPrefs } from './bookLogic';
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import {
   addBookMark,
@@ -40,11 +41,13 @@ import {
   setBookMarkNote,
   setBookNotes,
   setBooksField,
+  setBooksStatus,
   setBookText,
 } from './bookStore';
 
 const READER_KEY = 'books.reader';
 const SORT_KEY = 'books.sort';
+const GOALS_KEY = 'books.goals';
 const onPhone = Platform.OS !== 'web';
 
 const asUi = (b: BookItem): BookUi => ({ ...b, coverUri: b.cover ? fileUri(b.folder, b.cover) : null });
@@ -114,6 +117,7 @@ export function useBooksData(): BooksData {
   const [reader, setReaderState] = useState<ReaderPrefs>(DEFAULT_READER);
   const [trashDays, setTrashDays] = useState(30);
   const [sort, setSortState] = useState<BookSort>('shelf');
+  const [goals, setGoalsState] = useState<BookGoals>(NO_GOALS);
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -133,6 +137,9 @@ export function useBooksData(): BooksData {
     if (!onPhone) return;
     getSetting(READER_KEY)
       .then((j) => setReaderState(parseReaderPrefs(j)))
+      .catch(() => undefined);
+    getSetting(GOALS_KEY)
+      .then((j) => setGoalsState(parseGoals(j)))
       .catch(() => undefined);
     getSetting(SORT_KEY)
       .then((v) => {
@@ -248,17 +255,18 @@ export function useBooksData(): BooksData {
         await saveBookPlace(id, place, addMs, at);
       },
       setFinished: async (id, finished) => {
-        const at = finished ? Date.now() : null;
-        setItems((list) => list.map((b) => (b.id === id ? { ...b, finishedAt: at } : b)));
-        await setBookFinished(id, at);
+        const now = Date.now();
+        setItems((list) => list.map((b) => (b.id === id ? { ...b, ...withFinished(b, finished, now) } : b)));
+        await setBookFinished(id, finished ? now : null);
       },
       rate: async (ids, rating) => {
         patch(ids, (b) => ({ ...b, rating }));
         await setBooksField(ids, 'rating', rating);
       },
       setStatus: async (ids, st) => {
-        patch(ids, (b) => ({ ...b, status: st }));
-        await setBooksField(ids, 'status', st);
+        const now = Date.now();
+        patch(ids, (b) => ({ ...b, ...withStatus(b, st, now) }));
+        await setBooksStatus(ids, st, now);
       },
       addTag: async (ids, name) => {
         const t = cleanTag(name);
@@ -332,6 +340,12 @@ export function useBooksData(): BooksData {
         await setBookCover(id, next);
       },
       loadMarks: async (id) => (onPhone ? listBookMarks(id) : []),
+      loadAllMarks: async () => (onPhone ? listBookMarks() : []),
+      setGoals: async (g) => {
+        const clean = parseGoals(JSON.stringify(g));
+        setGoalsState(clean);
+        await setSetting(GOALS_KEY, JSON.stringify(clean));
+      },
       addMark: async (m) => {
         const id = await addBookMark(m);
         return { ...m, id };
@@ -372,5 +386,5 @@ export function useBooksData(): BooksData {
   const ui = useMemo(() => items.map(asUi), [items]);
   const live = useMemo(() => ui.filter((b) => !b.deletedAt), [ui]);
   const deleted = useMemo(() => ui.filter((b) => b.deletedAt), [ui]);
-  return useMemo(() => ({ items: live, deleted, trashDays, loaded, status, busy, reader, sort, actions }), [live, deleted, trashDays, loaded, status, busy, reader, sort, actions]);
+  return useMemo(() => ({ items: live, deleted, trashDays, loaded, status, busy, reader, goals, sort, actions }), [live, deleted, trashDays, loaded, status, busy, reader, goals, sort, actions]);
 }

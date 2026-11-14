@@ -8,16 +8,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
-import { shelfTags, type BookSort } from '../../books/bookLogic';
+import { dayGoal, quoteOfDay, quotesOf } from '../../books/bookGoals';
+import { shelfTags, type BookMark, type BookRead, type BookSort } from '../../books/bookLogic';
+import { bookStats } from '../../books/bookStats';
 import type { VideosMode } from '../overviewParts';
 import { afterModals } from '../screen';
 import BookInfo from './BookInfo';
+import BookQuotes from './BookQuotes';
 import BookReader from './BookReader';
 import BooksDashboard from './BooksDashboard';
 import BooksScreen from './BooksScreen';
 import type { BooksData } from './bookTypes';
 
-export type BooksDev = { reader?: boolean; dashboard?: boolean; info?: boolean; deleted?: boolean; panel?: string };
+export type BooksDev = { reader?: boolean; dashboard?: boolean; info?: boolean; deleted?: boolean; quotes?: boolean; quote?: boolean; panel?: string };
 
 export default function BooksSection({
   data,
@@ -43,6 +46,34 @@ export default function BooksSection({
   const open = reading ? (data.items.find((b) => b.id === reading.id) ?? null) : null;
   const info = infoId ? (data.items.find((b) => b.id === infoId) ?? null) : null;
   const tags = useMemo(() => shelfTags(data.items).map((t) => t.name), [data.items]);
+  const [quotesOpen, setQuotesOpen] = useState(dev?.quotes || dev?.quote || false);
+  const [marks, setMarks] = useState<BookMark[]>([]);
+  const [reads, setReads] = useState<BookRead[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Highlights and reading time change inside the reader and a book's page: read them again once those close.
+  const away = !!reading || !!infoId || dash;
+  useEffect(() => {
+    if (away || !data.loaded) return;
+    let alive = true;
+    setNow(Date.now());
+    data.actions
+      .loadAllMarks()
+      .then((m) => alive && setMarks(m))
+      .catch(() => undefined);
+    data.actions
+      .loadReads()
+      .then((r) => alive && setReads(r))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [away, data.loaded, data.actions]);
+
+  const seen = useMemo(() => data.items.filter((b) => showPrivate || !b.isPrivate), [data.items, showPrivate]);
+  const quotes = useMemo(() => quotesOf(marks, seen), [marks, seen]);
+  const quote = useMemo(() => quoteOfDay(quotes, now), [quotes, now]);
+  const today = useMemo(() => dayGoal(bookStats(seen, reads, now).todayMs, data.goals.dailyMin), [seen, reads, now, data.goals.dailyMin]);
 
   useEffect(() => {
     if (!openRequest) return;
@@ -71,17 +102,38 @@ export default function BooksSection({
         onInfo={(b) => setInfoId(b.id)}
         onMode={onMode}
         onDashboard={() => setDash(true)}
+        onQuotes={() => setQuotesOpen(true)}
+        quote={quote}
+        quoteCount={quotes.length}
+        today={today}
         initialDeleted={dev?.deleted}
       />
       {dash && (
         <BooksDashboard
           items={data.items.filter((b) => showPrivate || !b.isPrivate)}
           actions={data.actions}
+          goals={data.goals}
           onOpen={(b) => {
             setDash(false);
             afterModals(() => setReading({ id: b.id }));
           }}
           onClose={() => setDash(false)}
+        />
+      )}
+      {quotesOpen && (!dev?.quote || quotes.length > 0) && (
+        <BookQuotes
+          quotes={quotes}
+          paper={data.reader.theme}
+          initialOpen={dev?.quote ? (quotes[0]?.id ?? null) : null}
+          onRead={(q) => {
+            setQuotesOpen(false);
+            afterModals(() => setReading({ id: q.bookId, at: { chapter: q.chapter, block: q.block } }));
+          }}
+          onRemove={(q) => {
+            setMarks((l) => l.filter((m) => m.id !== q.id));
+            data.actions.deleteMark(q.id).catch(() => undefined);
+          }}
+          onClose={() => setQuotesOpen(false)}
         />
       )}
       {info && (

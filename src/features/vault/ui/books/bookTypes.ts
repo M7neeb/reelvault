@@ -4,6 +4,7 @@
  */
 
 import type { TocEntry } from '../../audio/epub';
+import type { BookGoals } from '../../books/bookGoals';
 import type { BookItem, BookMark, BookPlace, BookRead, BookSort, BookStatus, ReaderPrefs } from '../../books/bookLogic';
 
 export type BookUi = BookItem & { coverUri: string | null };
@@ -38,6 +39,9 @@ export type BookActions = {
   /** A picture from Files as the cover; `own` puts the book's own cover back. */
   setCover: (id: string, own?: boolean) => Promise<void>;
   loadMarks: (id: string) => Promise<BookMark[]>;
+  /** Bookmarks and highlights of every book (the Quotes page). */
+  loadAllMarks: () => Promise<BookMark[]>;
+  setGoals: (goals: BookGoals) => Promise<void>;
   addMark: (m: Omit<BookMark, 'id'>) => Promise<BookMark>;
   setMarkNote: (id: number, note: string | null) => Promise<void>;
   deleteMark: (id: number) => Promise<void>;
@@ -60,6 +64,8 @@ export type BooksData = {
   status: string;
   busy: boolean;
   reader: ReaderPrefs;
+  /** Minutes a day and books a year you set yourself; 0 = no goal. */
+  goals: BookGoals;
   /** The shelf's order (kept between launches). */
   sort: BookSort;
   actions: BookActions;
