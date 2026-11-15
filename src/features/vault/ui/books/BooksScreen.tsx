@@ -4,7 +4,7 @@
  * keywords) and a choice of order. Tap a book to read it, hold it for its
  * menu. Select several to rate, set a status, add a keyword, make Private
  * or delete. Recently Deleted keeps books for the days set in Settings.
- * Books are .epub files kept on the phone, so they read with no connection.
+ * Books (EPUB, Kindle, PDF, FB2, Word and more) are kept on the phone, so they read with no connection.
  * Presentational only (see the note at the top of types.ts).
  */
 
@@ -335,7 +335,7 @@ export default function BooksScreen({
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>No books yet</Text>
       <Text style={styles.emptyText}>
-        Add an .epub from Files, or open one in ReelVault from Safari, Mail or a chat. Books stay on this phone, so they read without a connection.
+        Add a book from Files: EPUB, Kindle (AZW3, MOBI), PDF, FB2, Word, RTF, HTML or plain text. Books stay on this phone, so they read without a connection.
       </Text>
       <TouchableOpacity style={styles.emptyBtn} onPress={add} disabled={busy}>
         <Text style={styles.emptyBtnText}>Add a book</Text>

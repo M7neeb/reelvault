@@ -1,5 +1,5 @@
 /**
- * Books (native wiring): the shelf from the database, adding .epub files
+ * Books (native wiring): the shelf from the database, adding book files
  * (from Files or sent from another app), opening a book's chapters, and
  * saving where you are. Each book is unpacked once into Documents/books/<id>/
  * and read from there, so it works with no connection at all.
@@ -11,11 +11,11 @@ import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 
-import { unpackBook } from '../audio/audioImport';
 import { fileIn, fileUri, readBookJson, readTextIn, removeFolder } from '../audio/audioFiles';
 import { contentKeyOf } from '../contentKey';
 import { onIncomingBook } from '../incoming';
 import { onBooksChanged } from './bookEvents';
+import { importBookFile } from './bookImport';
 import { getSetting, setSetting } from '../library';
 import type { BookActions, BookUi, BooksData } from '../ui/books/bookTypes';
 import { chapterBlocks } from '../audio/epub';
@@ -63,14 +63,14 @@ function removeQuietly(uri: string) {
   }
 }
 
-/** Unpacks one .epub into its own folder and adds it to the shelf. Null when it was already there. */
+/** Reads one book file (any format bookImport takes) into its own folder and adds it to the shelf. Null when it was already there. */
 async function addBook(uri: string, name: string, onStep: (t: string) => void): Promise<BookItem | null> {
   const key = await contentKeyOf(uri).catch(() => null);
   if (key && (await findBookByKey(key))) return null;
   const id = Crypto.randomUUID();
   const folder = `books/${id}`;
   try {
-    const book = await unpackBook(new File(uri), folder, onStep);
+    const book = await importBookFile(new File(uri), name, folder, onStep);
     if (!book.chapters.length) throw new Error('This book has no pages to read');
     const item: BookItem = {
       id,
@@ -233,7 +233,8 @@ export function useBooksData(): BooksData {
   const actions = useMemo<BookActions>(
     () => ({
       importFiles: async () => {
-        const picked = await DocumentPicker.getDocumentAsync({ type: ['application/epub+zip'], multiple: true, copyToCacheDirectory: true });
+        // Any file: iOS knows no type for AZW3, MOBI, FB2 and the like, so a narrower list would grey them out. The import checks each one.
+        const picked = await DocumentPicker.getDocumentAsync({ type: '*/*', multiple: true, copyToCacheDirectory: true });
         if (picked.canceled) return;
         await add((picked.assets ?? []).map((a) => ({ uri: a.uri, name: a.name })));
       },

@@ -108,7 +108,7 @@ export const isStarted = (b: BookItem) => b.lastReadAt !== null;
 
 export function displayTitle(b: Pick<BookItem, 'title' | 'filename'>): string {
   if (b.title?.trim()) return b.title.trim();
-  return b.filename.replace(/\.epub$/i, '').replace(/[_]+/g, ' ').trim() || 'Untitled';
+  return b.filename.replace(/\.(kepub\.epub|fb2\.zip|epub|pdf|mobi|azw3?|kf8|prc|pdb|fb2|fbz|docx|odt|rtf|html?|xhtml|txt|text|md|markdown|cbz)$/i, '').replace(/[_]+/g, ' ').trim() || 'Untitled';
 }
 
 /** The fraction of a chapter that a paragraph sits at, from its index among `count` paragraphs. */

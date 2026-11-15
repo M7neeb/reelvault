@@ -518,7 +518,7 @@ export default function BookReader({
         {failed ? (
           <View style={styles.center}>
             <Text style={[styles.msg, { color: ink.text }]}>This book could not be opened.</Text>
-            <Text style={[styles.msgSoft, { color: ink.soft }]}>Its files may be missing. Delete it from the shelf and add the .epub again.</Text>
+            <Text style={[styles.msgSoft, { color: ink.soft }]}>Its files may be missing. Delete it from the shelf and add the book again.</Text>
             <TouchableOpacity onPress={close} style={[styles.finishBtn, { borderColor: ink.accent, marginTop: 20 }]}>
               <Text style={[styles.finishText, { color: ink.accent }]}>Back to the shelf</Text>
             </TouchableOpacity>
