@@ -11,6 +11,7 @@ import {
   parseReaderPrefs,
   progressAt,
   progressOf,
+  readingNow,
   safeBlock,
   shelfOrder,
   statusOf,
@@ -222,4 +223,17 @@ test('minutes left in the chapter follow your pace through the book', () => {
   assert.equal(chapterMinutesLeft({ ...b, readMs: 60_000 }, 1, 0.5), null);
   assert.equal(chapterMinutesLeft(b, 0, 0.1), null);
   assert.equal(chapterMinutesLeft({ chapterSizes: [], readMs: 3_600_000 }, 0, 0.5), null);
+});
+
+test('reading now is every started book that is not finished, dropped or parked', () => {
+  const now = readingNow([
+    book({ id: 'old', lastReadAt: 10 }),
+    book({ id: 'new', lastReadAt: 50 }),
+    book({ id: 'unread' }),
+    book({ id: 'done', lastReadAt: 60, finishedAt: 60 }),
+    book({ id: 'dropped', lastReadAt: 70, status: 'dropped' }),
+    book({ id: 'want', lastReadAt: 80, status: 'want' }),
+    book({ id: 'forced', lastReadAt: 5, status: 'reading' }),
+  ]).map((b) => b.id);
+  assert.deepEqual(now, ['new', 'old', 'forced']);
 });

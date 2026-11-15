@@ -278,6 +278,11 @@ export function shelfOrder<T extends BookItem>(books: T[]): T[] {
   return [...books].sort((a, b) => rank(a) - rank(b) || (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0) || b.addedAt - a.addedAt);
 }
 
+/** Every book you are in the middle of, the one you read last first. */
+export function readingNow<T extends BookItem>(books: T[]): T[] {
+  return books.filter((b) => isStarted(b) && !b.finishedAt && statusOf(b) === 'reading').sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0) || b.addedAt - a.addedAt);
+}
+
 /** Minutes left at your own pace, once there is enough reading to tell. */
 export function minutesLeft(b: BookItem): number | null {
   const p = progressOf(b);

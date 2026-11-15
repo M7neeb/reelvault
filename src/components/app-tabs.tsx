@@ -15,8 +15,9 @@ export default function AppTabs() {
   const shows = due('show');
   const anime = due('anime');
 
+  // A fixed small label: with Bold Text on, the system size pushed "Movies" into its neighbours.
   return (
-    <NativeTabs minimizeBehavior="onScrollDown" tintColor={p.accent} iconColor={p.textSecondary}>
+    <NativeTabs minimizeBehavior="onScrollDown" tintColor={p.accent} iconColor={p.textSecondary} labelStyle={{ fontSize: 10, fontWeight: '600' }}>
       <NativeTabs.Trigger name="index" disableAutomaticContentInsets>
         <NativeTabs.Trigger.Label>Videos</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'film.stack', selected: 'film.stack.fill' }} />

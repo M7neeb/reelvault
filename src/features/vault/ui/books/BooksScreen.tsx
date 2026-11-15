@@ -22,6 +22,7 @@ import {
   fmtLeft,
   fmtProgress,
   isStarted,
+  readingNow,
   matchesBook,
   minutesLeft,
   progressOf,
@@ -147,8 +148,13 @@ export default function BooksScreen({
     );
   }, [inDeleted, deleted, visible, filter, query, sort, showPrivate]);
   const plain = !inDeleted && !filter && !query.trim() && sort === 'shelf' && !selected;
-  const current = plain ? (shown.find((b) => isStarted(b) && !b.finishedAt && statusOf(b) === 'reading') ?? null) : null;
-  const rest = current ? shown.filter((b) => b.id !== current.id) : shown;
+  // Every book you are in the middle of gets its own "Carry on", not only the last one.
+  const reading = useMemo(() => (plain ? readingNow(shown) : []), [plain, shown]);
+  const current = reading[0] ?? null;
+  const rest = useMemo(() => {
+    const ids = new Set(reading.map((b) => b.id));
+    return ids.size ? shown.filter((b) => !ids.has(b.id)) : shown;
+  }, [reading, shown]);
 
   const ids = selected ? [...selected] : [];
   const toggle = (id: string) =>
@@ -245,11 +251,11 @@ export default function BooksScreen({
         </ScrollView>
       )}
 
-      {current && (
-        <TouchableOpacity style={styles.current} activeOpacity={0.8} onPress={() => onOpen(current)} onLongPress={() => setMenuFor(current)} accessibilityLabel={`Carry on reading ${displayTitle(current)}`}>
+      {reading.map((current, n) => (
+        <TouchableOpacity key={current.id} style={styles.current} activeOpacity={0.8} onPress={() => onOpen(current)} onLongPress={() => setMenuFor(current)} accessibilityLabel={`Carry on reading ${displayTitle(current)}`}>
           <BookCover book={current} width={104} />
           <View style={styles.currentText}>
-            <Text style={styles.currentLabel}>Reading now</Text>
+            {n === 0 && <Text style={styles.currentLabel}>{reading.length > 1 ? `Reading now · ${reading.length} books` : 'Reading now'}</Text>}
             <Text style={styles.currentTitle} numberOfLines={3}>
               {displayTitle(current)}
             </Text>
@@ -268,13 +274,13 @@ export default function BooksScreen({
                 return m !== null ? ` · ${fmtLeft(m)}` : '';
               })()}
             </Text>
-            {today && <Text style={[styles.meta, today.met && styles.done]}>{today.line}</Text>}
+            {n === 0 && today && <Text style={[styles.meta, today.met && styles.done]}>{today.line}</Text>}
             <View style={styles.carryOn}>
               <Text style={styles.carryOnText}>Carry on</Text>
             </View>
           </View>
         </TouchableOpacity>
-      )}
+      ))}
 
       {!inDeleted && !selected && plain && quote && (
         <TouchableOpacity style={styles.quoteStrip} activeOpacity={0.7} onPress={onQuotes} accessibilityLabel={`A line you highlighted in ${quote.title}. Opens your quotes.`}>
@@ -381,6 +387,8 @@ export default function BooksScreen({
         }}
         ItemSeparatorComponent={() => <View style={styles.sep} />}
       />
+      {/* The page scrolls under the clock; this keeps the title from showing through it. */}
+      <View pointerEvents="none" style={[styles.clockBand, { height: insets.top }]} />
 
       {selected && (
         <Animated.View entering={FadeInDown} exiting={FadeOut} style={[styles.selectBar, { bottom: tabSpace + 10 }]}>
@@ -534,6 +542,7 @@ const makeStyles = (p: Palette) =>
     quoteFoot: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 },
     quoteFrom: { flex: 1, color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     quoteAll: { color: p.link, fontSize: 13, fontWeight: '600' },
+    clockBand: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: p.bg },
     carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9, marginTop: 14 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SIDE, marginTop: 22, marginBottom: 4 },

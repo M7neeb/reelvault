@@ -55,7 +55,7 @@ export function fixtureBooksData(empty = false): BooksData {
     ? []
     : [
         base('crime', 'Crime and Punishment', 'Fyodor Dostoevsky', { tags: ['Russian', 'Classics'], notes: 'Pevear and Volokhonsky next time, to compare.', chapter: 7, block: 5, chapterFrac: 0.4, readMs: 3 * 3_600_000, lastReadAt: Date.now() - 3_600_000 }),
-        base('karamazov', 'The Brothers Karamazov', 'Fyodor Dostoevsky', { addedAt: Date.now() - day, tags: ['Russian', 'Classics'] }),
+        base('karamazov', 'The Brothers Karamazov', 'Fyodor Dostoevsky', { addedAt: Date.now() - day, tags: ['Russian', 'Classics'], chapter: 12, chapterFrac: 0.2, readMs: 5 * 3_600_000, lastReadAt: Date.now() - 2 * day }),
         base('master', 'The Master and Margarita', 'Mikhail Bulgakov', { addedAt: Date.now() - 3 * day, tags: ['Russian'], status: 'want' }),
         base('notes', 'Notes from Underground', 'Fyodor Dostoevsky', { rating: 9, tags: ['Russian'], finishedAt: new Date(new Date().getFullYear(), 1, 20).getTime(), lastReadAt: new Date(new Date().getFullYear(), 1, 20).getTime() }),
       ];

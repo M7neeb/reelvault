@@ -112,7 +112,9 @@ export function ModeSwitch({ mode, onChange }: { mode: VideosMode; onChange: (m:
             }}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}>
-            <Text style={[styles.modeText, on && styles.modeTextOn]}>{label}</Text>
+            <Text style={[styles.modeText, on && styles.modeTextOn]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {label}
+            </Text>
           </TouchableOpacity>
         );
       })}
