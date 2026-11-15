@@ -106,6 +106,7 @@ export function fixtureBooksData(empty = false): BooksData {
     loadMarks: async (id) => marks.filter((m) => m.bookId === id),
     loadAllMarks: async () => marks,
     setGoals: async () => undefined,
+    setAudio: async () => undefined,
     addMark: async (m) => ({ ...m, id: Math.round(Math.random() * 1e6) }),
     setMarkNote: async () => undefined,
     deleteMark: async () => undefined,
@@ -117,7 +118,7 @@ export function fixtureBooksData(empty = false): BooksData {
     },
   };
   const deleted = empty ? [] : [base('idiot', 'The Idiot', 'Fyodor Dostoevsky', { deletedAt: Date.now() - 4 * day })];
-  return { items, deleted, trashDays: 30, loaded: true, status: '', busy: false, reader, goals: empty ? { dailyMin: 0, yearBooks: 0 } : { dailyMin: 20, yearBooks: 12 }, sort: 'shelf', actions };
+  return { items, deleted, trashDays: 30, loaded: true, status: '', busy: false, reader, goals: empty ? { dailyMin: 0, yearBooks: 0 } : { dailyMin: 20, yearBooks: 12 }, audioLinks: empty ? {} : { crime: 'aud-7' }, sort: 'shelf', actions };
 }
 
 /** Most evenings of this year, steady progress through the three books (seeded, so screenshots repeat). */

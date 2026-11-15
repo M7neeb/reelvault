@@ -99,6 +99,9 @@ export default function BooksScreen({
   quote = null,
   quoteCount = 0,
   today = null,
+  listenable,
+  onListen,
+  bottomSpace = 0,
   initialDeleted = false,
 }: {
   items: BookUi[];
@@ -120,6 +123,11 @@ export default function BooksScreen({
   quoteCount?: number;
   /** Today against the daily reading goal, when one is set. */
   today?: DayGoal | null;
+  /** Books that have an audiobook. */
+  listenable?: Set<string>;
+  onListen?: (b: BookUi) => void;
+  /** Room for the mini player above the tab bar. */
+  bottomSpace?: number;
   onMode: (m: VideosMode) => void;
   onDashboard: () => void;
   initialDeleted?: boolean;
@@ -275,8 +283,15 @@ export default function BooksScreen({
               })()}
             </Text>
             {n === 0 && today && <Text style={[styles.meta, today.met && styles.done]}>{today.line}</Text>}
-            <View style={styles.carryOn}>
-              <Text style={styles.carryOnText}>Carry on</Text>
+            <View style={styles.actRow}>
+              <View style={styles.carryOn}>
+                <Text style={styles.carryOnText}>Carry on</Text>
+              </View>
+              {listenable?.has(current.id) && onListen && (
+                <TouchableOpacity style={styles.listenBtn} onPress={() => onListen(current)} hitSlop={6} accessibilityLabel={`Listen to the audiobook of ${displayTitle(current)}`}>
+                  <Icon name="headphones" size={17} color={p.text} />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </TouchableOpacity>
@@ -336,7 +351,7 @@ export default function BooksScreen({
         keyExtractor={(b) => b.id}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
-        contentContainerStyle={{ paddingBottom: tabSpace + (selected ? 90 : 24) }}
+        contentContainerStyle={{ paddingBottom: tabSpace + bottomSpace + (selected ? 90 : 24) }}
         keyboardDismissMode="on-drag"
         renderItem={({ item: b }) => {
           const pr = progressOf(b);
@@ -543,7 +558,9 @@ const makeStyles = (p: Palette) =>
     quoteFrom: { flex: 1, color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     quoteAll: { color: p.link, fontSize: 13, fontWeight: '600' },
     clockBand: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: p.bg },
-    carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9, marginTop: 14 },
+    actRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+    listenBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SIDE, marginTop: 22, marginBottom: 4 },
     section: { flex: 1, color: p.text, fontSize: 20, fontWeight: '800' },

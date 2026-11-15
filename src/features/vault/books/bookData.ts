@@ -19,6 +19,7 @@ import { onBooksChanged } from './bookEvents';
 import { getSetting, setSetting } from '../library';
 import type { BookActions, BookUi, BooksData } from '../ui/books/bookTypes';
 import { chapterBlocks } from '../audio/epub';
+import { parseAudioLinks, withAudioLink, type AudioLinks } from './bookAudio';
 import { NO_GOALS, parseGoals, type BookGoals } from './bookGoals';
 import { BOOK_SORTS, cleanTag, DEFAULT_READER, displayTitle, parseReaderPrefs, progressAt, withFinished, withStatus, type BookItem, type BookSort, type ReaderPrefs } from './bookLogic';
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
@@ -48,6 +49,7 @@ import {
 const READER_KEY = 'books.reader';
 const SORT_KEY = 'books.sort';
 const GOALS_KEY = 'books.goals';
+const AUDIO_KEY = 'books.audio';
 const onPhone = Platform.OS !== 'web';
 
 const asUi = (b: BookItem): BookUi => ({ ...b, coverUri: b.cover ? fileUri(b.folder, b.cover) : null });
@@ -118,6 +120,9 @@ export function useBooksData(): BooksData {
   const [trashDays, setTrashDays] = useState(30);
   const [sort, setSortState] = useState<BookSort>('shelf');
   const [goals, setGoalsState] = useState<BookGoals>(NO_GOALS);
+  const [audioLinks, setAudioLinks] = useState<AudioLinks>({});
+  const linksRef = useRef(audioLinks);
+  linksRef.current = audioLinks;
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -137,6 +142,9 @@ export function useBooksData(): BooksData {
     if (!onPhone) return;
     getSetting(READER_KEY)
       .then((j) => setReaderState(parseReaderPrefs(j)))
+      .catch(() => undefined);
+    getSetting(AUDIO_KEY)
+      .then((j) => setAudioLinks(parseAudioLinks(j)))
       .catch(() => undefined);
     getSetting(GOALS_KEY)
       .then((j) => setGoalsState(parseGoals(j)))
@@ -341,6 +349,12 @@ export function useBooksData(): BooksData {
       },
       loadMarks: async (id) => (onPhone ? listBookMarks(id) : []),
       loadAllMarks: async () => (onPhone ? listBookMarks() : []),
+      setAudio: async (bookId, audioId) => {
+        const next = withAudioLink(linksRef.current, bookId, audioId);
+        linksRef.current = next;
+        setAudioLinks(next);
+        await setSetting(AUDIO_KEY, JSON.stringify(next));
+      },
       setGoals: async (g) => {
         const clean = parseGoals(JSON.stringify(g));
         setGoalsState(clean);
@@ -386,5 +400,5 @@ export function useBooksData(): BooksData {
   const ui = useMemo(() => items.map(asUi), [items]);
   const live = useMemo(() => ui.filter((b) => !b.deletedAt), [ui]);
   const deleted = useMemo(() => ui.filter((b) => b.deletedAt), [ui]);
-  return useMemo(() => ({ items: live, deleted, trashDays, loaded, status, busy, reader, goals, sort, actions }), [live, deleted, trashDays, loaded, status, busy, reader, goals, sort, actions]);
+  return useMemo(() => ({ items: live, deleted, trashDays, loaded, status, busy, reader, goals, audioLinks, sort, actions }), [live, deleted, trashDays, loaded, status, busy, reader, goals, audioLinks, sort, actions]);
 }

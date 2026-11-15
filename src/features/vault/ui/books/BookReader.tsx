@@ -38,10 +38,16 @@ import {
 } from '../../books/bookLogic';
 import { tick } from '../haptics';
 import Icon from '../Icon';
-import { GatedModal as Modal, useWindowDimensions } from '../screen';
+import { placeInAudio } from '../../books/bookAudio';
+import { AudioPlayerScreen } from '../audio/AudioPlayer';
+import type { AudioData, AudioUiItem } from '../audio/audioTypes';
+import { useAudioPlaybackOptional } from '../audio/playback';
+import { ListenBar } from './BookAudio';
+import { pushJump } from '../../jump';
+import { afterModals, GatedModal as Modal, useWindowDimensions } from '../screen';
 import type { BookActions, BookUi, OpenedBook } from './bookTypes';
 
-type Ink = { bg: string; text: string; soft: string; faint: string; rule: string; accent: string; bar: string; mark: string; dark: boolean };
+export type Ink = { bg: string; text: string; soft: string; faint: string; rule: string; accent: string; bar: string; mark: string; dark: boolean };
 
 /** Warm, low-glare page colours; night is never pure white on pure black. */
 export const INKS: Record<ReaderTheme, Ink> = {
@@ -144,6 +150,8 @@ export default function BookReader({
   onPrefs,
   onClose,
   startAt,
+  audiobook = null,
+  audio = null,
 }: {
   book: BookUi;
   actions: BookActions;
@@ -152,6 +160,9 @@ export default function BookReader({
   onClose: () => void;
   /** Open here instead of the saved place (a bookmark or highlight). */
   startAt?: { chapter: number; block: number } | null;
+  /** The book's audiobook, when one is linked. */
+  audiobook?: AudioUiItem | null;
+  audio?: AudioData | null;
 }) {
   const ink = INKS[prefs.theme];
   const insets = useSafeAreaInsets();
@@ -459,6 +470,17 @@ export default function BookReader({
   const progress = progressAt(book.chapterSizes, shown?.index ?? chapter, fracOfBlock(topBlock, blocks.length));
   const left = minutesLeft({ ...book, chapter: shown?.index ?? chapter, chapterFrac: fracOfBlock(topBlock, blocks.length), finishedAt: null });
   const chapterLeft = chapterMinutesLeft(book, shown?.index ?? chapter, fracOfBlock(topBlock, blocks.length));
+  // Listening along: the book's audiobook plays from the place on screen, with a small player over the text.
+  const pb = useAudioPlaybackOptional();
+  const [audioFull, setAudioFull] = useState(false);
+  const listening = !!audiobook && pb?.item?.id === audiobook.id;
+  const listen = () => {
+    if (!pb || !audiobook) return;
+    tick();
+    if (listening) return pb.toggle();
+    const at = placeInAudio(audiobook.tracks, progress);
+    pb.open(audiobook, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
+  };
   const isLast = !!opened && chapter >= opened.chapters.length - 1;
   const nextTitle = opened && !isLast ? chapterLabel(opened.toc, chapter + 1, book.title, opened.chapters[chapter + 1]?.title ?? '') : null;
 
@@ -527,7 +549,7 @@ export default function BookReader({
               extraData={marksKey}
               // prefs are read by every paragraph
               style={{ opacity: placed ? 1 : 0 }}
-              contentContainerStyle={{ paddingHorizontal: side, paddingTop: 18, paddingBottom: 40 }}
+              contentContainerStyle={{ paddingHorizontal: side, paddingTop: 18, paddingBottom: listening ? 110 : 40 }}
               ListFooterComponent={footer}
               ListEmptyComponent={<Text style={[styles.msgSoft, { color: ink.soft, textAlign: 'center' }]}>This part of the book has no text.</Text>}
               onViewableItemsChanged={onViewable}
@@ -602,6 +624,11 @@ export default function BookReader({
                 </Text>
               )}
             </View>
+            {audiobook && pb && (
+              <TouchableOpacity onPress={listen} style={styles.topBtn} accessibilityLabel={listening && pb.playing ? 'Pause the audiobook' : 'Listen from here'} hitSlop={8}>
+                <Icon name="headphones" size={19} color={listening ? ink.accent : ink.text} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={() => toggleBookmark()} style={styles.topBtn} accessibilityLabel={hereMark ? 'Remove the bookmark' : 'Bookmark this page'} hitSlop={8}>
               <Icon name={hereMark ? 'bookmark' : 'bookmarkAdd'} size={19} color={hereMark ? ink.accent : ink.text} />
             </TouchableOpacity>
@@ -635,6 +662,22 @@ export default function BookReader({
               </TouchableOpacity>
             </View>
           </Animated.View>
+        )}
+
+        {listening && pb && !panel && (
+          <ListenBar pb={pb} ink={ink} bottom={chrome && shown ? insets.bottom + 64 : bottomBand + 8} onOpen={() => setAudioFull(true)} onRate={pb.setRate} />
+        )}
+        {audioFull && listening && audio && (
+          <AudioPlayerScreen
+            actions={audio.actions}
+            prefs={audio.prefs}
+            onInfo={(i) => {
+              setAudioFull(false);
+              close();
+              afterModals(() => pushJump({ kind: 'audio', id: i.id, play: false }));
+            }}
+            onClose={() => setAudioFull(false)}
+          />
         )}
 
         {panel === 'contents' && opened && (

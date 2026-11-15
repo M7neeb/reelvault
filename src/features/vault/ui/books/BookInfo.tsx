@@ -18,6 +18,8 @@ import { OptionsSheet, PromptSheet } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { Modal } from '../screen';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
+import type { AudioUiItem } from '../audio/audioTypes';
+import { AudiobookPart } from './BookAudio';
 import { BookCover } from './BooksScreen';
 import type { BookActions, BookUi } from './bookTypes';
 
@@ -46,6 +48,14 @@ export default function BookInfo({
   onRead,
   onClose,
   initialMarks,
+  audiobook = null,
+  audioSuggestion = null,
+  audioChoices = [],
+  audioPlaying = false,
+  audioImporting = false,
+  onListen,
+  onLinkAudio,
+  onImportAudio,
 }: {
   book: BookUi;
   actions: BookActions;
@@ -55,6 +65,15 @@ export default function BookInfo({
   onRead: (at?: { chapter: number; block: number }) => void;
   onClose: () => void;
   initialMarks?: BookMark[];
+  audiobook?: AudioUiItem | null;
+  audioSuggestion?: AudioUiItem | null;
+  audioChoices?: AudioUiItem[];
+  audioPlaying?: boolean;
+  audioImporting?: boolean;
+  /** Absent where the Audio section is not there (the Audiobook part is hidden). */
+  onListen?: (from: 'audio' | 'book' | 'auto') => void;
+  onLinkAudio?: (audioId: string | null) => void;
+  onImportAudio?: () => void;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -103,6 +122,11 @@ export default function BookInfo({
             <Icon name="close" size={15} color={p.icon} weight="bold" />
           </TouchableOpacity>
           <View style={{ flex: 1 }} />
+          {audiobook && onListen && (
+            <TouchableOpacity style={[styles.circle, { width: 36, height: 36, borderRadius: 18, marginRight: 10 }]} onPress={() => onListen('auto')} accessibilityLabel="Listen to the audiobook">
+              <Icon name="headphones" size={17} color={p.icon} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.readBtn} onPress={() => onRead()}>
             <Text style={styles.readText}>{isStarted(book) && !book.finishedAt ? 'Carry on' : book.finishedAt ? 'Read again' : 'Start reading'}</Text>
           </TouchableOpacity>
@@ -140,6 +164,20 @@ export default function BookInfo({
               <Icon name="down" size={11} color={p.textSecondary} />
             </TouchableOpacity>
           </View>
+
+          {onListen && onLinkAudio && onImportAudio && (
+            <AudiobookPart
+              audiobook={audiobook}
+              suggestion={audioSuggestion}
+              choices={audioChoices}
+              playing={audioPlaying}
+              importing={audioImporting}
+              bookFrac={pr}
+              onListen={onListen}
+              onLink={onLinkAudio}
+              onImport={onImportAudio}
+            />
+          )}
 
           <Text style={styles.label}>Keywords</Text>
           <View style={styles.tagWrap}>

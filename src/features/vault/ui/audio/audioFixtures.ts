@@ -114,6 +114,15 @@ const ITEMS: AudioItem[] = [
     status: 'planned',
     importedAt: NOW - 7 * DAY,
   }),
+  base('aud-7', {
+    filename: 'Crime and Punishment (Unabridged).m4b',
+    title: 'Crime and Punishment',
+    author: 'Fyodor Dostoevsky',
+    narrator: 'George Guidall',
+    genre: 'Audiobook',
+    tracks: Array.from({ length: 6 }, (_, n) => ({ file: `part ${n + 1}.m4b`, title: `Part ${['One', 'Two', 'Three', 'Four', 'Five', 'Six'][n]}`, durationMs: 3_600_000 * (3 + (n % 2)) })),
+    importedAt: NOW - 2 * DAY,
+  }),
   base('aud-6', { filename: 'voice memo 2026-10-01.m4a', title: 'Voice memo, 1 October', tracks: [{ file: 'memo.m4a', title: 'memo', durationMs: 184_000 }], importedAt: NOW - 18 * DAY }),
 ];
 

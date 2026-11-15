@@ -1802,6 +1802,7 @@ function VaultScreenBody({
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
           <BooksSection
             data={books}
+            audio={audio}
             onMode={switchMode}
             showPrivate={privateOpen}
             onUnlockPrivate={() => void requestUnlock(() => undefined)}

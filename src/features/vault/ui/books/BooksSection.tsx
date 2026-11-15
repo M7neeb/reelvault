@@ -8,8 +8,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
+import { audioOf, listenFrom, newAudio, placeInAudio, suggestAudio } from '../../books/bookAudio';
 import { dayGoal, quoteOfDay, quotesOf } from '../../books/bookGoals';
-import { shelfTags, type BookMark, type BookRead, type BookSort } from '../../books/bookLogic';
+import { progressOf, shelfTags, type BookMark, type BookRead, type BookSort } from '../../books/bookLogic';
+import { pushJump } from '../../jump';
+import { AudioPlayerScreen, MiniPlayer } from '../audio/AudioPlayer';
+import type { AudioData, AudioUiItem } from '../audio/audioTypes';
+import { useAudioPlaybackOptional } from '../audio/playback';
+import { useTabBarSpace } from '../chrome';
 import { bookStats } from '../../books/bookStats';
 import type { VideosMode } from '../overviewParts';
 import { afterModals } from '../screen';
@@ -18,12 +24,13 @@ import BookQuotes from './BookQuotes';
 import BookReader from './BookReader';
 import BooksDashboard from './BooksDashboard';
 import BooksScreen from './BooksScreen';
-import type { BooksData } from './bookTypes';
+import type { BooksData, BookUi } from './bookTypes';
 
 export type BooksDev = { reader?: boolean; dashboard?: boolean; info?: boolean; deleted?: boolean; quotes?: boolean; quote?: boolean; panel?: string };
 
 export default function BooksSection({
   data,
+  audio,
   onMode,
   showPrivate,
   onUnlockPrivate,
@@ -32,6 +39,8 @@ export default function BooksSection({
   dev,
 }: {
   data: BooksData;
+  /** The Audio section's library: a book's audiobook is one of its items. */
+  audio?: AudioData | null;
   onMode: (m: VideosMode) => void;
   showPrivate: boolean;
   onUnlockPrivate?: () => void;
@@ -70,6 +79,53 @@ export default function BooksSection({
     };
   }, [away, data.loaded, data.actions]);
 
+  // ---- audiobooks: linked from the Audio section, played with its player
+  const pb = useAudioPlaybackOptional();
+  const tabSpace = useTabBarSpace();
+  const [player, setPlayer] = useState(false);
+  const [pendingLink, setPendingLink] = useState<{ bookId: string; before: Set<string> } | null>(null);
+  const audioItems = useMemo(() => (audio?.items ?? []).filter((a) => showPrivate || !a.isPrivate), [audio?.items, showPrivate]);
+  const audiobookOf = (bookId: string): AudioUiItem | null => audioOf(data.audioLinks, bookId, audioItems);
+  const linkedIds = useMemo(() => new Set(Object.values(data.audioLinks)), [data.audioLinks]);
+  const playingLinked = !!pb?.item && linkedIds.has(pb.item.id);
+
+  const startListening = (book: BookUi, from: 'audio' | 'book' | 'auto') => {
+    const item = audiobookOf(book.id);
+    if (!pb || !item) return false;
+    if (from === 'auto' && pb.item?.id === item.id) {
+      if (!pb.playing) pb.resume();
+      return true;
+    }
+    const frac = progressOf(book);
+    if ((from === 'auto' ? listenFrom(item, frac) : from) === 'book') {
+      const at = placeInAudio(item.tracks, frac);
+      pb.open(item, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
+    } else pb.open(item, { autoplay: true });
+    return true;
+  };
+
+  const importAudioFor = (bookId: string) => {
+    if (!audio) return;
+    const marker = { bookId, before: new Set(audio.items.map((a) => a.id)) };
+    setPendingLink(marker);
+    audio.actions
+      .importFiles()
+      .catch(() => undefined)
+      // Nothing new (cancelled, or already in Audio): stop waiting after a while.
+      .finally(() => setTimeout(() => setPendingLink((p) => (p === marker ? null : p)), 4000));
+  };
+
+  // What was just imported for a book becomes its audiobook.
+  useEffect(() => {
+    if (!pendingLink || !audio) return;
+    const added = newAudio(pendingLink.before, audio.items);
+    if (!added.length) return;
+    const book = data.items.find((b) => b.id === pendingLink.bookId);
+    const pick = (book && suggestAudio(book, added, {})) ?? added[0];
+    setPendingLink(null);
+    void data.actions.setAudio(pendingLink.bookId, pick.id).catch(() => undefined);
+  }, [pendingLink, audio?.items]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const seen = useMemo(() => data.items.filter((b) => showPrivate || !b.isPrivate), [data.items, showPrivate]);
   const quotes = useMemo(() => quotesOf(marks, seen), [marks, seen]);
   const quote = useMemo(() => quoteOfDay(quotes, now), [quotes, now]);
@@ -106,6 +162,11 @@ export default function BooksSection({
         quote={quote}
         quoteCount={quotes.length}
         today={today}
+        listenable={linkedIds.size ? new Set(data.items.filter((b) => audiobookOf(b.id)).map((b) => b.id)) : undefined}
+        onListen={(b) => {
+          if (startListening(b, 'auto')) setPlayer(true);
+        }}
+        bottomSpace={playingLinked ? 72 : 0}
         initialDeleted={dev?.deleted}
       />
       {dash && (
@@ -118,6 +179,18 @@ export default function BooksSection({
             afterModals(() => setReading({ id: b.id }));
           }}
           onClose={() => setDash(false)}
+        />
+      )}
+      {playingLinked && !player && !open && !info && !dash && !quotesOpen && <MiniPlayer bottom={tabSpace + 8} onExpand={() => setPlayer(true)} />}
+      {player && pb?.item && audio && (
+        <AudioPlayerScreen
+          actions={audio.actions}
+          prefs={audio.prefs}
+          onInfo={(i) => {
+            setPlayer(false);
+            afterModals(() => pushJump({ kind: 'audio', id: i.id, play: false }));
+          }}
+          onClose={() => setPlayer(false)}
         />
       )}
       {quotesOpen && (!dev?.quote || quotes.length > 0) && (
@@ -141,6 +214,24 @@ export default function BooksSection({
           book={info}
           actions={data.actions}
           tags={tags}
+          audiobook={audiobookOf(info.id)}
+          audioSuggestion={audio && !audiobookOf(info.id) ? suggestAudio(info, audioItems, data.audioLinks) : null}
+          audioChoices={audioItems}
+          audioPlaying={!!pb?.playing && !!pb.item && pb.item.id === audiobookOf(info.id)?.id}
+          audioImporting={pendingLink?.bookId === info.id}
+          onListen={
+            audio && pb
+              ? (from) => {
+                  const book = info;
+                  setInfoId(null);
+                  afterModals(() => {
+                    if (startListening(book, from)) setPlayer(true);
+                  });
+                }
+              : undefined
+          }
+          onLinkAudio={audio ? (id) => void data.actions.setAudio(info.id, id).catch(() => undefined) : undefined}
+          onImportAudio={audio ? () => importAudioFor(info.id) : undefined}
           onRead={(at) => {
             setInfoId(null);
             afterModals(() => setReading({ id: info.id, at }));
@@ -154,6 +245,8 @@ export default function BooksSection({
           book={open}
           actions={data.actions}
           prefs={data.reader}
+          audiobook={audiobookOf(open.id)}
+          audio={audio ?? null}
           startAt={reading?.at ?? null}
           onPrefs={(p) => void data.actions.setReader(p).catch(() => undefined)}
           onClose={() => setReading(null)}

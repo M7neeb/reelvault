@@ -4,6 +4,7 @@
  */
 
 import type { TocEntry } from '../../audio/epub';
+import type { AudioLinks } from '../../books/bookAudio';
 import type { BookGoals } from '../../books/bookGoals';
 import type { BookItem, BookMark, BookPlace, BookRead, BookSort, BookStatus, ReaderPrefs } from '../../books/bookLogic';
 
@@ -42,6 +43,8 @@ export type BookActions = {
   /** Bookmarks and highlights of every book (the Quotes page). */
   loadAllMarks: () => Promise<BookMark[]>;
   setGoals: (goals: BookGoals) => Promise<void>;
+  /** The audiobook of a book: an item of the Audio section, or null to take it away. */
+  setAudio: (bookId: string, audioId: string | null) => Promise<void>;
   addMark: (m: Omit<BookMark, 'id'>) => Promise<BookMark>;
   setMarkNote: (id: number, note: string | null) => Promise<void>;
   deleteMark: (id: number) => Promise<void>;
@@ -66,6 +69,8 @@ export type BooksData = {
   reader: ReaderPrefs;
   /** Minutes a day and books a year you set yourself; 0 = no goal. */
   goals: BookGoals;
+  /** Which audio item is the audiobook of which book. */
+  audioLinks: AudioLinks;
   /** The shelf's order (kept between launches). */
   sort: BookSort;
   actions: BookActions;
