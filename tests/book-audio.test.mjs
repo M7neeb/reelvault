@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { audioDoneFrac, audioLength, audioOf, listenFrom, nextSpeed, newAudio, parseAudioLinks, placeInAudio, suggestAudio, withAudioLink } from '../src/features/vault/books/bookAudio.ts';
+import { audioDoneFrac, audioLength, audioOf, chapterKey, listenAlongFrom, listenFrom, matchingAudioChapter, nextSpeed, newAudio, parseAudioLinks, placeInAudio, suggestAudio, withAudioLink } from '../src/features/vault/books/bookAudio.ts';
 
 const MIN = 60_000;
 const a = (id, title, over = {}) => ({ id, title, filename: `${id}.m4b`, author: null, durationMs: null, tracks: [], ...over });
@@ -81,4 +81,60 @@ test('the speed button goes round the list', () => {
   assert.equal(nextSpeed(1.1, speeds), 1.25);
   assert.equal(nextSpeed(2, speeds), 0.75);
   assert.equal(nextSpeed(3, speeds), 0.75);
+});
+
+test('chapter names from the text and the audio boil down to the same key', () => {
+  assert.equal(chapterKey('Canto V'), 'canto 5');
+  assert.equal(chapterKey('Inferno · Canto XXXIV'), 'canto 34');
+  assert.equal(chapterKey('03 - Canto 05'), 'canto 5');
+  assert.equal(chapterKey('Inferno_Canto_08.mp3'), 'canto 8');
+  assert.equal(chapterKey('Chapter Five'), 'chapter 5');
+  assert.equal(chapterKey('Ch. 12'), 'chapter 12');
+  assert.equal(chapterKey('Part I · Chapter III'), 'chapter 3');
+  assert.equal(chapterKey('The Dark Wood'), 'the dark wood');
+  assert.equal(chapterKey('Partial actions'), 'partial actions');
+  assert.equal(chapterKey('07'), null);
+  assert.equal(chapterKey(''), null);
+});
+
+// The Divine Comedy: three parts of a few cantos each, one audio file per canto.
+const parts = ['Inferno', 'Purgatorio', 'Paradiso'];
+const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+const textTitles = ['Introduction', ...parts.flatMap((p) => roman.map((r) => `${p} · Canto ${r}`)), 'Notes'];
+// Cantos of very different lengths in the audio, so the share of the text is a poor guess.
+const lens = parts.flatMap((_, p) => roman.map((_, n) => (8 + ((n * 7 + p * 3) % 9) * 2) * MIN));
+const tracks = lens.map((d, i) => ({ durationMs: d, title: `${parts[Math.floor(i / 10)]} Canto ${String((i % 10) + 1).padStart(2, '0')}` }));
+const starts = lens.map((_, i) => lens.slice(0, i).reduce((x, y) => x + y, 0));
+const audioChapters = tracks.map((t, i) => ({ title: t.title, overallStart: starts[i], lengthMs: lens[i] }));
+const comedy = (over = {}) => ({ tracks, lastPlayedAt: null, positionTrack: 0, positionMs: 0, finishedAt: null, ...over });
+
+test('a canto in the text is found in the audio by name, the right part too', () => {
+  assert.equal(matchingAudioChapter(textTitles, 5, audioChapters), 4); // Inferno V
+  assert.equal(matchingAudioChapter(textTitles, 15, audioChapters), 14); // Purgatorio V
+  assert.equal(matchingAudioChapter(textTitles, 0, audioChapters), null); // Introduction
+  // Audio of the Inferno only: Canto V is there once, the text has it three times, so no guessing.
+  assert.equal(matchingAudioChapter(textTitles, 15, audioChapters.slice(0, 10)), null);
+});
+
+test('reading canto 5 and listening to it: after a restart the audio carries on in canto 5', () => {
+  // The audio stopped 6 minutes into Inferno Canto V; the text is a little further on.
+  const a = comedy({ lastPlayedAt: 1, positionTrack: 4, positionMs: 6 * MIN });
+  assert.equal(listenAlongFrom(a, audioChapters, { titles: textTitles, chapter: 5, chapterFrac: 0.6, frac: 0.15 }), null);
+});
+
+test('the text moved on to another canto: the audio starts at that canto', () => {
+  const a = comedy({ lastPlayedAt: 1, positionTrack: 4, positionMs: 6 * MIN });
+  assert.deepEqual(listenAlongFrom(a, audioChapters, { titles: textTitles, chapter: 8, chapterFrac: 0, frac: 0.25 }), { track: 7, ms: 0 });
+  const mid = listenAlongFrom(comedy(), audioChapters, { titles: textTitles, chapter: 8, chapterFrac: 0.5, frac: 0.25 });
+  assert.deepEqual(mid, { track: 7, ms: lens[7] / 2 - 15_000 });
+});
+
+test('no chapter names to go by: the audio keeps its own place while it is near the text', () => {
+  const plain = [{ durationMs: 600 * MIN }];
+  const a = { tracks: plain, lastPlayedAt: 1, positionTrack: 0, positionMs: 100 * MIN, finishedAt: null };
+  assert.equal(listenAlongFrom(a, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.2 }), null);
+  // The text is far ahead (half way): start from the text instead.
+  assert.deepEqual(listenAlongFrom(a, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.5 }), { track: 0, ms: 300 * MIN - 15_000 });
+  // Never listened: from the text.
+  assert.deepEqual(listenAlongFrom({ ...a, lastPlayedAt: null, positionMs: 0 }, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.2 }), { track: 0, ms: 120 * MIN - 15_000 });
 });

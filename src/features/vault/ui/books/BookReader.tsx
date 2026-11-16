@@ -38,7 +38,8 @@ import {
 } from '../../books/bookLogic';
 import { tick } from '../haptics';
 import Icon from '../Icon';
-import { placeInAudio } from '../../books/bookAudio';
+import { listenAlongFrom } from '../../books/bookAudio';
+import { chaptersOf } from '../../audio/audioLogic';
 import { AudioPlayerScreen } from '../audio/AudioPlayer';
 import type { AudioData, AudioUiItem } from '../audio/audioTypes';
 import { useAudioPlaybackOptional } from '../audio/playback';
@@ -478,7 +479,8 @@ export default function BookReader({
     if (!pb || !audiobook) return;
     tick();
     if (listening) return pb.toggle();
-    const at = placeInAudio(audiobook.tracks, progress);
+    const titles = opened ? opened.chapters.map((c, i) => chapterLabel(opened.toc, i, book.title, c.title)) : [];
+    const at = listenAlongFrom(audiobook, chaptersOf(audiobook), { titles, chapter: shown?.index ?? chapter, chapterFrac: fracOfBlock(topBlock, blocks.length), frac: progress });
     pb.open(audiobook, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
   };
   const isLast = !!opened && chapter >= opened.chapters.length - 1;

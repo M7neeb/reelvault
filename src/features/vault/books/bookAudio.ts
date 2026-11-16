@@ -110,3 +110,101 @@ export function nextSpeed(rate: number, speeds: readonly number[]): number {
   const at = speeds.findIndex((s) => s > rate + 0.001);
   return speeds[at < 0 ? 0 : at];
 }
+
+/* ------------------------------------------- chapters of the text and the audio */
+
+const ROMAN: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+const KINDS = 'canto|chapter|chap|ch|book|part|section|letter|act|scene|story|kapitel|chapitre|capitolo|capitulo|capítulo|глава|часть';
+
+function numberOf(s: string): number | null {
+  if (/^\d+$/.test(s)) return Number(s);
+  const word = WORDS.indexOf(s);
+  if (word >= 0) return word;
+  if (!/^[ivxlcdm]+$/.test(s)) return null;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const v = ROMAN[s[i]];
+    n += v < (ROMAN[s[i + 1]] ?? 0) ? -v : v;
+  }
+  return n;
+}
+
+/**
+ * What a chapter is called, boiled down so the book and the audio can be compared:
+ * "Inferno · Canto V", "03 - Canto 05" and "canto five" all give "canto 5".
+ * Titles with no number give the words themselves.
+ */
+export function chapterKey(title: string | null | undefined): string | null {
+  const t = (title ?? '').toLowerCase().replace(/[_.]+/g, ' ');
+  const re = new RegExp(`(?:^|[^\\p{L}])(${KINDS})\\s*[:#.-]?\\s*(\\d+|[ivxlcdm]+|${WORDS.join('|')})(?![\\p{L}\\d])`, 'gu');
+  let last: string | null = null;
+  for (const m of t.matchAll(re)) {
+    const n = numberOf(m[2]);
+    if (n !== null) last = `${m[1] === 'chap' || m[1] === 'ch' ? 'chapter' : m[1]} ${n}`;
+  }
+  if (last) return last;
+  const words = t.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return words.length >= 3 && !/^\d+$/.test(words) ? words : null;
+}
+
+type AudioChapter = { title: string; overallStart: number; lengthMs: number };
+
+/**
+ * The audio chapter that is the same as chapter `chapter` of the text, found by name.
+ * A name used more than once (Canto V of each part) is matched by its turn, and
+ * only when the text and the audio use it the same number of times.
+ */
+export function matchingAudioChapter(textTitles: string[], chapter: number, audio: AudioChapter[]): number | null {
+  const key = chapterKey(textTitles[chapter]);
+  if (!key) return null;
+  const inText = textTitles.map((t, i) => (chapterKey(t) === key ? i : -1)).filter((i) => i >= 0);
+  const inAudio = audio.map((c, i) => (chapterKey(c.title) === key ? i : -1)).filter((i) => i >= 0);
+  if (!inAudio.length || inText.length !== inAudio.length) return null;
+  return inAudio[inText.indexOf(chapter)] ?? null;
+}
+
+const toTrack = (tracks: { durationMs: number | null }[], overall: number) => {
+  let left = Math.max(0, overall);
+  for (let i = 0; i < tracks.length; i++) {
+    const len = tracks[i].durationMs ?? 0;
+    if (left < len || i === tracks.length - 1) return { track: i, ms: Math.round(Math.min(left, len || left)) };
+    left -= len;
+  }
+  return { track: 0, ms: 0 };
+};
+
+/**
+ * Where to start the audiobook when you listen along from the reader.
+ * - The audio stopped inside the chapter on screen: carry on from there
+ *   (it is exact; the text place is only a guess). `null` means that.
+ * - Else the start of that chapter in the audio, plus how far you are into it.
+ * - No chapter to match: the audio's own place while it is near the text,
+ *   else the same fraction of the audio as of the text.
+ */
+export function listenAlongFrom(
+  a: { tracks: { durationMs: number | null }[]; lastPlayedAt: number | null; positionTrack: number; positionMs: number; finishedAt: number | null },
+  audioChapters: AudioChapter[],
+  text: { titles: string[]; chapter: number; chapterFrac: number; frac: number }
+): { track: number; ms: number } | null {
+  const total = a.tracks.reduce((n, t) => n + (t.durationMs ?? 0), 0);
+  let saved = Math.max(0, a.positionMs);
+  for (let i = 0; i < Math.min(a.positionTrack, a.tracks.length); i++) saved += a.tracks[i].durationMs ?? 0;
+  const listened = a.lastPlayedAt !== null && !a.finishedAt && saved > 0;
+
+  const m = matchingAudioChapter(text.titles, text.chapter, audioChapters);
+  if (m !== null) {
+    const c = audioChapters[m];
+    if (listened && saved >= c.overallStart && saved < c.overallStart + c.lengthMs) return null;
+    const at = c.overallStart + Math.max(0, Math.min(1, text.chapterFrac) * c.lengthMs - 15_000);
+    return toTrack(a.tracks, at);
+  }
+  const guess = placeInAudio(a.tracks, text.frac);
+  if (!guess) return null;
+  if (listened && total > 0) {
+    let g = guess.ms;
+    for (let i = 0; i < guess.track; i++) g += a.tracks[i].durationMs ?? 0;
+    if (Math.abs(g - saved) <= total * 0.1) return null;
+  }
+  return guess;
+}
