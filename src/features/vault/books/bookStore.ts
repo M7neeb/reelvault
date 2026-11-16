@@ -5,7 +5,7 @@
 
 import { getDb } from '@/db';
 
-import { SESSION_GAP_MS, type BookItem, type BookMark, type BookPlace, type BookRead, type BookStatus } from './bookLogic';
+import { joinsSitting, type BookItem, type BookMark, type BookPlace, type BookRead, type BookStatus } from './bookLogic';
 
 type Row = {
   id: string;
@@ -215,7 +215,7 @@ export async function logBookRead(bookId: string, at: number, addMs: number, pro
   if (addMs <= 0) return;
   const db = await getDb();
   const last = await db.getFirstAsync<{ id: number; ended_at: number }>('SELECT id, ended_at FROM book_reads WHERE book_id = ? ORDER BY ended_at DESC LIMIT 1;', [bookId]);
-  if (last && at - last.ended_at < SESSION_GAP_MS) {
+  if (last && joinsSitting(last.ended_at, at, addMs)) {
     await db.runAsync('UPDATE book_reads SET ended_at = ?, read_ms = read_ms + ?, progress_to = ? WHERE id = ?;', [at, Math.round(addMs), progressNow, last.id]);
   } else {
     await db.runAsync('INSERT INTO book_reads (book_id, started_at, ended_at, read_ms, progress_from, progress_to) VALUES (?, ?, ?, ?, ?, ?);', [

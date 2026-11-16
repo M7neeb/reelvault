@@ -122,3 +122,10 @@ test('the reading reminder: each evening at the chosen hour, but not today once 
   assert.equal(stepRemind(18, -1), 0);
   assert.equal(stepRemind(22, 1), 22);
 });
+
+test('the last 7 days are seven days: late reading eight days ago does not count', () => {
+  const now = new Date(2026, 10, 16, 21, 0).getTime();
+  const r = (d, h, min) => ({ bookId: 'b', startedAt: new Date(2026, 10, d, h, 30).getTime(), endedAt: 0, ms: min * 60_000, from: 0, to: 0 });
+  const reads = [9, 10, 11, 12, 13, 14, 15, 16].map((d) => r(d, d === 9 ? 23 : 20, 30));
+  assert.equal(daysMet(reads, 20, now), 7);
+});

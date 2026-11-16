@@ -287,7 +287,7 @@ export default function BooksScreen({
       )}
 
       {reading.map((current, n) => (
-        <TouchableOpacity key={current.id} style={styles.current} activeOpacity={0.8} onPress={() => onOpen(current)} onLongPress={() => setMenuFor(current)} accessibilityLabel={`Carry on reading ${displayTitle(current)}`}>
+        <TouchableOpacity key={current.id} style={styles.current} activeOpacity={0.8} onPress={() => onOpen(current)} onLongPress={() => setMenuFor(current)} accessibilityLabel={`${isStarted(current) ? 'Carry on reading' : 'Start reading'} ${displayTitle(current)}`}>
           <BookCover book={current} width={104} />
           <View style={styles.currentText}>
             {n === 0 && <Text style={styles.currentLabel}>{reading.length > 1 ? `Reading now · ${reading.length} books` : 'Reading now'}</Text>}
@@ -315,7 +315,7 @@ export default function BooksScreen({
             })()}
             <View style={styles.actRow}>
               <View style={styles.carryOn}>
-                <Text style={styles.carryOnText}>Carry on</Text>
+                <Text style={styles.carryOnText}>{isStarted(current) ? 'Carry on' : 'Start reading'}</Text>
               </View>
               {listenable?.has(current.id) && onListen && (
                 <TouchableOpacity style={styles.listenBtn} onPress={() => onListen(current)} hitSlop={6} accessibilityLabel={`Listen to the audiobook of ${displayTitle(current)}`}>

@@ -73,12 +73,22 @@ export type BookMark = { id: number; bookId: string; kind: 'bookmark' | 'highlig
 
 export type BookPlace = { chapter: number; block: number; chapterFrac: number };
 
-/** One sitting with a book: when, how long you read, and how far through the book it took you. */
 /** A sitting with a book. `listened`: time with its audiobook, not the text (no progress then). */
 export type BookRead = { bookId: string; startedAt: number; endedAt: number; ms: number; from: number; to: number; listened?: boolean };
 
 /** Saves closer together than this are the same sitting. */
 export const SESSION_GAP_MS = 10 * 60_000;
+
+const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
+
+/**
+ * Whether reading saved at `at` carries on the sitting that ended at `lastEndedAt`:
+ * close enough in time, and on the same day (past midnight the reading belongs to
+ * the new day, for today's goal and the streak).
+ */
+export function joinsSitting(lastEndedAt: number, at: number, addMs: number): boolean {
+  return at - lastEndedAt < SESSION_GAP_MS && sameDay(lastEndedAt, at) && sameDay(at - addMs, at);
+}
 
 const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
 
@@ -279,9 +289,9 @@ export function shelfOrder<T extends BookItem>(books: T[]): T[] {
   return [...books].sort((a, b) => rank(a) - rank(b) || (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0) || b.addedAt - a.addedAt);
 }
 
-/** Every book you are in the middle of, the one you read last first. */
+/** Every book you are in the middle of (or set to Reading by hand), the one you read last first. */
 export function readingNow<T extends BookItem>(books: T[]): T[] {
-  return books.filter((b) => isStarted(b) && !b.finishedAt && statusOf(b) === 'reading').sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0) || b.addedAt - a.addedAt);
+  return books.filter((b) => !b.finishedAt && statusOf(b) === 'reading').sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0) || b.addedAt - a.addedAt);
 }
 
 /** Minutes left at your own pace, once there is enough reading to tell. */

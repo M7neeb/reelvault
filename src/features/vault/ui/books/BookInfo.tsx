@@ -6,7 +6,7 @@
  * Presentational only (see the note at the top of types.ts).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -114,9 +114,17 @@ export default function BookInfo({
   const about = useMemo(() => (book.description ? plainText(book.description) : ''), [book.description]);
   const highlights = marks.filter((m) => m.kind === 'highlight');
   const bookmarks = marks.filter((m) => m.kind === 'bookmark');
+  // Saved when the box loses focus, and again as the page closes: closing with the X or a swipe
+  // does not always blur the box first, and the note would be lost.
+  const savedNotes = useRef(book.notes ?? '');
+  const typed = useRef(notes);
+  typed.current = notes;
   const saveNotes = () => {
-    if ((book.notes ?? '') !== notes) actions.setNotes(book.id, notes).catch(failed);
+    if (savedNotes.current === typed.current) return;
+    savedNotes.current = typed.current;
+    actions.setNotes(book.id, typed.current).catch(failed);
   };
+  useEffect(() => saveNotes, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const MarkRow = ({ m }: { m: BookMark }) => (
     <TouchableOpacity style={styles.mark} onPress={() => onRead({ chapter: m.chapter, block: m.block })} onLongPress={() => setMarkFor(m)} accessibilityLabel={`${m.kind === 'highlight' ? 'Highlight' : 'Bookmark'} in chapter ${m.chapter + 1}. Hold for more`}>

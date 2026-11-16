@@ -63,10 +63,18 @@ function removeQuietly(uri: string) {
   }
 }
 
-/** Reads one book file (any format bookImport takes) into its own folder and adds it to the shelf. Null when it was already there. */
-async function addBook(uri: string, name: string, onStep: (t: string) => void): Promise<BookItem | null> {
+/**
+ * Reads one book file (any format bookImport takes) into its own folder and adds it to the shelf.
+ * Null when it was already there; 'restored' when it was in Recently Deleted (it comes back, with your place and notes).
+ */
+async function addBook(uri: string, name: string, onStep: (t: string) => void): Promise<BookItem | null | 'restored'> {
   const key = await contentKeyOf(uri).catch(() => null);
-  if (key && (await findBookByKey(key))) return null;
+  const have = key ? await findBookByKey(key) : null;
+  if (have?.deletedAt) {
+    await setBooksField([have.id], 'deleted_at', null);
+    return 'restored';
+  }
+  if (have) return null;
   const id = Crypto.randomUUID();
   const folder = `books/${id}`;
   try {
@@ -165,6 +173,13 @@ export function useBooksData(): BooksData {
         await deleteBook(g.id);
         removeFolder(g.folder);
       }
+      if (gone.length) {
+        let links = parseAudioLinks(await getSetting(AUDIO_KEY));
+        for (const g of gone) links = withAudioLink(links, g.id, null);
+        linksRef.current = links;
+        setAudioLinks(links);
+        await setSetting(AUDIO_KEY, JSON.stringify(links));
+      }
       if (gone.length) await refresh();
     })().catch((e) => console.log(`[BOOKS] purge failed: ${String(e)}`));
   }, [refresh]);
@@ -180,6 +195,7 @@ export function useBooksData(): BooksData {
       setBusy(true);
       let added = 0;
       let already = 0;
+      let restored = 0;
       const failed: string[] = [];
       try {
         for (const [n, f] of files.entries()) {
@@ -187,7 +203,8 @@ export function useBooksData(): BooksData {
           setStatus(`Adding ${label}${f.name}`);
           try {
             const b = await addBook(f.uri, f.name, (t) => setStatus(`${label}${t}`));
-            if (b) added++;
+            if (b === 'restored') restored++;
+            else if (b) added++;
             else already++;
           } catch (e) {
             console.log(`[BOOKS] ${f.name} not added: ${String(e)}`);
@@ -199,6 +216,7 @@ export function useBooksData(): BooksData {
         await refresh();
         const parts = [];
         if (added) parts.push(added === 1 ? 'Book added' : `${added} books added`);
+        if (restored) parts.push(restored === 1 ? 'Back from Recently Deleted' : `${restored} back from Recently Deleted`);
         if (already) parts.push(already === 1 ? 'already on your shelf' : `${already} already on your shelf`);
         if (failed.length) parts.push(failed.length === 1 ? `could not open ${failed[0]}` : `${failed.length} could not be opened`);
         setStatus(parts.join(' · '));
@@ -262,9 +280,10 @@ export function useBooksData(): BooksData {
         if (!changed) return;
         if (addMs > 0) {
           const before = progressAt(was.chapterSizes, was.chapter, was.chapterFrac);
-          const write = logBookRead(id, at, addMs, before, progressAt(was.chapterSizes, place.chapter, place.chapterFrac)).catch((e) => console.log(`[BOOKS] session not saved: ${String(e)}`));
-          // The shelf reloads today's minutes as the book closes: let it wait for this sitting.
-          readWrites.current = readWrites.current.then(() => write);
+          const now = progressAt(was.chapterSizes, place.chapter, place.chapterFrac);
+          // One write at a time: two saves close together (a chapter turn, then closing) would both
+          // miss the sitting the other is about to add and split it in two. The shelf waits on this too.
+          readWrites.current = readWrites.current.then(() => logBookRead(id, at, addMs, before, now).catch((e) => console.log(`[BOOKS] session not saved: ${String(e)}`)));
         }
         setItems((list) => list.map((b) => (b.id === id ? { ...b, ...changed } : b)));
         await saveBookPlace(id, place, addMs, at);
@@ -316,6 +335,14 @@ export function useBooksData(): BooksData {
         }
         const set = new Set(ids);
         setItems((list) => list.filter((x) => !set.has(x.id)));
+        // Gone for good: its audiobook is free to be suggested for another book again.
+        let links = linksRef.current;
+        for (const id of ids) links = withAudioLink(links, id, null);
+        if (Object.keys(links).length !== Object.keys(linksRef.current).length) {
+          linksRef.current = links;
+          setAudioLinks(links);
+          await setSetting(AUDIO_KEY, JSON.stringify(links));
+        }
       },
       edit: async (id, title, author) => {
         const t = title?.trim() || null;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  joinsSitting,
   placeSaved,
   chapterMinutesLeft,
   countedMs,
@@ -235,8 +236,10 @@ test('reading now is every started book that is not finished, dropped or parked'
     book({ id: 'dropped', lastReadAt: 70, status: 'dropped' }),
     book({ id: 'want', lastReadAt: 80, status: 'want' }),
     book({ id: 'forced', lastReadAt: 5, status: 'reading' }),
+    // Set to Reading by hand before opening it: the Reading chip counts it, so Reading now shows it too.
+    book({ id: 'set', status: 'reading' }),
   ]).map((b) => b.id);
-  assert.deepEqual(now, ['new', 'old', 'forced']);
+  assert.deepEqual(now, ['new', 'old', 'forced', 'set']);
 });
 
 test('opening a book and closing it at the same place is not reading it', () => {
@@ -247,4 +250,13 @@ test('opening a book and closing it at the same place is not reading it', () => 
   assert.equal(placeSaved(b, { chapter: 4, block: 12, chapterFrac: 0.3 }, 45_000, 1000)?.readMs, 3_645_000);
   // A book never started, opened at its first page and closed again, stays unstarted.
   assert.equal(placeSaved({ chapter: 0, block: 0, readMs: 0 }, { chapter: 0, block: 0, chapterFrac: 0 }, 0, 1000), null);
+});
+
+test('a sitting carries on across short breaks but not past midnight', () => {
+  const t = (h, m) => new Date(2026, 10, 16, h, m).getTime();
+  assert.equal(joinsSitting(t(20, 0), t(20, 5), 60_000), true);
+  assert.equal(joinsSitting(t(20, 0), t(20, 15), 60_000), false);
+  // 23:58 then 00:03: five minutes apart, but the second part is tomorrow's reading.
+  const after = new Date(2026, 10, 17, 0, 3).getTime();
+  assert.equal(joinsSitting(t(23, 58), after, 60_000), false);
 });

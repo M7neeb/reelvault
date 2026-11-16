@@ -59,7 +59,8 @@ export function dayGoal(todayMs: number, goalMin: number): DayGoal | null {
 /** How many of the last seven days (today included) reached the daily goal. */
 export function daysMet(reads: BookRead[], goalMin: number, now: number): number {
   if (goalMin <= 0) return 0;
-  const from = sod(now) - 6 * DAY - 3_600_000;
+  // Midnight six days ago (worked out from noon, so a clock change can't shift it an hour into the day before).
+  const from = sod(sod(now) - 6 * DAY + DAY / 2);
   const per = new Map<number, number>();
   for (const r of reads) if (r.startedAt >= from && r.startedAt <= now) per.set(sod(r.startedAt), (per.get(sod(r.startedAt)) ?? 0) + r.ms);
   return [...per.values()].filter((ms) => Math.floor(ms / 60_000) >= goalMin).length;
