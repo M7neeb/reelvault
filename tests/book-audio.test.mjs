@@ -157,7 +157,7 @@ test('listening to a book counts as time with it, but reading along is not count
     { itemId: 'aud-other', startedAt: 1100 * MIN, listenedMs: 60 * MIN },
   ];
   const out = listeningAsReads(plays, links, reads);
-  assert.deepEqual(out.map((r) => [r.bookId, r.ms / MIN]), [['comedy', 40], ['comedy', 10]]);
+  assert.deepEqual(out.map((r) => [r.bookId, r.ms / MIN]), [['comedy', 10], ['comedy', 40]]);
   assert.deepEqual(listeningAsReads(plays, {}, reads), []);
 });
 
@@ -166,4 +166,34 @@ test('the audio moving on to a canto finds that canto in the text', () => {
   assert.equal(matchingTextChapter(textTitles, 15, audioChapters), 16); // Purgatorio VI
   assert.equal(matchingTextChapter(textTitles, 99, audioChapters), null);
   assert.equal(matchingTextChapter(textTitles, 15, audioChapters.slice(0, 10)), null);
+});
+
+// Total time with a book on a day: reading plus what listening adds.
+const total = (reads, plays, links = { comedy: 'aud-comedy' }) => (reads.reduce((n, r) => n + r.ms, 0) + listeningAsReads(plays, links, reads).reduce((n, r) => n + r.ms, 0)) / MIN;
+const sit = (from, to, ms) => ({ bookId: 'comedy', startedAt: from * MIN, endedAt: to * MIN, ms: ms * MIN, from: 0, to: 0 });
+const play = (from, min) => ({ itemId: 'aud-comedy', startedAt: from * MIN, listenedMs: min * MIN });
+
+test('reading with the audio on: an hour together is an hour, never two', () => {
+  // Read and listened together from 18:00 to 19:00.
+  assert.equal(total([sit(1080, 1140, 60)], [play(1080, 60)]), 60);
+  // The audio was paused a few times, so it is in several pieces.
+  assert.equal(total([sit(1080, 1140, 60)], [play(1080, 20), play(1100, 25), play(1125, 15)]), 60);
+  // Started the audio five minutes before opening the book, stopped it with the book.
+  assert.equal(total([sit(1085, 1140, 55)], [play(1080, 60)]), 60);
+  // Kept listening ten minutes after closing the book.
+  assert.equal(total([sit(1080, 1140, 60)], [play(1080, 70)]), 70);
+});
+
+test('listening along on one long page still counts, but only once', () => {
+  // A 60-minute sitting where the page sat still for a while: only 40 minutes counted as reading.
+  assert.equal(total([sit(1080, 1140, 40)], [play(1080, 60)]), 60);
+  // Two sittings with the audio running across both and the gap between them.
+  assert.equal(total([sit(1080, 1110, 30), sit(1125, 1140, 15)], [play(1080, 60)]), 60);
+});
+
+test('reading alone or listening alone is counted as it is', () => {
+  assert.equal(total([sit(1080, 1140, 60)], []), 60);
+  assert.equal(total([], [play(1080, 45)]), 45);
+  // Audio of a book that is not linked to this one does not count for it.
+  assert.equal(total([sit(1080, 1140, 60)], [play(1080, 60)], {}), 60);
 });

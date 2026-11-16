@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,40 +57,25 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
         <Image source={{ uri: book.coverUri }} style={{ width, height }} contentFit="cover" transition={120} recyclingKey={book.coverUri} />
       </View>
     );
-  const cloth = clothFor(displayTitle(book) + (book.author ?? ''));
   // Too narrow to set a title without breaking words: the first letter stands in.
   if (width < 80)
     return (
-      <View style={[styles.cover, styles.plainSmall, { width, height, borderRadius: radius, backgroundColor: cloth }]}>
+      <View style={[styles.cover, styles.plainCover, styles.plainSmall, { width, height, borderRadius: radius }]}>
         <Text style={[styles.plainInitial, { fontSize: Math.round(width * 0.46) }]}>{displayTitle(book).replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase()}</Text>
       </View>
     );
-  const inset = Math.round(width * 0.06);
   return (
-    <View style={[styles.cover, { width, height, borderRadius: radius, backgroundColor: cloth }]}>
-      <View style={[styles.plainFrame, { margin: inset, padding: Math.round(width * 0.08) }]}>
-        <View>
-          <Text style={[styles.plainTitle, { fontSize: Math.max(10, width * 0.125), lineHeight: Math.max(12, width * 0.15) }]} numberOfLines={5}>
-            {displayTitle(book)}
-          </Text>
-          <View style={[styles.plainRule, { width: Math.round(width * 0.16), marginTop: Math.round(width * 0.06) }]} />
-        </View>
-        {!!book.author && (
-          <Text style={[styles.plainAuthor, { fontSize: Math.max(7, width * 0.06), letterSpacing: Math.max(0.5, width * 0.012) }]} numberOfLines={2}>
-            {book.author.toUpperCase()}
-          </Text>
-        )}
-      </View>
+    <View style={[styles.cover, styles.plainCover, { width, height, borderRadius: radius, padding: Math.max(6, width * 0.1) }]}>
+      <Text style={[styles.plainTitle, { fontSize: Math.max(9, width * 0.13), lineHeight: Math.max(11, width * 0.16) }]} numberOfLines={5}>
+        {displayTitle(book)}
+      </Text>
+      {width >= 80 && !!book.author && (
+        <Text style={[styles.plainAuthor, { fontSize: Math.max(8, width * 0.085) }]} numberOfLines={2}>
+          {book.author}
+        </Text>
+      )}
     </View>
   );
-}
-
-/** Book cloth: deep, slightly worn colours, so a shelf of covers without art still looks like books. */
-const CLOTHS = ['#6E2A2A', '#2F4A3A', '#22344F', '#8A6A2E', '#3E4A52', '#5A3B2E', '#2E5552', '#6B5A3A', '#4A2F38', '#3B4630'];
-function clothFor(key: string): string {
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
-  return CLOTHS[Math.abs(h) % CLOTHS.length];
 }
 
 type Menu = 'more' | 'sort' | 'status' | 'tag' | 'rate' | 'newTag' | null;
@@ -627,12 +612,11 @@ const makeStyles = (p: Palette) =>
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },
     sep: { height: 1, backgroundColor: p.separator, marginLeft: SIDE + 52 + 14 },
     cover: { overflow: 'hidden', backgroundColor: p.tile },
-    plainFrame: { flex: 1, justifyContent: 'space-between', borderWidth: StyleSheet.hairlineWidth * 2, borderColor: 'rgba(244,236,220,0.35)' },
-    plainTitle: { color: '#F4ECDC', fontWeight: '700', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
-    plainRule: { height: 1, backgroundColor: 'rgba(244,236,220,0.6)' },
+    plainCover: { backgroundColor: p.elevated, borderWidth: 1, borderColor: p.border, justifyContent: 'space-between' },
+    plainTitle: { color: p.text, fontWeight: '700' },
     plainSmall: { alignItems: 'center', justifyContent: 'center' },
-    plainInitial: { color: '#F4ECDC', fontWeight: '600', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
-    plainAuthor: { color: 'rgba(244,236,220,0.8)', fontWeight: '600' },
+    plainInitial: { color: p.textSecondary, fontWeight: '600', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
+    plainAuthor: { color: p.textSecondary },
     selectBar: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 18, padding: 8, borderWidth: 1, borderColor: p.border },
     selectBtn: { flex: 1, backgroundColor: p.card, borderRadius: 12, height: 38, alignItems: 'center', justifyContent: 'center' },
     selectBtnText: { color: p.text, fontSize: 15, fontWeight: '700' },

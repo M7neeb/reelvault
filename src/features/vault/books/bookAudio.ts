@@ -208,24 +208,37 @@ export function listenAlongFrom(
 }
 
 /**
- * Time spent listening to a book's audiobook, as reading time for that book (for the
- * daily goal, today's minutes and the streak). Listening while reading along is already
- * counted as reading, so only the minutes outside that book's reading sittings are added.
+ * Time spent listening to a book's audiobook, as time with that book (for the daily
+ * goal, today's minutes, the streak and its page). Listening while reading must not
+ * count twice: inside a reading sitting the time counts once, as the reading or the
+ * listening, whichever is longer (reading only counts while the page moves, so a long
+ * stretch of listening on one page still counts). Outside sittings it all counts.
  */
 export function listeningAsReads(plays: { itemId: string; startedAt: number; listenedMs: number }[], links: AudioLinks, reads: BookRead[]): BookRead[] {
   const bookOf = new Map(Object.entries(links).map(([book, audio]) => [audio, book]));
   const out: BookRead[] = [];
+  const inSitting = new Map<BookRead, number>();
   for (const pl of plays) {
     const bookId = bookOf.get(pl.itemId);
     if (!bookId || pl.listenedMs <= 0) continue;
     const start = pl.startedAt;
     const end = start + pl.listenedMs;
-    let overlap = 0;
-    for (const r of reads) if (r.bookId === bookId) overlap += Math.max(0, Math.min(end, r.endedAt) - Math.max(start, r.startedAt));
-    const ms = pl.listenedMs - Math.min(pl.listenedMs, overlap);
-    if (ms >= 1000) out.push({ bookId, startedAt: start, endedAt: end, ms, from: 0, to: 0, listened: true });
+    let inside = 0;
+    for (const r of reads) {
+      if (r.bookId !== bookId) continue;
+      const o = Math.min(pl.listenedMs - inside, Math.max(0, Math.min(end, r.endedAt) - Math.max(start, r.startedAt)));
+      if (o <= 0) continue;
+      inside += o;
+      inSitting.set(r, (inSitting.get(r) ?? 0) + o);
+    }
+    const outside = pl.listenedMs - inside;
+    if (outside >= 1000) out.push({ bookId, startedAt: start, endedAt: end, ms: outside, from: 0, to: 0, listened: true });
   }
-  return out;
+  for (const [r, listened] of inSitting) {
+    const extra = Math.min(listened, r.endedAt - r.startedAt) - r.ms;
+    if (extra >= 1000) out.push({ bookId: r.bookId, startedAt: r.startedAt, endedAt: r.endedAt, ms: extra, from: 0, to: 0, listened: true });
+  }
+  return out.sort((x, y) => x.startedAt - y.startedAt);
 }
 
 /** The text chapter that is the same as audio chapter `audioIndex` (the other way round from matchingAudioChapter). */
