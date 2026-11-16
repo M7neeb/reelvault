@@ -356,6 +356,7 @@ export function parseViewOptions(json: string | null, defaults: ViewOptions): Vi
     glass: oneOf(r.glass, ['regular', 'clear', 'solid'] as const, defaults.glass),
     corners: oneOf(r.corners, ['standard', 'round', 'square'] as const, defaults.corners),
     outlined: bool(r.outlined, defaults.outlined),
+    artwork: bool(r.artwork, defaults.artwork),
     rotate: bool(r.rotate, defaults.rotate),
   };
 }

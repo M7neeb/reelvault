@@ -18,6 +18,7 @@ import { AUDIO_SORTS, AUDIO_STATUSES, continueListening, displayTitle, fmtLength
 import { useTabBarSpace } from '../chrome';
 import { tick } from '../haptics';
 import Icon from '../Icon';
+import Ambient from '../Ambient';
 import IconButton from '../IconButton';
 import { enterUp } from '../motion';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
@@ -156,6 +157,7 @@ export default function AudioScreen({
 
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
+      <Ambient uri={(visible.find((i) => i.id === currentId) ?? resume[0])?.coverSource} height={insets.top + 520} />
       <View style={styles.titleRow}>
         <Text style={styles.title}>{inDeleted ? 'Recently Deleted' : 'Audio'}</Text>
         <View style={styles.buttons}>
@@ -565,11 +567,11 @@ const makeStyles = (p: Palette) =>
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
     status: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
     summary: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
-    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 12, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 12, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12, height: 40 },
     searchInput: { flex: 1, color: p.text, fontSize: 16 },
     section: { color: p.text, fontSize: 20, fontWeight: '800', paddingHorizontal: SIDE, marginBottom: 10 },
     resume: { width: 132, gap: 5 },
-    resumeBar: { height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginTop: 4 },
+    resumeBar: { height: 4, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden', marginTop: 4 },
     resumeFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     resumeTitle: { color: p.text, fontSize: 14, fontWeight: '700' },
     queued: { width: 96, gap: 5 },
@@ -595,7 +597,7 @@ const makeStyles = (p: Palette) =>
     meta: { color: p.textSecondary, fontSize: 13 },
     done: { color: '#30D158', fontSize: 12, fontWeight: '700' },
     tags: { color: p.link, fontSize: 12 },
-    bar: { height: 3, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginTop: 3 },
+    bar: { height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden', marginTop: 3 },
     barFill: { height: 3, borderRadius: 2, backgroundColor: p.accent },
     check: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: p.textMuted, alignItems: 'center', justifyContent: 'center' },
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },

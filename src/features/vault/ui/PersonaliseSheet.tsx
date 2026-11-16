@@ -299,6 +299,11 @@ export default function PersonaliseSheet({
         <ToggleRow label="A thin line around cards" value={viewOptions.outlined} onChange={(outlined) => setLook({ outlined })} />
       </Section>
 
+      <Section card label="Artwork">
+        <ToggleRow label="Backgrounds from the artwork" value={viewOptions.artwork} onChange={(artwork) => setLook({ artwork })} />
+        <Text style={styles.hint}>A book's page, the shelf, the player and a film's page take their colour from the cover or poster. Off gives the plain background back.</Text>
+      </Section>
+
       <Section card label="Action button, Siri and Control Center">
         <Text style={styles.hint}>
           Copy a link below. In the Shortcuts app tap +, add the action "Open URLs", paste the link and give the shortcut a name (for example "Carry on reading").

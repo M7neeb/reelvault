@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,6 +38,9 @@ import Icon from '../Icon';
 import IconButton from '../IconButton';
 import { tidyQuote, type DayGoal, type Quote } from '../../books/bookGoals';
 import { fmtTime } from '../../books/bookStats';
+import Ambient from '../Ambient';
+import Glass from '../Glass';
+import { PressableScale } from '../motion';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
 import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
@@ -202,8 +205,30 @@ export default function BooksScreen({
     ...(visible.length ? [{ label: quoteCount ? `Quotes · ${quoteCount}` : 'Quotes', onPress: onQuotes }] : []),
   ];
 
+  // A narrow phone (or Display Zoom) gets a smaller cover, so the title keeps its words whole.
+  const { width: screenW } = useWindowDimensions();
+  const heroCover = screenW < 360 ? 100 : 132;
+
+  const progressLines = (b: BookUi) => {
+    const pr = progressOf(b);
+    const m = minutesLeft(b);
+    const todayMs = readToday?.get(b.id) ?? 0;
+    return (
+      <>
+        <View style={styles.bar}>
+          <View style={[styles.barFill, { width: `${Math.round(pr * 100)}%` }]} />
+        </View>
+        <Text style={styles.meta} numberOfLines={2}>
+          {[fmtProgress(pr, isStarted(b)), m !== null ? fmtLeft(m) : null].filter(Boolean).join(' · ')}
+        </Text>
+        {todayMs >= 60_000 && <Text style={styles.metaToday}>{fmtTime(todayMs)} today</Text>}
+      </>
+    );
+  };
+
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
+      {plain && <Ambient uri={current?.coverUri} height={insets.top + 640} />}
       <View style={styles.titleRow}>
         <Text style={styles.title}>{inDeleted ? 'Recently Deleted' : selected ? `${ids.length} selected` : 'Books'}</Text>
         <View style={styles.buttons}>
@@ -266,31 +291,82 @@ export default function BooksScreen({
         </ScrollView>
       )}
 
+      {reading.slice(0, 1).map((current) => (
+        <PressableScale
+          key={current.id}
+          scaleTo={0.98}
+          style={styles.hero}
+          onPress={() => onInfo(current)}
+          onLongPress={() => setMenuFor(current)}
+          accessibilityRole="button"
+          accessibilityLabel={`${displayTitle(current)}, ${fmtProgress(progressOf(current), isStarted(current))}. Opens details, notes and highlights`}>
+          <View style={styles.heroCover}>
+            <BookCover book={current} width={heroCover} radius={6} />
+          </View>
+          <View style={styles.currentText}>
+            <Text style={styles.currentLabel}>{reading.length > 1 ? `Reading now · ${reading.length} books` : 'Reading now'}</Text>
+            <Text style={styles.heroTitle} numberOfLines={4}>
+              {displayTitle(current)}
+            </Text>
+            {!!current.author && (
+              <Text style={styles.author} numberOfLines={1}>
+                {current.author}
+              </Text>
+            )}
+            {progressLines(current)}
+            <View style={styles.actRow}>
+              <PressableScale
+                style={styles.carryOn}
+                onPress={() => onOpen(current)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`${isStarted(current) ? 'Carry on reading' : 'Start reading'} ${displayTitle(current)}`}>
+                <Icon name="play" size={13} color={p.bg} />
+                <Text style={styles.carryOnText} maxFontSizeMultiplier={1.3}>
+                  {isStarted(current) ? 'Carry on' : 'Start'}
+                </Text>
+              </PressableScale>
+              {listenable?.has(current.id) && onListen && <IconButton icon="headphones" size={44} label={`Listen to the audiobook of ${displayTitle(current)}`} onPress={() => onListen(current)} />}
+            </View>
+          </View>
+        </PressableScale>
+      ))}
+
       {reading.length > 0 && today && (
-        <TouchableOpacity
-          style={styles.goalBox}
-          activeOpacity={0.7}
+        <PressableScale
+          scaleTo={0.98}
+          style={styles.goalOuter}
           onPress={onDashboard}
+          accessibilityRole="button"
           accessibilityLabel={`Daily reading goal, all books: ${today.line}${streak > 1 ? `, ${streak} days in a row` : ''}. Opens your reading stats.`}>
-          <View style={styles.goalHead}>
-            <Text style={styles.goalLabel}>Daily goal</Text>
-            {streak > 1 && <Text style={styles.goalStreak}>{streak} days in a row</Text>}
-            <Icon name="forward" size={11} color={p.textMuted} />
-          </View>
-          <View style={styles.goalTrack}>
-            <View style={[styles.goalFill, today.met && styles.goalMet, { width: `${Math.round(today.ratio * 100)}%` }]} />
-          </View>
-          <Text style={[styles.goalText, today.met && styles.done]} numberOfLines={1}>
-            {today.line}
+          <Glass interactive style={styles.goalCapsule}>
+            <Text style={styles.goalLabel} maxFontSizeMultiplier={1.4}>
+              Today
+            </Text>
+            <View style={styles.goalTrack}>
+              <View style={[styles.goalFill, today.met && styles.goalMet, { width: `${Math.round(today.ratio * 100)}%` }]} />
+            </View>
+            <Text style={[styles.goalText, today.met && styles.done]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
+              {today.met ? `${today.min} min` : `${today.min} of ${today.goal} min`}
+            </Text>
+          </Glass>
+          <Text style={styles.goalCaption} numberOfLines={1}>
+            {[today.met ? 'Goal reached' : `${today.goal - today.min} min to go`, streak > 1 ? `${streak} days in a row` : null].filter(Boolean).join(' · ')}
           </Text>
-        </TouchableOpacity>
+        </PressableScale>
       )}
 
-      {reading.map((current, n) => (
-        <TouchableOpacity key={current.id} style={styles.current} activeOpacity={0.8} onPress={() => onInfo(current)} onLongPress={() => setMenuFor(current)} accessibilityLabel={`${displayTitle(current)}: details, notes and highlights`}>
-          <BookCover book={current} width={104} />
+      {reading.slice(1).map((current) => (
+        <PressableScale
+          key={current.id}
+          scaleTo={0.98}
+          style={styles.current}
+          onPress={() => onInfo(current)}
+          onLongPress={() => setMenuFor(current)}
+          accessibilityRole="button"
+          accessibilityLabel={`${displayTitle(current)}, ${fmtProgress(progressOf(current), isStarted(current))}. Opens details, notes and highlights`}>
+          <BookCover book={current} width={88} />
           <View style={styles.currentText}>
-            {n === 0 && <Text style={styles.currentLabel}>{reading.length > 1 ? `Reading now · ${reading.length} books` : 'Reading now'}</Text>}
             <Text style={styles.currentTitle} numberOfLines={3}>
               {displayTitle(current)}
             </Text>
@@ -299,32 +375,22 @@ export default function BooksScreen({
                 {current.author}
               </Text>
             )}
-            <View style={styles.bar}>
-              <View style={[styles.barFill, { width: `${Math.round(progressOf(current) * 100)}%` }]} />
-            </View>
-            <Text style={styles.meta} numberOfLines={1}>
-              {fmtProgress(progressOf(current), isStarted(current))}
-              {(() => {
-                const m = minutesLeft(current);
-                return m !== null ? ` · ${fmtLeft(m)}` : '';
-              })()}
-            </Text>
-            {(() => {
-              const ms = readToday?.get(current.id) ?? 0;
-              return ms >= 60_000 ? <Text style={styles.meta}>{fmtTime(ms)} today</Text> : null;
-            })()}
+            {progressLines(current)}
             <View style={styles.actRow}>
-              <TouchableOpacity style={styles.carryOn} onPress={() => onOpen(current)} hitSlop={6} accessibilityLabel={`${isStarted(current) ? 'Carry on reading' : 'Start reading'} ${displayTitle(current)}`}>
-                <Text style={styles.carryOnText}>{isStarted(current) ? 'Carry on' : 'Start reading'}</Text>
-              </TouchableOpacity>
-              {listenable?.has(current.id) && onListen && (
-                <TouchableOpacity style={styles.listenBtn} onPress={() => onListen(current)} hitSlop={6} accessibilityLabel={`Listen to the audiobook of ${displayTitle(current)}`}>
-                  <Icon name="headphones" size={17} color={p.text} />
-                </TouchableOpacity>
-              )}
+              <PressableScale
+                style={[styles.carryOn, styles.carryOnSmall]}
+                onPress={() => onOpen(current)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`${isStarted(current) ? 'Carry on reading' : 'Start reading'} ${displayTitle(current)}`}>
+                <Text style={styles.carryOnText} maxFontSizeMultiplier={1.3}>
+                  {isStarted(current) ? 'Carry on' : 'Start'}
+                </Text>
+              </PressableScale>
+              {listenable?.has(current.id) && onListen && <IconButton icon="headphones" size={40} label={`Listen to the audiobook of ${displayTitle(current)}`} onPress={() => onListen(current)} />}
             </View>
           </View>
-        </TouchableOpacity>
+        </PressableScale>
       ))}
 
       {!inDeleted && !selected && plain && quote && (
@@ -571,6 +637,9 @@ const makeStyles = (p: Palette) =>
     chipText: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
     chipCount: { color: p.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
     chipTextOn: { color: p.bg },
+    hero: { flexDirection: 'row', gap: 18, marginHorizontal: SIDE, marginTop: 24 },
+    heroCover: { borderRadius: 6, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
+    heroTitle: { color: p.text, fontSize: 24, fontWeight: '800', lineHeight: 28, marginTop: 6, letterSpacing: -0.5 },
     current: { flexDirection: 'row', gap: 16, marginHorizontal: SIDE, marginTop: 22, paddingBottom: 22, borderBottomWidth: 1, borderBottomColor: p.separator },
     currentText: { flex: 1, paddingTop: 2 },
     currentLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -579,15 +648,16 @@ const makeStyles = (p: Palette) =>
     bar: { height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden', marginTop: 14 },
     barFill: { height: 3, borderRadius: 2, backgroundColor: p.accent },
     meta: { color: p.textSecondary, fontSize: 13, marginTop: 6, fontVariant: ['tabular-nums'] },
+    metaToday: { color: p.textSecondary, fontSize: 13, marginTop: 2, fontVariant: ['tabular-nums'] },
     done: { color: p.success },
-    goalBox: { marginHorizontal: SIDE, marginTop: 18, gap: 7 },
-    goalHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    goalLabel: { flex: 1, color: p.text, fontSize: 13, fontWeight: '600' },
-    goalStreak: { color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
-    goalTrack: { height: 4, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden' },
-    goalFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
+    goalOuter: { marginHorizontal: SIDE, marginTop: 26, gap: 8 },
+    goalCapsule: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 999, paddingHorizontal: 20, minHeight: 56 },
+    goalLabel: { color: p.text, fontSize: 17, fontWeight: '700' },
+    goalTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: p.scheme === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.1)', overflow: 'hidden' },
+    goalFill: { height: 6, borderRadius: 3, backgroundColor: p.rating },
     goalMet: { backgroundColor: p.success },
-    goalText: { color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
+    goalText: { color: p.textSecondary, fontSize: 15, fontVariant: ['tabular-nums'] },
+    goalCaption: { color: p.textSecondary, fontSize: 13, paddingHorizontal: 20 },
     rating: { color: p.rating, fontWeight: '800' },
     tags: { color: p.link },
     quoteStrip: { marginHorizontal: SIDE, paddingTop: 20 },
@@ -596,9 +666,10 @@ const makeStyles = (p: Palette) =>
     quoteFrom: { flex: 1, color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     quoteAll: { color: p.link, fontSize: 13, fontWeight: '600' },
     clockBand: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: p.bg },
-    actRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+    actRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 },
     listenBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
-    carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9 },
+    carryOn: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 20, minHeight: 44 },
+    carryOnSmall: { paddingHorizontal: 16, minHeight: 40 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: SIDE, marginTop: 30, marginBottom: 4, paddingTop: 12, borderTopWidth: 2, borderTopColor: p.text },
     section: { flex: 1, color: p.text, fontSize: 20, fontWeight: '800' },

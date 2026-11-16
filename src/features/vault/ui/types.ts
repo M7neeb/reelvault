@@ -167,6 +167,8 @@ export type ViewOptions = {
   corners: import('./paletteMath').CornerKey;
   /** A thin line around cards. */
   outlined: boolean;
+  /** Pages built around one picture (a book, an audiobook, a poster) take their background from it. */
+  artwork: boolean;
   /** The whole app turns with the phone, not only the player. */
   rotate: boolean;
 };
@@ -189,6 +191,7 @@ export const DEFAULT_VIEW_OPTIONS: ViewOptions = {
   glass: 'regular',
   corners: 'standard',
   outlined: false,
+  artwork: true,
   rotate: false,
 };
 

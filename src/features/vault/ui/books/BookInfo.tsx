@@ -20,6 +20,9 @@ import { Modal } from '../screen';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { AudioUiItem } from '../audio/audioTypes';
 import { AudiobookPart } from './BookAudio';
+import Ambient from '../Ambient';
+import IconButton from '../IconButton';
+import { PressableScale } from '../motion';
 import { BookCover } from './BooksScreen';
 import type { BookActions, BookUi } from './bookTypes';
 
@@ -142,19 +145,17 @@ export default function BookInfo({
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.screen}>
+        <Ambient uri={book.coverUri} height={560} />
         <View style={styles.header}>
-          <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-            <Icon name="close" size={15} color={p.icon} weight="bold" />
-          </TouchableOpacity>
+          <IconButton icon="close" size={40} label="Close" onPress={onClose} />
           <View style={{ flex: 1 }} />
-          {audiobook && onListen && (
-            <TouchableOpacity style={[styles.circle, { width: 36, height: 36, borderRadius: 18, marginRight: 10 }]} onPress={() => onListen('auto')} accessibilityLabel="Listen to the audiobook">
-              <Icon name="headphones" size={17} color={p.icon} />
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.readBtn} onPress={() => onRead()}>
-            <Text style={styles.readText}>{isStarted(book) && !book.finishedAt ? 'Carry on' : book.finishedAt ? 'Read again' : 'Start reading'}</Text>
-          </TouchableOpacity>
+          {audiobook && onListen && <IconButton icon="headphones" size={40} label="Listen to the audiobook" onPress={() => onListen('auto')} style={{ marginRight: 10 }} />}
+          <PressableScale style={styles.readBtn} onPress={() => onRead()} accessibilityRole="button">
+            <Icon name="play" size={12} color={p.bg} />
+            <Text style={styles.readText} maxFontSizeMultiplier={1.3}>
+              {isStarted(book) && !book.finishedAt ? 'Carry on' : book.finishedAt ? 'Read again' : 'Start reading'}
+            </Text>
+          </PressableScale>
         </View>
 
         <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 40 }]} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
@@ -396,7 +397,7 @@ const makeStyles = (p: Palette) =>
     screen: { flex: 1, backgroundColor: p.bg },
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
     circle: { width: 34, height: 34, borderRadius: 17, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
-    readBtn: { backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, height: 36, justifyContent: 'center' },
+    readBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, minHeight: 40 },
     readText: { color: p.bg, fontSize: 15, fontWeight: '700' },
     body: { paddingHorizontal: 20, paddingTop: 10 },
     top: { flexDirection: 'row', gap: 18 },

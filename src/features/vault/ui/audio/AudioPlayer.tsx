@@ -20,6 +20,7 @@ import RatingPicker from '../RatingPicker';
 import { Modal } from '../screen';
 import { Segment, SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
+import Ambient from '../Ambient';
 import AudioCover from './AudioCover';
 import { AudioPhotos } from './AudioPhotos';
 import type { AudioActions, AudioBookmark, AudioUiItem } from './audioTypes';
@@ -158,6 +159,7 @@ export function AudioPlayerScreen({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={[styles.screen, { paddingTop: insets.top + 4, paddingBottom: insets.bottom + 10 }]}>
+        <Ambient uri={item.coverSource} />
         <View style={styles.top}>
           <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close the player">
             <Icon name="down" size={16} color={p.icon} weight="bold" />
@@ -452,19 +454,19 @@ const makeStyles = (p: Palette) =>
     screen: { flex: 1, backgroundColor: p.bg },
     top: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 8, paddingBottom: 8 },
     topTitle: { flex: 1, color: p.textSecondary, fontSize: 14, fontWeight: '700', textAlign: 'center' },
-    circle: { width: 36, height: 36, borderRadius: 18, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    circle: { width: 36, height: 36, borderRadius: 18, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
     bottom: { paddingHorizontal: 22, gap: 10, paddingTop: 10 },
     titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     title: { color: p.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.4 },
     sub: { color: p.textSecondary, fontSize: 14 },
-    rateBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 12, height: 36 },
+    rateBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 12, height: 36 },
     rateText: { color: p.text, fontSize: 15, fontWeight: '800' },
-    chapter: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+    chapter: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
     chapterText: { flex: 1, color: p.text, fontSize: 14, fontWeight: '600' },
     chapterLeft: { color: p.textSecondary, fontSize: 12 },
     error: { color: p.danger, fontSize: 13 },
     scrub: { height: 28, justifyContent: 'center' },
-    scrubTrack: { height: 5, borderRadius: 3, backgroundColor: p.card, overflow: 'hidden' },
+    scrubTrack: { height: 5, borderRadius: 3, backgroundColor: p.elevated, overflow: 'hidden' },
     scrubFill: { height: 5, backgroundColor: p.text },
     scrubTick: { position: 'absolute', top: 0, width: 2, height: 5, marginLeft: -1, backgroundColor: p.bg, opacity: 0.8 },
     scrubKnob: { position: 'absolute', width: 14, height: 14, borderRadius: 7, marginLeft: -7, backgroundColor: p.text },
@@ -474,11 +476,11 @@ const makeStyles = (p: Palette) =>
     controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, paddingVertical: 4 },
     play: { width: 74, height: 74, borderRadius: 37, backgroundColor: p.text, alignItems: 'center', justifyContent: 'center' },
     tools: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-    tool: { flex: 1, alignItems: 'center', gap: 4, backgroundColor: p.card, borderRadius: 14, paddingVertical: 9 },
+    tool: { flex: 1, alignItems: 'center', gap: 4, backgroundColor: p.elevated, borderRadius: 14, paddingVertical: 9 },
     toolBig: { color: p.text, fontSize: 16, fontWeight: '800' },
     toolLabel: { color: p.textSecondary, fontSize: 11, fontWeight: '700' },
     favRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 10 },
-    fav: { minWidth: 58, alignItems: 'center', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.card },
+    fav: { minWidth: 58, alignItems: 'center', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.elevated },
     favOn: { backgroundColor: p.accent },
     favText: { color: p.text, fontSize: 13, fontWeight: '800', fontVariant: ['tabular-nums'] },
     favTextOn: { color: '#fff' },

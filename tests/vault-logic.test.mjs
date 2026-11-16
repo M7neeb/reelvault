@@ -134,6 +134,7 @@ const DEFAULTS = {
   glass: 'regular',
   corners: 'standard',
   outlined: false,
+  artwork: true,
   rotate: false,
 };
 

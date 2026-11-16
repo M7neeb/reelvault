@@ -66,6 +66,8 @@ export type Palette = {
   glass?: GlassKey;
   corners?: CornerKey;
   outlined?: boolean;
+  /** Settings → Personalise: backgrounds taken from the artwork on pages built around one picture. */
+  art?: boolean;
 };
 
 /** The original ReelVault / HashPhotos dark look. */
@@ -190,7 +192,7 @@ export function rgbOf(hex: string): string {
  */
 export function themeFor(
   scheme: Scheme,
-  o: { accent: string | null; colors?: ColorSet; videoColor?: string | null; font?: FontKey; glass?: GlassKey; corners?: CornerKey; outlined?: boolean }
+  o: { accent: string | null; colors?: ColorSet; videoColor?: string | null; font?: FontKey; glass?: GlassKey; corners?: CornerKey; outlined?: boolean; artwork?: boolean }
 ): Palette {
   let p = paletteFor(scheme);
   const tint = o.colors === 'video' ? (o.videoColor ?? null) : (COLOR_SETS.find((c) => c.key === o.colors)?.color ?? null);
@@ -199,7 +201,7 @@ export function themeFor(
   const font = FONTS.find((f) => f.key === o.font)?.family ?? null;
   const corners = o.corners ?? 'standard';
   const outlined = !!o.outlined;
-  return { ...p, font, glass: o.glass ?? 'regular', corners, outlined, key: [scheme, p.bg, p.accent, font ?? '', corners, outlined ? 1 : 0].join('|') };
+  return { ...p, font, glass: o.glass ?? 'regular', corners, outlined, art: o.artwork ?? true, key: [scheme, p.bg, p.accent, font ?? '', corners, outlined ? 1 : 0].join('|') };
 }
 
 /** The palette with your accent colour (Settings → Personalise); null keeps the default blue. */
