@@ -12,9 +12,10 @@ const sod = (t: number) => {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 };
 
-/** 0 switches a goal off. */
-export type BookGoals = { dailyMin: number; yearBooks: number };
-export const NO_GOALS: BookGoals = { dailyMin: 0, yearBooks: 0 };
+/** 0 switches a goal off. `remindAt`: hour of the evening reminder, 0 = none. */
+export type BookGoals = { dailyMin: number; yearBooks: number; remindAt: number };
+export const NO_GOALS: BookGoals = { dailyMin: 0, yearBooks: 0, remindAt: 0 };
+export const REMIND_HOURS = [0, 18, 19, 20, 21, 22];
 export const DAILY_STEPS = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
 export const MAX_YEAR_BOOKS = 200;
 
@@ -25,6 +26,7 @@ export function parseGoals(json: string | null): BookGoals {
     return {
       dailyMin: DAILY_STEPS.includes(g?.dailyMin) ? g.dailyMin : 0,
       yearBooks: Number.isFinite(year) ? Math.min(MAX_YEAR_BOOKS, Math.max(0, year)) : 0,
+      remindAt: REMIND_HOURS.includes(g?.remindAt) ? g.remindAt : 0,
     };
   } catch {
     return NO_GOALS;
@@ -129,4 +131,27 @@ export function tidyQuote(text: string): string {
 /** What goes to the share sheet when a picture is not possible. */
 export function quoteAsText(q: Pick<Quote, 'text' | 'title' | 'author'>): string {
   return `“${tidyQuote(q.text)}”\n${q.author ? `${q.author}, ` : ''}${q.title}`;
+}
+
+/** The next reminder hour up or down the list (0 = off). */
+export function stepRemind(now: number, dir: 1 | -1): number {
+  const at = REMIND_HOURS.indexOf(now);
+  return REMIND_HOURS[Math.min(REMIND_HOURS.length - 1, Math.max(0, (at < 0 ? 0 : at) + dir))];
+}
+
+/**
+ * When to remind you to read, for the next week: at the chosen hour on each day,
+ * but not today once the goal is reached or the hour has passed. Planned again
+ * whenever your reading changes, so a day you reach the goal drops out.
+ */
+export function reminderTimes(goals: Pick<BookGoals, 'dailyMin' | 'remindAt'>, metToday: boolean, now: number, days = 7): number[] {
+  if (goals.dailyMin <= 0 || goals.remindAt <= 0) return [];
+  const d = new Date(now);
+  const out: number[] = [];
+  for (let i = 0; i < days; i++) {
+    const at = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, goals.remindAt, 0).getTime();
+    if (i === 0 && (metToday || at <= now)) continue;
+    out.push(at);
+  }
+  return out;
 }

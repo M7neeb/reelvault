@@ -4,6 +4,8 @@
  * Pure: no React, no native modules (tested in Node).
  */
 
+import type { BookRead } from './bookLogic.ts';
+
 type BookLike = { id: string; title: string | null; filename: string; author: string | null };
 type AudioLike = { id: string; title: string | null; filename: string; author: string | null; durationMs: number | null; tracks: { durationMs: number | null }[] };
 
@@ -203,4 +205,31 @@ export function listenAlongFrom(
     if (Math.abs(g - saved) <= total * 0.1) return null;
   }
   return guess;
+}
+
+/**
+ * Time spent listening to a book's audiobook, as reading time for that book (for the
+ * daily goal, today's minutes and the streak). Listening while reading along is already
+ * counted as reading, so only the minutes outside that book's reading sittings are added.
+ */
+export function listeningAsReads(plays: { itemId: string; startedAt: number; listenedMs: number }[], links: AudioLinks, reads: BookRead[]): BookRead[] {
+  const bookOf = new Map(Object.entries(links).map(([book, audio]) => [audio, book]));
+  const out: BookRead[] = [];
+  for (const pl of plays) {
+    const bookId = bookOf.get(pl.itemId);
+    if (!bookId || pl.listenedMs <= 0) continue;
+    const start = pl.startedAt;
+    const end = start + pl.listenedMs;
+    let overlap = 0;
+    for (const r of reads) if (r.bookId === bookId) overlap += Math.max(0, Math.min(end, r.endedAt) - Math.max(start, r.startedAt));
+    const ms = pl.listenedMs - Math.min(pl.listenedMs, overlap);
+    if (ms >= 1000) out.push({ bookId, startedAt: start, endedAt: end, ms, from: 0, to: 0, listened: true });
+  }
+  return out;
+}
+
+/** The text chapter that is the same as audio chapter `audioIndex` (the other way round from matchingAudioChapter). */
+export function matchingTextChapter(textTitles: string[], audioIndex: number, audio: AudioChapter[]): number | null {
+  for (let i = 0; i < textTitles.length; i++) if (matchingAudioChapter(textTitles, i, audio) === audioIndex) return i;
+  return null;
 }

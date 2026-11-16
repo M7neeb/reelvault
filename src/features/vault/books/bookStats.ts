@@ -33,6 +33,38 @@ export function todayByBook(reads: BookRead[], now: number): Map<string, number>
   return out;
 }
 
+export type BookDay = { day: number; readMs: number; listenMs: number; from: number | null; to: number | null };
+
+/**
+ * One book's time: today, the last seven days, all of it, and day by day
+ * (newest first), with how far the reading took you that day.
+ */
+export function bookHistory(sittings: BookRead[], bookId: string, now: number, maxDays = 14): { todayMs: number; weekMs: number; totalMs: number; days: BookDay[] } {
+  const today = sod(now);
+  const weekFrom = sod(today - 6 * DAY + DAY / 2);
+  const byDay = new Map<number, BookDay>();
+  let todayMs = 0;
+  let weekMs = 0;
+  let totalMs = 0;
+  for (const r of sittings) {
+    if (r.bookId !== bookId || r.ms <= 0) continue;
+    const d = dayKey(r.startedAt);
+    totalMs += r.ms;
+    if (d === today) todayMs += r.ms;
+    if (d >= weekFrom) weekMs += r.ms;
+    const day = byDay.get(d) ?? { day: d, readMs: 0, listenMs: 0, from: null, to: null };
+    if (r.listened) day.listenMs += r.ms;
+    else {
+      day.readMs += r.ms;
+      day.from = day.from === null ? r.from : Math.min(day.from, r.from);
+      day.to = day.to === null ? r.to : Math.max(day.to, r.to);
+    }
+    byDay.set(d, day);
+  }
+  const days = [...byDay.values()].sort((a, b) => b.day - a.day).slice(0, maxDays);
+  return { todayMs, weekMs, totalMs, days };
+}
+
 /** A day counts towards a streak with at least a minute of reading. */
 const MIN_DAY_MS = 60_000;
 

@@ -74,7 +74,8 @@ export type BookMark = { id: number; bookId: string; kind: 'bookmark' | 'highlig
 export type BookPlace = { chapter: number; block: number; chapterFrac: number };
 
 /** One sitting with a book: when, how long you read, and how far through the book it took you. */
-export type BookRead = { bookId: string; startedAt: number; endedAt: number; ms: number; from: number; to: number };
+/** A sitting with a book. `listened`: time with its audiobook, not the text (no progress then). */
+export type BookRead = { bookId: string; startedAt: number; endedAt: number; ms: number; from: number; to: number; listened?: boolean };
 
 /** Saves closer together than this are the same sitting. */
 export const SESSION_GAP_MS = 10 * 60_000;

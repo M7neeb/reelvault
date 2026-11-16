@@ -1,17 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { dayGoal, daysMet, matchesQuote, parseGoals, quoteAsText, quoteOfDay, quoteSize, quotesOf, stepDaily, tidyQuote, yearGoal } from '../src/features/vault/books/bookGoals.ts';
+import { dayGoal, daysMet, reminderTimes, stepRemind, matchesQuote, parseGoals, quoteAsText, quoteOfDay, quoteSize, quotesOf, stepDaily, tidyQuote, yearGoal } from '../src/features/vault/books/bookGoals.ts';
 
 const MIN = 60_000;
 const at = (y, m, d, h = 12) => new Date(y, m, d, h).getTime();
 
 test('goals are read back safely', () => {
-  assert.deepEqual(parseGoals(null), { dailyMin: 0, yearBooks: 0 });
-  assert.deepEqual(parseGoals('{"dailyMin":20,"yearBooks":12}'), { dailyMin: 20, yearBooks: 12 });
-  assert.deepEqual(parseGoals('{"dailyMin":7,"yearBooks":-3}'), { dailyMin: 0, yearBooks: 0 });
-  assert.deepEqual(parseGoals('{"dailyMin":"20","yearBooks":9999}'), { dailyMin: 0, yearBooks: 200 });
-  assert.deepEqual(parseGoals('not json'), { dailyMin: 0, yearBooks: 0 });
+  assert.deepEqual(parseGoals(null), { dailyMin: 0, yearBooks: 0, remindAt: 0 });
+  assert.deepEqual(parseGoals('{"dailyMin":20,"yearBooks":12}'), { dailyMin: 20, yearBooks: 12, remindAt: 0 });
+  assert.deepEqual(parseGoals('{"dailyMin":7,"yearBooks":-3}'), { dailyMin: 0, yearBooks: 0, remindAt: 0 });
+  assert.deepEqual(parseGoals('{"dailyMin":"20","yearBooks":9999}'), { dailyMin: 0, yearBooks: 200, remindAt: 0 });
+  assert.deepEqual(parseGoals('not json'), { dailyMin: 0, yearBooks: 0, remindAt: 0 });
+  assert.equal(parseGoals('{"dailyMin":20,"remindAt":20}').remindAt, 20);
+  assert.equal(parseGoals('{"dailyMin":20,"remindAt":3}').remindAt, 0);
 });
 
 test('the daily goal steps up and down and stops at the ends', () => {
@@ -101,4 +103,22 @@ test('a quote is tidied and sized for its card', () => {
   assert.ok(quoteSize('x'.repeat(300)).size > quoteSize('x'.repeat(900)).size);
   assert.equal(quoteAsText({ text: '"Beauty will save the world."', title: 'The Idiot', author: 'Fyodor Dostoevsky' }), '“Beauty will save the world.”\nFyodor Dostoevsky, The Idiot');
   assert.equal(quoteAsText({ text: 'Beauty', title: 'The Idiot', author: null }), '“Beauty”\nThe Idiot');
+});
+
+test('the reading reminder: each evening at the chosen hour, but not today once the goal is met', () => {
+  const now = new Date(2026, 10, 16, 15, 0).getTime();
+  const at = (d, h) => new Date(2026, 10, d, h, 0).getTime();
+  assert.deepEqual(reminderTimes({ dailyMin: 20, remindAt: 0 }, false, now), []);
+  assert.deepEqual(reminderTimes({ dailyMin: 0, remindAt: 20 }, false, now), []);
+  const all = reminderTimes({ dailyMin: 20, remindAt: 20 }, false, now);
+  assert.equal(all.length, 7);
+  assert.equal(all[0], at(16, 20));
+  assert.equal(all[6], at(22, 20));
+  // Goal reached today: starts tomorrow.
+  assert.equal(reminderTimes({ dailyMin: 20, remindAt: 20 }, true, now)[0], at(17, 20));
+  // Already past 20:00: starts tomorrow.
+  assert.equal(reminderTimes({ dailyMin: 20, remindAt: 20 }, false, at(16, 21))[0], at(17, 20));
+  assert.equal(stepRemind(0, 1), 18);
+  assert.equal(stepRemind(18, -1), 0);
+  assert.equal(stepRemind(22, 1), 22);
 });

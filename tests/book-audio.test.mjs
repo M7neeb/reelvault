@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { audioDoneFrac, audioLength, audioOf, chapterKey, listenAlongFrom, matchingAudioChapter, nextSpeed, newAudio, parseAudioLinks, placeInAudio, suggestAudio, withAudioLink } from '../src/features/vault/books/bookAudio.ts';
+import { audioDoneFrac, audioLength, audioOf, chapterKey, listenAlongFrom, listeningAsReads, matchingAudioChapter, matchingTextChapter, nextSpeed, newAudio, parseAudioLinks, placeInAudio, suggestAudio, withAudioLink } from '../src/features/vault/books/bookAudio.ts';
 
 const MIN = 60_000;
 const a = (id, title, over = {}) => ({ id, title, filename: `${id}.m4b`, author: null, durationMs: null, tracks: [], ...over });
@@ -141,4 +141,29 @@ test('a few seconds of audio do not count as having listened', () => {
   const plain = [{ durationMs: 600 * MIN }];
   const a = { tracks: plain, lastPlayedAt: 5, positionTrack: 0, positionMs: 10_000, finishedAt: null };
   assert.deepEqual(listenAlongFrom(a, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.4 }), { track: 0, ms: 240 * MIN - 15_000 });
+});
+
+test('listening to a book counts as time with it, but reading along is not counted twice', () => {
+  const links = { comedy: 'aud-comedy' };
+  const reads = [{ bookId: 'comedy', startedAt: 1000 * MIN, endedAt: 1030 * MIN, ms: 30 * MIN, from: 0, to: 0.1 }];
+  const plays = [
+    // 20 minutes of it while the book was open and moving: already counted.
+    { itemId: 'aud-comedy', startedAt: 1005 * MIN, listenedMs: 20 * MIN },
+    // 40 minutes on a walk, well after the reading.
+    { itemId: 'aud-comedy', startedAt: 1100 * MIN, listenedMs: 40 * MIN },
+    // Half inside, half after.
+    { itemId: 'aud-comedy', startedAt: 1020 * MIN, listenedMs: 20 * MIN },
+    // Another audiobook, not linked to a book.
+    { itemId: 'aud-other', startedAt: 1100 * MIN, listenedMs: 60 * MIN },
+  ];
+  const out = listeningAsReads(plays, links, reads);
+  assert.deepEqual(out.map((r) => [r.bookId, r.ms / MIN]), [['comedy', 40], ['comedy', 10]]);
+  assert.deepEqual(listeningAsReads(plays, {}, reads), []);
+});
+
+test('the audio moving on to a canto finds that canto in the text', () => {
+  assert.equal(matchingTextChapter(textTitles, 4, audioChapters), 5); // Inferno V
+  assert.equal(matchingTextChapter(textTitles, 15, audioChapters), 16); // Purgatorio VI
+  assert.equal(matchingTextChapter(textTitles, 99, audioChapters), null);
+  assert.equal(matchingTextChapter(textTitles, 15, audioChapters.slice(0, 10)), null);
 });

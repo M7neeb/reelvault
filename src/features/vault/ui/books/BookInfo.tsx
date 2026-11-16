@@ -10,8 +10,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BOOK_STATUSES, displayTitle, fmtProgress, isStarted, progressOf, statusOf, type BookMark } from '../../books/bookLogic';
-import { fmtTime } from '../../books/bookStats';
+import { BOOK_STATUSES, displayTitle, fmtProgress, isStarted, progressOf, statusOf, type BookMark, type BookRead } from '../../books/bookLogic';
+import { bookHistory, fmtTime } from '../../books/bookStats';
 import { fmtSize } from '../format';
 import Icon from '../Icon';
 import { OptionsSheet, PromptSheet } from '../prompts';
@@ -39,6 +39,17 @@ const plainText = (s: string) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+const fmtPct = (f: number) => `${Math.round(f * 100)}%`;
+const DAY_MS = 86_400_000;
+const dayName = (day: number, now: number) => {
+  const today = new Date(now);
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  if (day >= t) return 'Today';
+  if (day >= t - DAY_MS - 3_600_000) return 'Yesterday';
+  const d = new Date(day);
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+};
+
 type Sheet = 'rate' | 'status' | 'tag' | 'cover' | 'title' | 'author' | null;
 
 export default function BookInfo({
@@ -56,6 +67,7 @@ export default function BookInfo({
   onListen,
   onLinkAudio,
   onImportAudio,
+  sittings = [],
 }: {
   book: BookUi;
   actions: BookActions;
@@ -74,12 +86,17 @@ export default function BookInfo({
   onListen?: (from: 'audio' | 'book' | 'auto') => void;
   onLinkAudio?: (audioId: string | null) => void;
   onImportAudio?: () => void;
+  /** Reading and listening sittings (any book: this one is picked out). */
+  sittings?: BookRead[];
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const [sheetOpen, setSheet] = useState<Sheet>(null);
   const [marks, setMarks] = useState<BookMark[]>(initialMarks ?? []);
+  const [now] = useState(() => Date.now());
+  const history = useMemo(() => bookHistory(sittings, book.id, now), [sittings, book.id, now]);
+  const [allDays, setAllDays] = useState(false);
   const [notes, setNotes] = useState(book.notes ?? '');
   const [markFor, setMarkFor] = useState<BookMark | null>(null);
   const [noteFor, setNoteFor] = useState<BookMark | null>(null);
@@ -177,6 +194,48 @@ export default function BookInfo({
               onLink={onLinkAudio}
               onImport={onImportAudio}
             />
+          )}
+
+          {history.totalMs >= 60_000 && (
+            <>
+              <Text style={styles.label}>Your time with it</Text>
+              <View style={styles.figures}>
+                {[
+                  { n: history.todayMs, label: 'Today' },
+                  { n: history.weekMs, label: 'Last 7 days' },
+                  { n: history.totalMs, label: 'In all' },
+                ].map((f) => (
+                  <View key={f.label} style={styles.figure}>
+                    <Text style={styles.figureNum}>{f.n >= 60_000 ? fmtTime(f.n) : '-'}</Text>
+                    <Text style={styles.figureLabel}>{f.label}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.days}>
+                {(allDays ? history.days : history.days.slice(0, 5)).map((d) => (
+                  <View key={d.day} style={styles.dayRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.dayName}>{dayName(d.day, now)}</Text>
+                      <Text style={styles.dayDetail} numberOfLines={1}>
+                        {[
+                          d.from !== null && d.to !== null && Math.round(d.to * 100) > Math.round(d.from * 100) ? `${fmtPct(d.from)} to ${fmtPct(d.to)}` : null,
+                          d.readMs >= 60_000 && d.listenMs >= 60_000 ? `${fmtTime(d.readMs)} reading` : null,
+                          d.listenMs >= 60_000 ? `${fmtTime(d.listenMs)} listening` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'Reading'}
+                      </Text>
+                    </View>
+                    <Text style={styles.dayTime}>{fmtTime(d.readMs + d.listenMs)}</Text>
+                  </View>
+                ))}
+                {history.days.length > 5 && (
+                  <TouchableOpacity onPress={() => setAllDays((x) => !x)} style={styles.dayMore}>
+                    <Text style={styles.link}>{allDays ? 'Fewer days' : `Show ${history.days.length - 5} more days`}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </>
           )}
 
           <Text style={styles.label}>Keywords</Text>
@@ -344,6 +403,16 @@ const makeStyles = (p: Palette) =>
     pill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 16, height: 38 },
     pillText: { color: p.text, fontSize: 15, fontWeight: '700' },
     label: { color: p.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 26, marginBottom: 10 },
+    figures: { flexDirection: 'row', gap: 10 },
+    figure: { flex: 1, gap: 2 },
+    figureNum: { color: p.text, fontSize: 20, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    figureLabel: { color: p.textSecondary, fontSize: 12 },
+    days: { marginTop: 14, borderTopWidth: 1, borderTopColor: p.separator },
+    dayRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: p.separator },
+    dayName: { color: p.text, fontSize: 15, fontWeight: '600' },
+    dayDetail: { color: p.textSecondary, fontSize: 13, marginTop: 2, fontVariant: ['tabular-nums'] },
+    dayTime: { color: p.text, fontSize: 15, fontVariant: ['tabular-nums'] },
+    dayMore: { paddingVertical: 12 },
     tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     tag: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 12, height: 32 },
     tagAdd: { backgroundColor: 'transparent', borderWidth: 1, borderColor: p.border },

@@ -6,12 +6,13 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { dayGoal, daysMet, stepDaily, yearGoal, MAX_YEAR_BOOKS, type BookGoals } from '../../books/bookGoals';
+import { dayGoal, daysMet, stepDaily, stepRemind, yearGoal, MAX_YEAR_BOOKS, type BookGoals } from '../../books/bookGoals';
+import { allowReadReminder } from '../../books/bookReminder';
 import { displayTitle, type BookRead } from '../../books/bookLogic';
-import { bookStats, bookYears, fmtTime } from '../../books/bookStats';
+import { bookStats, bookYears, fmtTime, streaks, todayByBook } from '../../books/bookStats';
 import { monthRangesOf, recentWeekRanges, yearRangeOf, type ReadRange } from '../../manga/mangaInsights';
 import Icon from '../Icon';
 import { Card } from '../insightParts';
@@ -27,7 +28,7 @@ import type { BookActions, BookUi } from './bookTypes';
 
 const DAY = 86_400_000;
 
-export default function BooksDashboard({ items, actions, goals, onOpen, onClose, initialReads }: { items: BookUi[]; actions: BookActions; goals: BookGoals; onOpen: (b: BookUi) => void; onClose: () => void; initialReads?: BookRead[] }) {
+export default function BooksDashboard({ items, actions, goals, onOpen, onClose, initialReads, listened = [] }: { items: BookUi[]; actions: BookActions; goals: BookGoals; onOpen: (b: BookUi) => void; onClose: () => void; initialReads?: BookRead[]; /** Audiobook time outside reading, for the goal and the streak. */ listened?: BookRead[] }) {
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -66,8 +67,17 @@ export default function BooksDashboard({ items, actions, goals, onOpen, onClose,
         return { key: `${r.kind}${r.start}`, label: r.label, line: fmtTime(ms), top: b ? displayTitle(b) : undefined, source: b?.coverUri ? { uri: b.coverUri } : null, onPress: () => setWrapped(r) };
       });
 
-  const daily = st ? dayGoal(st.todayMs, goals.dailyMin) : null;
-  const metDays = reads ? daysMet(reads, goals.dailyMin, now) : 0;
+  // The goal and the streak count listening to a book's audiobook too.
+  const goalReads = useMemo(() => (reads ? [...reads, ...listened] : null), [reads, listened]);
+  const goalToday = useMemo(() => {
+    const per = todayByBook(goalReads ?? [], now);
+    let ms = 0;
+    for (const b of items) ms += per.get(b.id) ?? 0;
+    return ms;
+  }, [goalReads, items, now]);
+  const run = useMemo(() => (goalReads ? streaks(goalReads, now) : { current: 0, best: 0 }), [goalReads, now]);
+  const daily = st ? dayGoal(goalToday, goals.dailyMin) : null;
+  const metDays = goalReads ? daysMet(goalReads, goals.dailyMin, now) : 0;
   const yearly = yearGoal(items, goals.yearBooks, now);
   const setGoals = (g: BookGoals) => void actions.setGoals(g).catch(() => undefined);
 
@@ -110,9 +120,9 @@ export default function BooksDashboard({ items, actions, goals, onOpen, onClose,
               </View>
               <View style={styles.tile}>
                 <Text style={styles.tileNum}>
-                  {st.streak} {st.streak === 1 ? 'day' : 'days'}
+                  {run.current} {run.current === 1 ? 'day' : 'days'}
                 </Text>
-                <Text style={styles.tileLabel}>Streak · best {st.bestStreak}</Text>
+                <Text style={styles.tileLabel}>Streak · best {run.best}</Text>
               </View>
               <View style={styles.tile}>
                 <Text style={styles.tileNum}>{st.finished}</Text>
@@ -142,6 +152,30 @@ export default function BooksDashboard({ items, actions, goals, onOpen, onClose,
                   </>
                 ) : (
                   <Text style={styles.goalLine}>No daily goal. Tap + to set the minutes you want to read each day.</Text>
+                )}
+                {goals.dailyMin > 0 && (
+                  <View style={[styles.goalHead, styles.remind]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.remindName}>Remind me</Text>
+                      <Text style={styles.goalLine}>{goals.remindAt ? `At ${goals.remindAt}:00 on days the goal isn't reached yet` : 'No reminder'}</Text>
+                    </View>
+                    <Stepper
+                      value={goals.remindAt ? `${goals.remindAt}:00` : 'Off'}
+                      name="reading reminder time"
+                      onLess={goals.remindAt > 0 ? () => setGoals({ ...goals, remindAt: stepRemind(goals.remindAt, -1) }) : undefined}
+                      onMore={
+                        stepRemind(goals.remindAt, 1) !== goals.remindAt
+                          ? () => {
+                              const next = { ...goals, remindAt: stepRemind(goals.remindAt, 1) };
+                              if (goals.remindAt > 0 || Platform.OS === 'web') return setGoals(next);
+                              allowReadReminder()
+                                .then((ok) => (ok ? setGoals(next) : Alert.alert('Notifications are off', 'Turn on notifications for ReelVault in the Settings app to get the reminder.')))
+                                .catch(() => undefined);
+                            }
+                          : undefined
+                      }
+                    />
+                  </View>
                 )}
               </View>
               <View style={[styles.goal, styles.goalNext]}>
@@ -276,6 +310,8 @@ function Stepper({ value, name, onLess, onMore }: { value: string; name: string;
 const makeStyles = (p: Palette) =>
   sheet({
     goal: { gap: 8 },
+    remind: { marginTop: 8 },
+    remindName: { color: p.text, fontSize: 15, fontWeight: '600' },
     goalNext: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: p.separator },
     goalHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
     goalName: { color: p.text, fontSize: 16, fontWeight: '700' },

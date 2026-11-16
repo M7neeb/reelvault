@@ -5,19 +5,20 @@
  * Presentational only (see the note at the top of types.ts).
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { AppState, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Platform, View } from 'react-native';
+import { planReadReminders } from '../../books/bookReminder';
 
-import { audioOf, listenAlongFrom, newAudio, suggestAudio } from '../../books/bookAudio';
-import { chaptersOf } from '../../audio/audioLogic';
-import { dayGoal, quoteOfDay, quotesOf } from '../../books/bookGoals';
+import { audioOf, listenAlongFrom, listeningAsReads, newAudio, suggestAudio } from '../../books/bookAudio';
+import { chaptersOf, type AudioPlay } from '../../audio/audioLogic';
+import { dayGoal, quoteOfDay, quotesOf, reminderTimes } from '../../books/bookGoals';
 import { chapterLabel, progressOf, shelfTags, type BookMark, type BookRead, type BookSort } from '../../books/bookLogic';
 import { pushJump } from '../../jump';
 import { AudioPlayerScreen, MiniPlayer } from '../audio/AudioPlayer';
 import type { AudioData, AudioUiItem } from '../audio/audioTypes';
 import { useAudioPlaybackOptional } from '../audio/playback';
 import { useTabBarSpace } from '../chrome';
-import { bookStats, todayByBook } from '../../books/bookStats';
+import { streaks, todayByBook } from '../../books/bookStats';
 import type { VideosMode } from '../overviewParts';
 import { afterModals } from '../screen';
 import BookInfo from './BookInfo';
@@ -69,8 +70,11 @@ export default function BooksSection({
     const sub = AppState.addEventListener('change', (st) => st === 'active' && setWoke((n) => n + 1));
     return () => sub.remove();
   }, []);
+  const loadedOnce = useRef(false);
   useEffect(() => {
-    if (away || !data.loaded) return;
+    // The first load happens even with a page already open (opened from Search).
+    if ((away && loadedOnce.current) || !data.loaded) return;
+    loadedOnce.current = true;
     let alive = true;
     setNow(Date.now());
     data.actions
@@ -95,6 +99,25 @@ export default function BooksSection({
   const audiobookOf = (bookId: string): AudioUiItem | null => audioOf(data.audioLinks, bookId, audioItems);
   const linkedIds = useMemo(() => new Set(Object.values(data.audioLinks)), [data.audioLinks]);
   const playingLinked = !!pb?.item && linkedIds.has(pb.item.id);
+
+  // Listening to a book's audiobook counts as time with that book; read again when it pauses.
+  const [plays, setPlays] = useState<AudioPlay[]>([]);
+  const isPlaying = !!pb?.playing;
+  useEffect(() => {
+    if (away || !audio || isPlaying) return;
+    let alive = true;
+    // The player writes the sitting as it pauses: give it a moment.
+    const t = setTimeout(() => {
+      audio.actions
+        .loadPlays()
+        .then((pl) => alive && setPlays(pl))
+        .catch(() => undefined);
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [away, woke, isPlaying, audio?.actions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startListening = (book: BookUi, from: 'audio' | 'book' | 'auto') => {
     const item = audiobookOf(book.id);
@@ -144,8 +167,22 @@ export default function BooksSection({
   const seen = useMemo(() => data.items.filter((b) => showPrivate || !b.isPrivate), [data.items, showPrivate]);
   const quotes = useMemo(() => quotesOf(marks, seen), [marks, seen]);
   const quote = useMemo(() => quoteOfDay(quotes, now), [quotes, now]);
-  const today = useMemo(() => dayGoal(bookStats(seen, reads, now).todayMs, data.goals.dailyMin), [seen, reads, now, data.goals.dailyMin]);
-  const readToday = useMemo(() => todayByBook(reads, now), [reads, now]);
+  const listened = useMemo(() => listeningAsReads(plays, data.audioLinks, reads), [plays, data.audioLinks, reads]);
+  const withListening = useMemo(() => [...reads, ...listened], [reads, listened]);
+  const readToday = useMemo(() => todayByBook(withListening, now), [withListening, now]);
+  const today = useMemo(() => {
+    let ms = 0;
+    for (const b of seen) ms += readToday.get(b.id) ?? 0;
+    return dayGoal(ms, data.goals.dailyMin);
+  }, [seen, readToday, data.goals.dailyMin]);
+  const streak = useMemo(() => streaks(withListening, now).current, [withListening, now]);
+
+  // The evening reminder: planned again as today's reading changes, and dropped for today once the goal is met.
+  const metToday = !!today?.met;
+  useEffect(() => {
+    if (!data.loaded || Platform.OS === 'web') return;
+    planReadReminders(reminderTimes(data.goals, metToday, Date.now()), data.goals.dailyMin).catch(() => undefined);
+  }, [data.loaded, metToday, data.goals, woke]);
 
   useEffect(() => {
     if (!openRequest) return;
@@ -179,6 +216,7 @@ export default function BooksSection({
         quoteCount={quotes.length}
         today={today}
         readToday={readToday}
+        streak={streak}
         listenable={linkedIds.size ? new Set(data.items.filter((b) => audiobookOf(b.id)).map((b) => b.id)) : undefined}
         onListen={(b) => {
           if (startListening(b, 'auto')) setPlayer(true);
@@ -191,6 +229,7 @@ export default function BooksSection({
           items={data.items.filter((b) => showPrivate || !b.isPrivate)}
           actions={data.actions}
           goals={data.goals}
+          listened={listened}
           onOpen={(b) => {
             setDash(false);
             afterModals(() => setReading({ id: b.id }));
@@ -236,6 +275,7 @@ export default function BooksSection({
           audioChoices={audioItems}
           audioPlaying={!!pb?.playing && !!pb.item && pb.item.id === audiobookOf(info.id)?.id}
           audioImporting={pendingLink?.bookId === info.id}
+          sittings={withListening}
           onListen={
             audio && pb
               ? (from) => {

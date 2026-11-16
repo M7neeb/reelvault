@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Alert, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,25 +57,40 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
         <Image source={{ uri: book.coverUri }} style={{ width, height }} contentFit="cover" transition={120} recyclingKey={book.coverUri} />
       </View>
     );
+  const cloth = clothFor(displayTitle(book) + (book.author ?? ''));
   // Too narrow to set a title without breaking words: the first letter stands in.
   if (width < 80)
     return (
-      <View style={[styles.cover, styles.plainCover, styles.plainSmall, { width, height, borderRadius: radius }]}>
+      <View style={[styles.cover, styles.plainSmall, { width, height, borderRadius: radius, backgroundColor: cloth }]}>
         <Text style={[styles.plainInitial, { fontSize: Math.round(width * 0.46) }]}>{displayTitle(book).replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase()}</Text>
       </View>
     );
+  const inset = Math.round(width * 0.06);
   return (
-    <View style={[styles.cover, styles.plainCover, { width, height, borderRadius: radius, padding: Math.max(6, width * 0.1) }]}>
-      <Text style={[styles.plainTitle, { fontSize: Math.max(9, width * 0.13), lineHeight: Math.max(11, width * 0.16) }]} numberOfLines={5}>
-        {displayTitle(book)}
-      </Text>
-      {width >= 80 && !!book.author && (
-        <Text style={[styles.plainAuthor, { fontSize: Math.max(8, width * 0.085) }]} numberOfLines={2}>
-          {book.author}
-        </Text>
-      )}
+    <View style={[styles.cover, { width, height, borderRadius: radius, backgroundColor: cloth }]}>
+      <View style={[styles.plainFrame, { margin: inset, padding: Math.round(width * 0.08) }]}>
+        <View>
+          <Text style={[styles.plainTitle, { fontSize: Math.max(10, width * 0.125), lineHeight: Math.max(12, width * 0.15) }]} numberOfLines={5}>
+            {displayTitle(book)}
+          </Text>
+          <View style={[styles.plainRule, { width: Math.round(width * 0.16), marginTop: Math.round(width * 0.06) }]} />
+        </View>
+        {!!book.author && (
+          <Text style={[styles.plainAuthor, { fontSize: Math.max(7, width * 0.06), letterSpacing: Math.max(0.5, width * 0.012) }]} numberOfLines={2}>
+            {book.author.toUpperCase()}
+          </Text>
+        )}
+      </View>
     </View>
   );
+}
+
+/** Book cloth: deep, slightly worn colours, so a shelf of covers without art still looks like books. */
+const CLOTHS = ['#6E2A2A', '#2F4A3A', '#22344F', '#8A6A2E', '#3E4A52', '#5A3B2E', '#2E5552', '#6B5A3A', '#4A2F38', '#3B4630'];
+function clothFor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return CLOTHS[Math.abs(h) % CLOTHS.length];
 }
 
 type Menu = 'more' | 'sort' | 'status' | 'tag' | 'rate' | 'newTag' | null;
@@ -101,6 +116,7 @@ export default function BooksScreen({
   quoteCount = 0,
   today = null,
   readToday,
+  streak = 0,
   listenable,
   onListen,
   bottomSpace = 0,
@@ -127,6 +143,8 @@ export default function BooksScreen({
   today?: DayGoal | null;
   /** Minutes read today, per book id. */
   readToday?: Map<string, number>;
+  /** Days in a row with some reading or listening. */
+  streak?: number;
   /** Books that have an audiobook. */
   listenable?: Set<string>;
   onListen?: (b: BookUi) => void;
@@ -264,15 +282,23 @@ export default function BooksScreen({
       )}
 
       {reading.length > 0 && today && (
-        <View style={styles.goalRow} accessibilityLabel={`Daily reading goal, all books: ${today.line}`}>
-          <Text style={styles.goalLabel}>Daily goal</Text>
+        <TouchableOpacity
+          style={styles.goalBox}
+          activeOpacity={0.7}
+          onPress={onDashboard}
+          accessibilityLabel={`Daily reading goal, all books: ${today.line}${streak > 1 ? `, ${streak} days in a row` : ''}. Opens your reading stats.`}>
+          <View style={styles.goalHead}>
+            <Text style={styles.goalLabel}>Daily goal</Text>
+            {streak > 1 && <Text style={styles.goalStreak}>{streak} days in a row</Text>}
+            <Icon name="forward" size={11} color={p.textMuted} />
+          </View>
           <View style={styles.goalTrack}>
             <View style={[styles.goalFill, today.met && styles.goalMet, { width: `${Math.round(today.ratio * 100)}%` }]} />
           </View>
           <Text style={[styles.goalText, today.met && styles.done]} numberOfLines={1}>
             {today.line}
           </Text>
-        </View>
+        </TouchableOpacity>
       )}
 
       {reading.map((current, n) => (
@@ -569,15 +595,17 @@ const makeStyles = (p: Palette) =>
     barFill: { height: 3, borderRadius: 2, backgroundColor: p.accent },
     meta: { color: p.textSecondary, fontSize: 13, marginTop: 6, fontVariant: ['tabular-nums'] },
     done: { color: p.success },
-    goalRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: SIDE, marginTop: 18 },
-    goalLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
-    goalTrack: { width: 44, height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden' },
-    goalFill: { height: 3, backgroundColor: p.accent },
+    goalBox: { marginHorizontal: SIDE, marginTop: 18, gap: 7 },
+    goalHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    goalLabel: { flex: 1, color: p.text, fontSize: 13, fontWeight: '600' },
+    goalStreak: { color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
+    goalTrack: { height: 4, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden' },
+    goalFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     goalMet: { backgroundColor: p.success },
-    goalText: { flex: 1, color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
+    goalText: { color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
     rating: { color: p.rating, fontWeight: '800' },
     tags: { color: p.link },
-    quoteStrip: { marginHorizontal: SIDE, paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: p.separator },
+    quoteStrip: { marginHorizontal: SIDE, paddingTop: 20 },
     quoteText: { color: p.textSoft, fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }), fontSize: 18, lineHeight: 27 },
     quoteFoot: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10 },
     quoteFrom: { flex: 1, color: p.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -587,7 +615,7 @@ const makeStyles = (p: Palette) =>
     listenBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
     carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
-    sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SIDE, marginTop: 22, marginBottom: 4 },
+    sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: SIDE, marginTop: 30, marginBottom: 4, paddingTop: 12, borderTopWidth: 2, borderTopColor: p.text },
     section: { flex: 1, color: p.text, fontSize: 20, fontWeight: '800' },
     sortText: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: SIDE, paddingVertical: 12 },
@@ -599,11 +627,12 @@ const makeStyles = (p: Palette) =>
     checkOn: { backgroundColor: p.accent, borderColor: p.accent },
     sep: { height: 1, backgroundColor: p.separator, marginLeft: SIDE + 52 + 14 },
     cover: { overflow: 'hidden', backgroundColor: p.tile },
-    plainCover: { backgroundColor: p.elevated, borderWidth: 1, borderColor: p.border, justifyContent: 'space-between' },
-    plainTitle: { color: p.text, fontWeight: '700' },
+    plainFrame: { flex: 1, justifyContent: 'space-between', borderWidth: StyleSheet.hairlineWidth * 2, borderColor: 'rgba(244,236,220,0.35)' },
+    plainTitle: { color: '#F4ECDC', fontWeight: '700', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
+    plainRule: { height: 1, backgroundColor: 'rgba(244,236,220,0.6)' },
     plainSmall: { alignItems: 'center', justifyContent: 'center' },
-    plainInitial: { color: p.textSecondary, fontWeight: '600', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
-    plainAuthor: { color: p.textSecondary },
+    plainInitial: { color: '#F4ECDC', fontWeight: '600', fontFamily: Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' }) },
+    plainAuthor: { color: 'rgba(244,236,220,0.8)', fontWeight: '600' },
     selectBar: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 18, padding: 8, borderWidth: 1, borderColor: p.border },
     selectBtn: { flex: 1, backgroundColor: p.card, borderRadius: 12, height: 38, alignItems: 'center', justifyContent: 'center' },
     selectBtnText: { color: p.text, fontSize: 15, fontWeight: '700' },

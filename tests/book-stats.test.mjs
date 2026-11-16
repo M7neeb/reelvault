@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bookStats, bookWrapped, bookYears, fmtTime, readerKind, streaks, todayByBook } from '../src/features/vault/books/bookStats.ts';
+import { bookStats, bookWrapped, bookYears, fmtTime, readerKind, streaks, todayByBook, bookHistory } from '../src/features/vault/books/bookStats.ts';
 
 const book = (id, over = {}) => ({
   id, folder: `books/${id}`, filename: `${id}.epub`, size: 1, title: id, author: null, language: null, description: null, cover: null,
@@ -90,4 +90,25 @@ test('time read today is kept per book, not given to whichever book is on top', 
   assert.equal(today.get('comedy'), 60 * 60_000);
   assert.equal(today.get('crime'), undefined);
   assert.equal(todayByBook([], now).size, 0);
+});
+
+test('a book page shows its own time: today, the last 7 days, in all, and day by day', () => {
+  const now = new Date(2026, 10, 16, 21, 0).getTime();
+  const at = (d, h) => new Date(2026, 10, d, h, 0).getTime();
+  const r = (bookId, d, h, min, from, to, listened) => ({ bookId, startedAt: at(d, h), endedAt: at(d, h) + min * 60_000, ms: min * 60_000, from, to, ...(listened ? { listened } : {}) });
+  const sittings = [
+    r('comedy', 16, 18, 40, 0.05, 0.07),
+    r('comedy', 16, 20, 20, 0.07, 0.08),
+    r('comedy', 16, 12, 30, 0, 0, true),
+    r('comedy', 12, 9, 25, 0.03, 0.05),
+    r('comedy', 1, 9, 60, 0, 0.03),
+    r('crime', 16, 10, 50, 0.04, 0.05),
+  ];
+  const h = bookHistory(sittings, 'comedy', now);
+  assert.equal(h.todayMs, 90 * 60_000);
+  assert.equal(h.weekMs, 115 * 60_000);
+  assert.equal(h.totalMs, 175 * 60_000);
+  assert.deepEqual(h.days[0], { day: new Date(2026, 10, 16).getTime(), readMs: 60 * 60_000, listenMs: 30 * 60_000, from: 0.05, to: 0.08 });
+  assert.equal(h.days.length, 3);
+  assert.equal(bookHistory(sittings, 'nothing', now).totalMs, 0);
 });

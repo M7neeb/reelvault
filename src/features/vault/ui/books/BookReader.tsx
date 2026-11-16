@@ -38,8 +38,8 @@ import {
 } from '../../books/bookLogic';
 import { tick } from '../haptics';
 import Icon from '../Icon';
-import { listenAlongFrom } from '../../books/bookAudio';
-import { chaptersOf } from '../../audio/audioLogic';
+import { listenAlongFrom, matchingTextChapter } from '../../books/bookAudio';
+import { chapterIndexAt, chaptersOf } from '../../audio/audioLogic';
 import { AudioPlayerScreen } from '../audio/AudioPlayer';
 import type { AudioData, AudioUiItem } from '../audio/audioTypes';
 import { useAudioPlaybackOptional } from '../audio/playback';
@@ -475,12 +475,25 @@ export default function BookReader({
   const pb = useAudioPlaybackOptional();
   const [audioFull, setAudioFull] = useState(false);
   const listening = !!audiobook && pb?.item?.id === audiobook.id;
+  const titles = useMemo(() => (opened ? opened.chapters.map((c, i) => chapterLabel(opened.toc, i, book.title, c.title)) : []), [opened, book.title]);
+  const audioChapters = useMemo(() => (audiobook ? chaptersOf(audiobook) : []), [audiobook]);
+  // The audio moves on to the next chapter: turn to it too, if the text was on the one it left.
+  const audioAt = listening && pb ? chapterIndexAt(audioChapters, pb.overall) : -1;
+  const lastAudioAt = useRef(-1);
+  useEffect(() => {
+    const was = lastAudioAt.current;
+    lastAudioAt.current = audioAt;
+    if (!pb?.playing || audioAt < 0 || was < 0 || was === audioAt) return;
+    const from = matchingTextChapter(titles, was, audioChapters);
+    const to = matchingTextChapter(titles, audioAt, audioChapters);
+    const here = shown?.index ?? chapter;
+    if (to !== null && from === here && to !== here) goChapter(to);
+  }, [audioAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const listen = () => {
     if (!pb || !audiobook) return;
     tick();
     if (listening) return pb.toggle();
-    const titles = opened ? opened.chapters.map((c, i) => chapterLabel(opened.toc, i, book.title, c.title)) : [];
-    const at = listenAlongFrom(audiobook, chaptersOf(audiobook), { titles, chapter: shown?.index ?? chapter, chapterFrac: fracOfBlock(topBlock, blocks.length), frac: progress });
+    const at = listenAlongFrom(audiobook, audioChapters, { titles, chapter: shown?.index ?? chapter, chapterFrac: fracOfBlock(topBlock, blocks.length), frac: progress });
     pb.open(audiobook, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
   };
   const isLast = !!opened && chapter >= opened.chapters.length - 1;
