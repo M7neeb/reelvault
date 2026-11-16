@@ -37,6 +37,7 @@ import { tick } from '../haptics';
 import Icon from '../Icon';
 import IconButton from '../IconButton';
 import { tidyQuote, type DayGoal, type Quote } from '../../books/bookGoals';
+import { fmtTime } from '../../books/bookStats';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
 import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
@@ -99,6 +100,7 @@ export default function BooksScreen({
   quote = null,
   quoteCount = 0,
   today = null,
+  readToday,
   listenable,
   onListen,
   bottomSpace = 0,
@@ -123,6 +125,8 @@ export default function BooksScreen({
   quoteCount?: number;
   /** Today against the daily reading goal, when one is set. */
   today?: DayGoal | null;
+  /** Minutes read today, per book id. */
+  readToday?: Map<string, number>;
   /** Books that have an audiobook. */
   listenable?: Set<string>;
   onListen?: (b: BookUi) => void;
@@ -259,6 +263,18 @@ export default function BooksScreen({
         </ScrollView>
       )}
 
+      {reading.length > 0 && today && (
+        <View style={styles.goalRow} accessibilityLabel={`Daily reading goal, all books: ${today.line}`}>
+          <Text style={styles.goalLabel}>Daily goal</Text>
+          <View style={styles.goalTrack}>
+            <View style={[styles.goalFill, today.met && styles.goalMet, { width: `${Math.round(today.ratio * 100)}%` }]} />
+          </View>
+          <Text style={[styles.goalText, today.met && styles.done]} numberOfLines={1}>
+            {today.line}
+          </Text>
+        </View>
+      )}
+
       {reading.map((current, n) => (
         <TouchableOpacity key={current.id} style={styles.current} activeOpacity={0.8} onPress={() => onOpen(current)} onLongPress={() => setMenuFor(current)} accessibilityLabel={`Carry on reading ${displayTitle(current)}`}>
           <BookCover book={current} width={104} />
@@ -282,7 +298,10 @@ export default function BooksScreen({
                 return m !== null ? ` · ${fmtLeft(m)}` : '';
               })()}
             </Text>
-            {n === 0 && today && <Text style={[styles.meta, today.met && styles.done]}>{today.line}</Text>}
+            {(() => {
+              const ms = readToday?.get(current.id) ?? 0;
+              return ms >= 60_000 ? <Text style={styles.meta}>{fmtTime(ms)} today</Text> : null;
+            })()}
             <View style={styles.actRow}>
               <View style={styles.carryOn}>
                 <Text style={styles.carryOnText}>Carry on</Text>
@@ -533,7 +552,7 @@ const makeStyles = (p: Palette) =>
     pillText: { color: p.text, fontSize: 15, fontWeight: '700' },
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
     status: { color: p.textSecondary, fontSize: 13, paddingHorizontal: SIDE, paddingTop: 10 },
-    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 14, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: SIDE, marginTop: 14, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12, height: 40 },
     searchInput: { flex: 1, color: p.text, fontSize: 16 },
     chips: { gap: 8, paddingHorizontal: SIDE, paddingTop: 12 },
     chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7 },
@@ -546,10 +565,16 @@ const makeStyles = (p: Palette) =>
     currentLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     currentTitle: { color: p.text, fontSize: 22, fontWeight: '700', lineHeight: 27, marginTop: 4, letterSpacing: -0.3 },
     author: { color: p.textSecondary, fontSize: 14, marginTop: 3 },
-    bar: { height: 3, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginTop: 14 },
+    bar: { height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden', marginTop: 14 },
     barFill: { height: 3, borderRadius: 2, backgroundColor: p.accent },
     meta: { color: p.textSecondary, fontSize: 13, marginTop: 6, fontVariant: ['tabular-nums'] },
     done: { color: p.success },
+    goalRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: SIDE, marginTop: 18 },
+    goalLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
+    goalTrack: { width: 44, height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden' },
+    goalFill: { height: 3, backgroundColor: p.accent },
+    goalMet: { backgroundColor: p.success },
+    goalText: { flex: 1, color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
     rating: { color: p.rating, fontWeight: '800' },
     tags: { color: p.link },
     quoteStrip: { marginHorizontal: SIDE, paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: p.separator },
@@ -559,7 +584,7 @@ const makeStyles = (p: Palette) =>
     quoteAll: { color: p.link, fontSize: 13, fontWeight: '600' },
     clockBand: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: p.bg },
     actRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
-    listenBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    listenBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
     carryOn: { alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9 },
     carryOnText: { color: p.bg, fontSize: 15, fontWeight: '700' },
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: SIDE, marginTop: 22, marginBottom: 4 },

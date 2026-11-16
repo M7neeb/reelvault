@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { audioDoneFrac, audioLength, audioOf, chapterKey, listenAlongFrom, listenFrom, matchingAudioChapter, nextSpeed, newAudio, parseAudioLinks, placeInAudio, suggestAudio, withAudioLink } from '../src/features/vault/books/bookAudio.ts';
+import { audioDoneFrac, audioLength, audioOf, chapterKey, listenAlongFrom, matchingAudioChapter, nextSpeed, newAudio, parseAudioLinks, placeInAudio, suggestAudio, withAudioLink } from '../src/features/vault/books/bookAudio.ts';
 
 const MIN = 60_000;
 const a = (id, title, over = {}) => ({ id, title, filename: `${id}.m4b`, author: null, durationMs: null, tracks: [], ...over });
@@ -67,14 +67,6 @@ test('how far through the audiobook you are', () => {
   assert.equal(audioDoneFrac({ durationMs: null, tracks: [], positionTrack: 0, positionMs: 5, finishedAt: null }), 0);
 });
 
-test('Listen starts at your place in the book until you have listened yourself', () => {
-  assert.equal(listenFrom({ lastPlayedAt: null, positionTrack: 0, positionMs: 0 }, 0.4), 'book');
-  assert.equal(listenFrom({ lastPlayedAt: null, positionTrack: 0, positionMs: 0 }, 0.01), 'audio');
-  assert.equal(listenFrom({ lastPlayedAt: 5, positionTrack: 0, positionMs: 10_000 }, 0.4), 'book');
-  assert.equal(listenFrom({ lastPlayedAt: 5, positionTrack: 2, positionMs: 0 }, 0.4), 'audio');
-  assert.equal(listenFrom({ lastPlayedAt: 5, positionTrack: 0, positionMs: 5 * MIN }, 0.4), 'audio');
-});
-
 test('the speed button goes round the list', () => {
   const speeds = [0.75, 1, 1.25, 1.5, 2];
   assert.equal(nextSpeed(1, speeds), 1.25);
@@ -137,4 +129,16 @@ test('no chapter names to go by: the audio keeps its own place while it is near 
   assert.deepEqual(listenAlongFrom(a, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.5 }), { track: 0, ms: 300 * MIN - 15_000 });
   // Never listened: from the text.
   assert.deepEqual(listenAlongFrom({ ...a, lastPlayedAt: null, positionMs: 0 }, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.2 }), { track: 0, ms: 120 * MIN - 15_000 });
+});
+
+test('listened but hardly read: the audio keeps its own place', () => {
+  const a = comedy({ lastPlayedAt: 1, positionTrack: 12, positionMs: 3 * MIN });
+  assert.equal(listenAlongFrom(a, audioChapters, { titles: textTitles, chapter: 0, chapterFrac: 0, frac: 0 }), null);
+  assert.equal(listenAlongFrom(a, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.01 }), null);
+});
+
+test('a few seconds of audio do not count as having listened', () => {
+  const plain = [{ durationMs: 600 * MIN }];
+  const a = { tracks: plain, lastPlayedAt: 5, positionTrack: 0, positionMs: 10_000, finishedAt: null };
+  assert.deepEqual(listenAlongFrom(a, [], { titles: [], chapter: 0, chapterFrac: 0, frac: 0.4 }), { track: 0, ms: 240 * MIN - 15_000 });
 });

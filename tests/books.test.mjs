@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  placeSaved,
   chapterMinutesLeft,
   countedMs,
   displayTitle,
@@ -236,4 +237,14 @@ test('reading now is every started book that is not finished, dropped or parked'
     book({ id: 'forced', lastReadAt: 5, status: 'reading' }),
   ]).map((b) => b.id);
   assert.deepEqual(now, ['new', 'old', 'forced']);
+});
+
+test('opening a book and closing it at the same place is not reading it', () => {
+  const b = { chapter: 4, block: 12, readMs: 3_600_000 };
+  assert.equal(placeSaved(b, { chapter: 4, block: 12, chapterFrac: 0.3 }, 0, 1000), null);
+  // Turned the page, or read for a while: it counts and moves to the top.
+  assert.deepEqual(placeSaved(b, { chapter: 4, block: 20, chapterFrac: 0.5 }, 0, 1000), { chapter: 4, block: 20, chapterFrac: 0.5, readMs: 3_600_000, lastReadAt: 1000 });
+  assert.equal(placeSaved(b, { chapter: 4, block: 12, chapterFrac: 0.3 }, 45_000, 1000)?.readMs, 3_645_000);
+  // A book never started, opened at its first page and closed again, stays unstarted.
+  assert.equal(placeSaved({ chapter: 0, block: 0, readMs: 0 }, { chapter: 0, block: 0, chapterFrac: 0 }, 0, 1000), null);
 });

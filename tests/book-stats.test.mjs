@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bookStats, bookWrapped, bookYears, fmtTime, readerKind, streaks } from '../src/features/vault/books/bookStats.ts';
+import { bookStats, bookWrapped, bookYears, fmtTime, readerKind, streaks, todayByBook } from '../src/features/vault/books/bookStats.ts';
 
 const book = (id, over = {}) => ({
   id, folder: `books/${id}`, filename: `${id}.epub`, size: 1, title: id, author: null, language: null, description: null, cover: null,
@@ -75,4 +75,19 @@ test('a short stretch has day bars', () => {
   const w = bookWrapped([book('a')], [], at(2026, 11, 9, 0), at(2026, 11, 16, 0));
   assert.equal(w.bars.length, 7);
   assert.equal(readerKind(w).name, 'Just starting');
+});
+
+test('time read today is kept per book, not given to whichever book is on top', () => {
+  const now = new Date(2026, 10, 16, 20, 19).getTime();
+  const at = (h, m) => new Date(2026, 10, 16, h, m).getTime();
+  const reads = [
+    { bookId: 'comedy', startedAt: at(18, 0), endedAt: at(18, 40), ms: 40 * 60_000, from: 0, to: 0.05 },
+    { bookId: 'comedy', startedAt: at(19, 0), endedAt: at(19, 20), ms: 20 * 60_000, from: 0.05, to: 0.08 },
+    // Crime and Punishment was read yesterday, not today.
+    { bookId: 'crime', startedAt: new Date(2026, 10, 15, 22, 0).getTime(), endedAt: 0, ms: 30 * 60_000, from: 0, to: 0.08 },
+  ];
+  const today = todayByBook(reads, now);
+  assert.equal(today.get('comedy'), 60 * 60_000);
+  assert.equal(today.get('crime'), undefined);
+  assert.equal(todayByBook([], now).size, 0);
 });

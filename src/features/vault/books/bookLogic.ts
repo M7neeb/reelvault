@@ -334,6 +334,16 @@ export function parseReaderPrefs(json: string | null): ReaderPrefs {
 
 export const lineHeightFor = (size: number, spacing: ReaderPrefs['spacing']) => Math.round(size * (spacing === 'tight' ? 1.38 : spacing === 'loose' ? 1.72 : 1.55));
 
+/**
+ * What saving your place changes on a book, or null when nothing does: opening a
+ * book and closing it again at the same paragraph is not reading it, so it must not
+ * move the book to the top of Reading now (or start a book you only looked at).
+ */
+export function placeSaved(b: Pick<BookItem, 'chapter' | 'block' | 'readMs'>, place: BookPlace, addMs: number, at: number): (BookPlace & { readMs: number; lastReadAt: number }) | null {
+  if (addMs <= 0 && b.chapter === place.chapter && b.block === place.block) return null;
+  return { ...place, readMs: b.readMs + Math.max(0, addMs), lastReadAt: at };
+}
+
 /** A reading session only counts while the page is moving: idle minutes on an open book are not reading. */
 export const IDLE_MS = 3 * 60_000;
 export function countedMs(gapMs: number): number {

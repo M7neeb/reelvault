@@ -25,6 +25,14 @@ export function fmtTime(ms: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
+/** Reading time today for each book (book id to ms), for the line under each book. */
+export function todayByBook(reads: BookRead[], now: number): Map<string, number> {
+  const today = sod(now);
+  const out = new Map<string, number>();
+  for (const r of reads) if (dayKey(r.startedAt) === today) out.set(r.bookId, (out.get(r.bookId) ?? 0) + r.ms);
+  return out;
+}
+
 /** A day counts towards a streak with at least a minute of reading. */
 const MIN_DAY_MS = 60_000;
 

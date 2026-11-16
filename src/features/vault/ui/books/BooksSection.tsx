@@ -6,17 +6,18 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
 
-import { audioOf, listenFrom, newAudio, placeInAudio, suggestAudio } from '../../books/bookAudio';
+import { audioOf, listenAlongFrom, newAudio, suggestAudio } from '../../books/bookAudio';
+import { chaptersOf } from '../../audio/audioLogic';
 import { dayGoal, quoteOfDay, quotesOf } from '../../books/bookGoals';
-import { progressOf, shelfTags, type BookMark, type BookRead, type BookSort } from '../../books/bookLogic';
+import { chapterLabel, progressOf, shelfTags, type BookMark, type BookRead, type BookSort } from '../../books/bookLogic';
 import { pushJump } from '../../jump';
 import { AudioPlayerScreen, MiniPlayer } from '../audio/AudioPlayer';
 import type { AudioData, AudioUiItem } from '../audio/audioTypes';
 import { useAudioPlaybackOptional } from '../audio/playback';
 import { useTabBarSpace } from '../chrome';
-import { bookStats } from '../../books/bookStats';
+import { bookStats, todayByBook } from '../../books/bookStats';
 import type { VideosMode } from '../overviewParts';
 import { afterModals } from '../screen';
 import BookInfo from './BookInfo';
@@ -62,6 +63,12 @@ export default function BooksSection({
 
   // Highlights and reading time change inside the reader and a book's page: read them again once those close.
   const away = !!reading || !!infoId || dash;
+  // Back in the app (maybe the next morning): "today" has to be worked out again.
+  const [woke, setWoke] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => st === 'active' && setWoke((n) => n + 1));
+    return () => sub.remove();
+  }, []);
   useEffect(() => {
     if (away || !data.loaded) return;
     let alive = true;
@@ -77,7 +84,7 @@ export default function BooksSection({
     return () => {
       alive = false;
     };
-  }, [away, data.loaded, data.actions]);
+  }, [away, woke, data.loaded, data.actions]);
 
   // ---- audiobooks: linked from the Audio section, played with its player
   const pb = useAudioPlaybackOptional();
@@ -96,11 +103,19 @@ export default function BooksSection({
       if (!pb.playing) pb.resume();
       return true;
     }
-    const frac = progressOf(book);
-    if ((from === 'auto' ? listenFrom(item, frac) : from) === 'book') {
-      const at = placeInAudio(item.tracks, frac);
-      pb.open(item, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
-    } else pb.open(item, { autoplay: true });
+    if (from === 'audio') {
+      pb.open(item, { autoplay: true });
+      return true;
+    }
+    // Chapter names line the text up with the audio; the book is opened for them.
+    data.actions
+      .open(book.id)
+      .catch(() => null)
+      .then((opened) => {
+        const titles = opened ? opened.chapters.map((c, i) => chapterLabel(opened.toc, i, book.title, c.title)) : [];
+        const at = listenAlongFrom(item, chaptersOf(item), { titles, chapter: book.chapter, chapterFrac: book.chapterFrac, frac: progressOf(book) });
+        pb.open(item, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
+      });
     return true;
   };
 
@@ -130,6 +145,7 @@ export default function BooksSection({
   const quotes = useMemo(() => quotesOf(marks, seen), [marks, seen]);
   const quote = useMemo(() => quoteOfDay(quotes, now), [quotes, now]);
   const today = useMemo(() => dayGoal(bookStats(seen, reads, now).todayMs, data.goals.dailyMin), [seen, reads, now, data.goals.dailyMin]);
+  const readToday = useMemo(() => todayByBook(reads, now), [reads, now]);
 
   useEffect(() => {
     if (!openRequest) return;
@@ -162,6 +178,7 @@ export default function BooksSection({
         quote={quote}
         quoteCount={quotes.length}
         today={today}
+        readToday={readToday}
         listenable={linkedIds.size ? new Set(data.items.filter((b) => audiobookOf(b.id)).map((b) => b.id)) : undefined}
         onListen={(b) => {
           if (startListening(b, 'auto')) setPlayer(true);

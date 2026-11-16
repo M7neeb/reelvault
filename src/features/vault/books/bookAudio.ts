@@ -99,12 +99,6 @@ export function audioDoneFrac(a: Pick<AudioLike, 'durationMs' | 'tracks'> & { po
   return Math.min(1, at / total);
 }
 
-/** Where to start when you tap Listen: the audio's own place once you have listened, else your place in the book. */
-export function listenFrom(a: { lastPlayedAt: number | null; positionTrack: number; positionMs: number }, bookFrac: number): 'audio' | 'book' {
-  const listened = a.lastPlayedAt !== null && (a.positionTrack > 0 || a.positionMs > 30_000);
-  return !listened && bookFrac > 0.02 ? 'book' : 'audio';
-}
-
 /** The speed after this one, round the list. */
 export function nextSpeed(rate: number, speeds: readonly number[]): number {
   const at = speeds.findIndex((s) => s > rate + 0.001);
@@ -190,7 +184,9 @@ export function listenAlongFrom(
   const total = a.tracks.reduce((n, t) => n + (t.durationMs ?? 0), 0);
   let saved = Math.max(0, a.positionMs);
   for (let i = 0; i < Math.min(a.positionTrack, a.tracks.length); i++) saved += a.tracks[i].durationMs ?? 0;
-  const listened = a.lastPlayedAt !== null && !a.finishedAt && saved > 0;
+  const listened = a.lastPlayedAt !== null && !a.finishedAt && saved > 30_000;
+  // Only listened so far, the text not really started: the audio's place is the only real one.
+  if (listened && text.frac <= 0.02) return null;
 
   const m = matchingAudioChapter(text.titles, text.chapter, audioChapters);
   if (m !== null) {

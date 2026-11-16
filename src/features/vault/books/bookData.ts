@@ -21,7 +21,7 @@ import type { BookActions, BookUi, BooksData } from '../ui/books/bookTypes';
 import { chapterBlocks } from '../audio/epub';
 import { parseAudioLinks, withAudioLink, type AudioLinks } from './bookAudio';
 import { NO_GOALS, parseGoals, type BookGoals } from './bookGoals';
-import { BOOK_SORTS, cleanTag, DEFAULT_READER, displayTitle, parseReaderPrefs, progressAt, withFinished, withStatus, type BookItem, type BookSort, type ReaderPrefs } from './bookLogic';
+import { BOOK_SORTS, cleanTag, DEFAULT_READER, displayTitle, parseReaderPrefs, placeSaved, progressAt, withFinished, withStatus, type BookItem, type BookSort, type ReaderPrefs } from './bookLogic';
 import { ReelVaultMedia } from '../../../../modules/reelvault-media';
 import {
   addBookMark,
@@ -124,6 +124,7 @@ export function useBooksData(): BooksData {
   const linksRef = useRef(audioLinks);
   linksRef.current = audioLinks;
   const itemsRef = useRef(items);
+  const readWrites = useRef<Promise<unknown>>(Promise.resolve());
   itemsRef.current = items;
 
   const refresh = useCallback(async () => {
@@ -256,11 +257,16 @@ export function useBooksData(): BooksData {
       savePlace: async (id, place, addMs) => {
         const at = Date.now();
         const was = itemsRef.current.find((b) => b.id === id);
-        if (was && addMs > 0) {
+        if (!was) return;
+        const changed = placeSaved(was, place, addMs, at);
+        if (!changed) return;
+        if (addMs > 0) {
           const before = progressAt(was.chapterSizes, was.chapter, was.chapterFrac);
-          logBookRead(id, at, addMs, before, progressAt(was.chapterSizes, place.chapter, place.chapterFrac)).catch((e) => console.log(`[BOOKS] session not saved: ${String(e)}`));
+          const write = logBookRead(id, at, addMs, before, progressAt(was.chapterSizes, place.chapter, place.chapterFrac)).catch((e) => console.log(`[BOOKS] session not saved: ${String(e)}`));
+          // The shelf reloads today's minutes as the book closes: let it wait for this sitting.
+          readWrites.current = readWrites.current.then(() => write);
         }
-        setItems((list) => list.map((b) => (b.id === id ? { ...b, ...place, readMs: b.readMs + addMs, lastReadAt: at } : b)));
+        setItems((list) => list.map((b) => (b.id === id ? { ...b, ...changed } : b)));
         await saveBookPlace(id, place, addMs, at);
       },
       setFinished: async (id, finished) => {
@@ -367,7 +373,11 @@ export function useBooksData(): BooksData {
       },
       setMarkNote: async (id, note) => setBookMarkNote(id, note?.trim() ? note : null),
       deleteMark: async (id) => deleteBookMark(id),
-      loadReads: async () => (onPhone ? listBookReads() : []),
+      loadReads: async () => {
+        if (!onPhone) return [];
+        await readWrites.current;
+        return listBookReads();
+      },
       passage: async (id) => {
         const b = itemsRef.current.find((x) => x.id === id);
         const book = b ? readBookJson(b.folder) : null;
