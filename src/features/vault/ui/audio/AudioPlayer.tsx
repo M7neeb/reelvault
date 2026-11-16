@@ -128,7 +128,12 @@ export function AudioPlayerScreen({
   // The cover takes what room is left above the controls: a two-line title, a chapter bar or
   // larger text in the iPhone's settings leave less, and a fixed size spilled over the title.
   const [space, setSpace] = useState<{ w: number; h: number } | null>(null);
-  const coverSize = space ? Math.round(Math.max(96, Math.min(290, space.w - 60, space.h - PHOTO_STRIP - 16))) : 290;
+  // The photo row as drawn (larger text makes its button taller); with little room it only shows photos you added.
+  const [stripH, setStripH] = useState(PHOTO_STRIP);
+  const tight = !!space && space.h < 290 + PHOTO_STRIP + 16;
+  // So little room that even photos you added would squeeze the cover: the cover alone.
+  const noStrip = !!space && space.h < 140 + PHOTO_STRIP + 16;
+  const coverSize = space ? Math.round(Math.max(80, Math.min(290, space.w - 60, space.h - (noStrip ? 0 : stripH) - 16))) : 290;
 
   const chapters = useMemo(() => (item ? chaptersOf(item) : []), [item]);
   const chIndex = chapterIndexAt(chapters, pb.overall);
@@ -184,7 +189,11 @@ export function AudioPlayerScreen({
           ) : (
             <Animated.View entering={FadeIn} style={{ alignItems: 'center', paddingHorizontal: 30, opacity: space ? 1 : 0 }}>
               <AudioCover item={item} size={coverSize} radius={coverSize >= 200 ? 22 : 14} />
-              <AudioPhotos itemId={item.id} actions={actions} playing={pb.playing} onToggle={pb.toggle} title={displayTitle(item)} />
+              {!noStrip && (
+                <View style={{ alignSelf: 'stretch' }} onLayout={(e) => setStripH(e.nativeEvent.layout.height)}>
+                  <AudioPhotos itemId={item.id} actions={actions} playing={pb.playing} onToggle={pb.toggle} title={displayTitle(item)} compact={tight} />
+                </View>
+              )}
             </Animated.View>
           )}
         </View>

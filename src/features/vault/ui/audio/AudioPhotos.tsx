@@ -24,7 +24,10 @@ export function AudioPhotos({
   playing,
   onToggle,
   title,
+  compact = false,
 }: {
+  /** Little room: no "Add photos" button while there are none (the cover needs the space). */
+  compact?: boolean;
   itemId: string;
   actions: Pick<AudioActions, 'listPhotos' | 'addPhotos' | 'removePhoto'>;
   playing: boolean;
@@ -42,6 +45,7 @@ export function AudioPhotos({
   useEffect(load, [itemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!actions.listPhotos || !actions.addPhotos) return null;
+  if (compact && photos.length === 0) return null;
   const add = () =>
     actions
       .addPhotos?.(itemId)
