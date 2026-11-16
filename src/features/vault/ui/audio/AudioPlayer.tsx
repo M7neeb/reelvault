@@ -125,6 +125,10 @@ export function AudioPlayerScreen({
   const [marks, setMarks] = useState<AudioBookmark[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [boosting, setBoosting] = useState<number | null>(null);
+  // The cover takes what room is left above the controls: a two-line title, a chapter bar or
+  // larger text in the iPhone's settings leave less, and a fixed size spilled over the title.
+  const [space, setSpace] = useState<{ w: number; h: number } | null>(null);
+  const coverSize = space ? Math.round(Math.max(96, Math.min(290, space.w - 60, space.h - PHOTO_STRIP - 16))) : 290;
 
   const chapters = useMemo(() => (item ? chaptersOf(item) : []), [item]);
   const chIndex = chapterIndexAt(chapters, pb.overall);
@@ -174,12 +178,12 @@ export function AudioPlayerScreen({
           </TouchableOpacity>
         </View>
 
-        <View style={{ flex: 1, justifyContent: 'center' }}>
+        <View style={styles.middle} onLayout={(e) => setSpace({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
           {isBook && view === 'read' ? (
             <ReadAlong item={item} actions={actions} />
           ) : (
-            <Animated.View entering={FadeIn} style={{ alignItems: 'center', paddingHorizontal: 30 }}>
-              <AudioCover item={item} size={290} radius={22} />
+            <Animated.View entering={FadeIn} style={{ alignItems: 'center', paddingHorizontal: 30, opacity: space ? 1 : 0 }}>
+              <AudioCover item={item} size={coverSize} radius={coverSize >= 200 ? 22 : 14} />
               <AudioPhotos itemId={item.id} actions={actions} playing={pb.playing} onToggle={pb.toggle} title={displayTitle(item)} />
             </Animated.View>
           )}
@@ -249,11 +253,11 @@ export function AudioPlayerScreen({
           <View style={styles.tools}>
             <TouchableOpacity style={styles.tool} onPress={() => setSheetOpen('speed')} accessibilityLabel={`Speed ${pb.rate}`}>
               <Text style={styles.toolBig}>{pb.rate}×</Text>
-              <Text style={styles.toolLabel}>Speed</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={styles.toolLabel}>Speed</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tool} onPress={() => setSheetOpen('sleep')} accessibilityLabel="Sleep timer">
               <Icon name="sleep" size={18} color={pb.sleep ? p.accent : p.text} />
-              <Text style={[styles.toolLabel, pb.sleep && { color: p.accent }]}>{sleepLabel}</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.toolLabel, pb.sleep && { color: p.accent }]}>{sleepLabel}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.tool}
@@ -261,11 +265,11 @@ export function AudioPlayerScreen({
               onLongPress={() => setSheetOpen('marks')}
               accessibilityLabel="Add a bookmark (hold for your bookmarks)">
               <Icon name="bookmarkAdd" size={18} color={p.text} />
-              <Text style={styles.toolLabel}>Bookmark</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={styles.toolLabel}>Bookmark</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tool} onPress={() => setSheetOpen('marks')} accessibilityLabel="Your bookmarks">
               <Icon name="bookmark" size={18} color={marks.length ? p.accent : p.text} />
-              <Text style={styles.toolLabel}>{marks.length ? `${marks.length} ${marks.length === 1 ? 'mark' : 'marks'}` : 'Marks'}</Text>
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={styles.toolLabel}>{marks.length ? `${marks.length} ${marks.length === 1 ? 'mark' : 'marks'}` : 'Marks'}</Text>
             </TouchableOpacity>
             {actions.setVoiceBoost && actions.canBoost?.() && (
               <TouchableOpacity
@@ -281,7 +285,7 @@ export function AudioPlayerScreen({
                 }}
                 accessibilityLabel={prefs.boosted.includes(item.id) ? 'Voice Boost is on. Tap to turn it off' : 'Voice Boost: clearer, louder voices'}>
                 <Icon name="audio" size={18} color={prefs.boosted.includes(item.id) || boosting !== null ? p.accent : p.text} />
-                <Text style={[styles.toolLabel, (prefs.boosted.includes(item.id) || boosting !== null) && { color: p.accent }]}>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.toolLabel, (prefs.boosted.includes(item.id) || boosting !== null) && { color: p.accent }]}>
                   {boosting !== null ? `${Math.round(boosting * 100)}%` : 'Boost'}
                 </Text>
               </TouchableOpacity>
@@ -423,8 +427,12 @@ export function AudioPlayerScreen({
   );
 }
 
+/** The photo strip under the cover: its margin and one row of thumbnails. */
+const PHOTO_STRIP = 14 + 54;
+
 const makeStyles = (p: Palette) =>
   sheet({
+    middle: { flex: 1, justifyContent: 'center', overflow: 'hidden' },
     mini: { position: 'absolute', left: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: p.elevated, borderRadius: 18, paddingHorizontal: 10, paddingVertical: 9, borderWidth: 1, borderColor: p.border, overflow: 'hidden' },
     miniMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
     miniTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
