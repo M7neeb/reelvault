@@ -185,10 +185,10 @@ const makeStyles = (p: Palette) =>
   sheet({
     screen: { flex: 1, backgroundColor: p.bg },
     header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 8, minHeight: 42 },
-    circle: { width: 34, height: 34, borderRadius: 17, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    circle: { width: 34, height: 34, borderRadius: 17, backgroundColor: p.elevated, alignItems: 'center', justifyContent: 'center' },
     title: { color: p.text, fontSize: 26, fontWeight: '800', flex: 1 },
     count: { color: p.textSecondary, fontSize: 14, paddingHorizontal: 20, marginTop: 2 },
-    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 14, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 12, height: 40 },
+    search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 14, backgroundColor: p.elevated, borderRadius: 12, paddingHorizontal: 12, height: 40 },
     searchInput: { flex: 1, color: p.text, fontSize: 16 },
     row: { paddingHorizontal: 20, paddingVertical: 20 },
     quote: { color: p.text, fontFamily: SERIF, fontSize: 18, lineHeight: 27 },
@@ -206,6 +206,6 @@ const makeStyles = (p: Palette) =>
     actions: { flexDirection: 'row', gap: 10 },
     primary: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 22, height: 44 },
     primaryText: { color: p.bg, fontSize: 16, fontWeight: '700' },
-    secondary: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 20, height: 44, justifyContent: 'center' },
+    secondary: { backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 20, height: 44, justifyContent: 'center' },
     secondaryText: { color: p.text, fontSize: 16, fontWeight: '700' },
   });

@@ -188,13 +188,13 @@ const bar = StyleSheet.create({
 const makeStyles = (p: Palette) =>
   sheet({
     label: { color: p.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 26, marginBottom: 10 },
-    card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: p.card, borderRadius: 14, padding: 10 },
+    card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: p.elevated, borderRadius: 14, padding: 10 },
     title: { color: p.text, fontSize: 15, fontWeight: '700', lineHeight: 19 },
     meta: { color: p.textSecondary, fontSize: 12.5, fontVariant: ['tabular-nums'] },
     listen: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 14, height: 36 },
     listenText: { color: p.bg, fontSize: 14, fontWeight: '700' },
     row: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    pill: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 15, height: 38 },
+    pill: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 15, height: 38 },
     pillText: { color: p.text, fontSize: 14.5, fontWeight: '700' },
     hint: { color: p.textSecondary, fontSize: 13, lineHeight: 18 },
   });
