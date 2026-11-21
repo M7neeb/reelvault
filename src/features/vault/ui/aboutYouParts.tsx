@@ -9,6 +9,7 @@ import type { Axis } from '../aboutYou';
 import { success, warn } from './haptics';
 import Icon from './Icon';
 import { useReducedMotion } from './motion';
+import { useLater } from './storyKit';
 
 /** The profile: five sliders, each dot gliding from the middle to where you are. */
 export function TraitSliders({ axes, delay = 300 }: { axes: readonly Axis[]; delay?: number }) {
@@ -49,6 +50,7 @@ function TraitSlider({ axis, delay }: { axis: Axis; delay: number }) {
 export function LieQuiz({ statements, lie, reveal, onAnswer, onDone }: { statements: string[]; lie: number; reveal: string; onAnswer?: (right: boolean) => void; onDone: () => void }) {
   const reduce = useReducedMotion();
   const [pick, setPick] = useState<number | null>(null);
+  const later = useLater();
   return (
     <View style={{ gap: 10, marginTop: 14 }}>
       {statements.map((text, n) => {
@@ -64,7 +66,7 @@ export function LieQuiz({ statements, lie, reveal, onAnswer, onDone }: { stateme
                 if (n === lie) success();
                 else warn();
                 onAnswer?.(n === lie);
-                setTimeout(onDone, 4200);
+                later(onDone, 4200);
               }}
               style={[s.opt, isLie && s.optLie, missed && s.optMissed, pick !== null && !isLie && !missed && { opacity: 0.5 }]}
               accessibilityRole="button"

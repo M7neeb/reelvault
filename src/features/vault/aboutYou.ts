@@ -20,7 +20,8 @@ export type AboutInput = {
 export type AxisKey = 'clock' | 'pace' | 'loyalty' | 'nostalgia' | 'week';
 /** One slider of the profile. 0 = all the way to `left`, 1 = all the way to `right`. */
 export type Axis = { key: AxisKey; left: string; right: string; value: number };
-export type Archetype = { name: string; line: string };
+/** `icon` is an icon name of the app's set (moon, sun, fire…). */
+export type Archetype = { name: string; line: string; icon: string };
 export type Award = { key: string; title: string; titleId: string; line: string };
 export type TwoTruths = { statements: string[]; lie: number; reveal: string };
 
@@ -96,11 +97,28 @@ const POLES: Record<`${AxisKey}:${0 | 1}`, { adj: string; noun: Record<AboutKind
   'week:1': { adj: 'Weekend', noun: { video: 'Warrior', manga: 'Warrior' }, line: { video: 'Saturdays and Sundays are when it really happens.', manga: 'Weekends are when the stories come out.' } },
 };
 
-function axesOf(kind: AboutKind, inRange: Sitting[], startedBefore: (id: string) => boolean): Axis[] {
+/** A sitting counts as going back to something when you first had it at least this long before. */
+const RETURN_AFTER = 30 * DAY;
+
+const POLE_ICONS: Record<`${AxisKey}:${0 | 1}`, string> = {
+  'clock:0': 'sun',
+  'clock:1': 'moon',
+  'pace:0': 'clock',
+  'pace:1': 'fire',
+  'loyalty:0': 'globe',
+  'loyalty:1': 'heart',
+  'nostalgia:0': 'sparkle',
+  'nostalgia:1': 'rewatch',
+  'week:0': 'calendar',
+  'week:1': 'star',
+};
+
+function axesOf(kind: AboutKind, inRange: Sitting[], firstEver: ReadonlyMap<string, number>): Axis[] {
   const total = inRange.reduce((a, s) => a + s.ms, 0) || 1;
   let night = 0;
   let morning = 0;
   let weekend = 0;
+  let back = 0;
   const per = new Map<string, number>();
   for (const s of inRange) {
     const d = new Date(s.at);
@@ -109,6 +127,8 @@ function axesOf(kind: AboutKind, inRange: Sitting[], startedBefore: (id: string)
     else if (h >= 5 && h < 11) morning += s.ms;
     if (d.getDay() === 0 || d.getDay() === 6) weekend += s.ms;
     per.set(s.titleId, (per.get(s.titleId) ?? 0) + s.ms);
+    // Judged per sitting, so it works for any range, all time included.
+    if (s.at - (firstEver.get(s.titleId) ?? s.at) >= RETURN_AFTER) back += s.ms;
   }
   // Long sittings carry the most time, so the typical minute sits in a sitting this long.
   const sorted = inRange.map((s) => s.ms).sort((a, b) => a - b);
@@ -123,7 +143,7 @@ function axesOf(kind: AboutKind, inRange: Sitting[], startedBefore: (id: string)
   }
   const shares = [...per.values()].sort((a, b) => b - a);
   const top3 = shares.slice(0, 3).reduce((a, x) => a + x, 0) / total;
-  const old = [...per.entries()].reduce((a, [id, ms]) => a + (startedBefore(id) ? ms : 0), 0) / total;
+  const old = back / total;
   const clock = night + morning ? night / (night + morning) : 0.5;
   // Two of seven days are weekend days: that share is the middle of the slider.
   const wk = weekend / total;
@@ -144,9 +164,9 @@ export function archetypeOf(kind: AboutKind, axes: readonly Axis[]): Archetype {
   const first = pole(ranked[0]);
   const second = pole(ranked[1] ?? ranked[0]);
   if (Math.abs(ranked[0].value - 0.5) < 0.12) {
-    return { name: kind === 'video' ? 'The All-Rounder' : 'The Balanced Reader', line: 'No extremes: a bit of everything, at every hour. Hard to pin down, and that is the point.' };
+    return { name: kind === 'video' ? 'The All-Rounder' : 'The Balanced Reader', line: 'No extremes: a bit of everything, at every hour. Hard to pin down, and that is the point.', icon: 'target' };
   }
-  return { name: `The ${first.adj} ${second.noun[kind]}`, line: `${first.line[kind]} ${second.line[kind]}` };
+  return { name: `The ${first.adj} ${second.noun[kind]}`, line: `${first.line[kind]} ${second.line[kind]}`, icon: POLE_ICONS[`${ranked[0].key}:${ranked[0].value >= 0.5 ? 1 : 0}`] };
 }
 
 /* ------------------------------------------------------------------- awards */
@@ -191,7 +211,7 @@ function awardsOf(kind: AboutKind, inRange: Sitting[], all: readonly Sitting[], 
   }
   if (back) {
     const months = Math.round(back.gap / (30 * DAY));
-    add({ key: 'comeback', title: 'Comeback of the year', titleId: back.id, line: `You hadn't touched ${name(back.id)} in ${months >= 24 ? `${Math.round(months / 12)} years` : `${months} months`}. Then, out of nowhere, you were back.` });
+    add({ key: 'comeback', title: 'The comeback', titleId: back.id, line: `You hadn't touched ${name(back.id)} in ${months >= 24 ? `${Math.round(months / 12)} years` : `${months} months`}. Then, out of nowhere, you were back.` });
   }
 
   // Guilty pleasure: lots of your time, not much of your rating.
@@ -254,7 +274,14 @@ function factsOf(kind: AboutKind, inRange: Sitting[], titles: ReadonlyMap<string
   const fresh = ranked.filter(([id]) => !startedBefore(id)).length;
   if (ranked.length >= 3) {
     const wrong = fresh <= 2 ? fresh + 3 : random() < 0.5 ? fresh + Math.max(2, Math.round(fresh * 0.4)) : Math.max(0, fresh - Math.max(2, Math.round(fresh * 0.4)));
-    const say = (n: number) => (n === 0 ? `You didn't start a single new ${w.thing}.` : `You started ${n} new ${n === 1 ? w.thing : w.things}.`);
+    const say = (n: number) =>
+      kind === 'video'
+        ? n === 0
+          ? 'Everything you watched, you had seen before.'
+          : `You watched ${n} ${n === 1 ? 'video' : 'videos'} for the first time.`
+        : n === 0
+          ? `You didn't start a single new ${w.thing}.`
+          : `You started ${n} new ${n === 1 ? w.thing : w.things}.`;
     if (wrong !== fresh) facts.push({ truth: say(fresh), lie: say(wrong) });
   }
   return facts;
@@ -344,7 +371,7 @@ export function aboutYou(input: AboutInput, prevMs = 0): AboutYou | null {
   const startedBefore = (id: string) => (firstEver.get(id) ?? Infinity) < start;
   const random = rng(input.seed ?? Math.floor(start / DAY));
 
-  const axes = axesOf(kind, inRange, startedBefore);
+  const axes = axesOf(kind, inRange, firstEver);
   const archetype = archetypeOf(kind, axes);
   const ranked = [...axes].sort((a, b) => Math.abs(b.value - 0.5) - Math.abs(a.value - 0.5));
   const poleKey = (a: Axis) => `${a.key}:${a.value >= 0.5 ? 1 : 0}` as const;

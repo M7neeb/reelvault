@@ -51,7 +51,7 @@ import { DUR, EASE_OUT, enterUp, PressableScale, SPRING, useReducedMotion } from
 import { Segment } from './sheets';
 import { FilmStrips, ImageRiver, Tint } from './scenes';
 import { LookFrame, lookFor, type VideoLook } from './videoLooks';
-import { Aurora, Confetti, CountUp, CoverWall, Float, GrowBar, GrowColumn, hexA, Marquee, Pulse, Rays, Tilt, Words } from './storyKit';
+import { Aurora, Confetti, CountUp, CoverWall, Float, GrowBar, GrowColumn, hexA, Marquee, Pulse, Rays, Tilt, useLater, Words } from './storyKit';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 
@@ -597,6 +597,7 @@ function Quiz({ options, answer, thumbs, width, onAnswer, onDone }: { options: {
   const styles = useStyles(makeStyles);
   const reduce = useReducedMotion();
   const [pick, setPick] = useState<string | null>(null);
+  const later = useLater();
   const w = (width - 20) / 3;
   return (
     <View style={{ gap: 14, marginTop: 8 }}>
@@ -614,7 +615,7 @@ function Quiz({ options, answer, thumbs, width, onAnswer, onDone }: { options: {
                   if (o.id === answer) success();
                   else warn();
                   onAnswer?.(o.id === answer);
-                  setTimeout(onDone, 2200);
+                  later(onDone, 2200);
                 }}
                 style={[styles.qOpt, { width: w, height: w * 1.4 }, right && styles.qRight, wrong && styles.qWrong, pick && !right && !wrong && { opacity: 0.45 }]}
                 accessibilityLabel={o.label}>
@@ -647,6 +648,7 @@ function TextQuiz({ options, answer, onAnswer, onDone }: { options: { id: string
   const styles = useStyles(makeStyles);
   const reduce = useReducedMotion();
   const [pick, setPick] = useState<string | null>(null);
+  const later = useLater();
   return (
     <View style={{ gap: 10, marginTop: 12 }}>
       {options.map((o, n) => {
@@ -662,7 +664,7 @@ function TextQuiz({ options, answer, onAnswer, onDone }: { options: { id: string
                 if (o.id === answer) success();
                 else warn();
                 onAnswer?.(o.id === answer);
-                setTimeout(onDone, 2200);
+                later(onDone, 2200);
               }}
               style={[styles.tqOpt, right && styles.tqRight, wrong && styles.tqWrong, !!pick && !right && !wrong && { opacity: 0.45 }]}
               accessibilityLabel={o.label}>
@@ -1674,7 +1676,7 @@ export function WrappedStory({
           {kicker('ALL OF THAT MAKES YOU', 0)}
           <Animated.View entering={reduce ? FadeIn : ZoomIn.delay(200).springify().damping(13)}>
             <Float style={styles.sIcon}>
-              <Icon name={iconOr(f.persona.icon)} size={38} color="#fff" />
+              <Icon name={iconOr(about?.archetype.icon ?? f.persona.icon)} size={38} color="#fff" />
             </Float>
           </Animated.View>
           {big(personaName, 2)}

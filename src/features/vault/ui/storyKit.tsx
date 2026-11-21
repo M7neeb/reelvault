@@ -7,7 +7,7 @@
  * still. Presentational only.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
@@ -343,4 +343,22 @@ export function KenBurns({ source, ms, seed = 0, style, fill = false }: { source
       </Animated.View>
     </View>
   );
+}
+
+/**
+ * Runs something a moment later, unless the card has gone by then: a quiz that moves the story on
+ * after its answer must not move it again when you already tapped to the next card yourself.
+ */
+export function useLater(): (fn: () => void, ms: number) => void {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    []
+  );
+  return useCallback((fn: () => void, ms: number) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(fn, ms);
+  }, []);
 }

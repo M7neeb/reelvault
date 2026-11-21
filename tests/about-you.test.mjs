@@ -48,6 +48,7 @@ test('a late, long-sitting watcher reads as a midnight marathoner', () => {
   assert.ok(axis.pace > 0.9, `pace ${axis.pace}`);
   for (const x of a.axes) assert.ok(x.value >= 0 && x.value <= 1, x.key);
   assert.match(a.archetype.name, /^The (Midnight Marathoner|Marathon Night Owl)$/);
+  assert.ok(['moon', 'fire'].includes(a.archetype.icon));
   assert.equal(a.roast, 'Your bedtime is more of a suggestion.');
   assert.notEqual(a.roast, a.toast);
 });
@@ -114,4 +115,20 @@ test('sittings outside the range do not count, and many sittings stay quick', ()
   const a = aboutYou({ kind: 'video', sittings: many, titles, start, end });
   assert.ok(Date.now() - t0 < 1500);
   assert.ok(a === null || a.axes.length === 5);
+});
+
+test('going back to old favourites counts in any range, all time included', () => {
+  const s = [];
+  // Read for two years, mostly the same story again and again.
+  for (let m = 0; m < 24; m++) s.push({ titleId: 'd', at: new Date(2024, m, 5, 21).getTime(), ms: 60 * MIN });
+  s.push({ titleId: 'a', at: new Date(2025, 11, 1, 21).getTime(), ms: 30 * MIN });
+  const all = aboutYou({ kind: 'manga', sittings: s, titles, start: new Date(2024, 0, 1).getTime(), end: new Date(2026, 0, 1).getTime() });
+  const nostalgia = all.axes.find((x) => x.key === 'nostalgia').value;
+  assert.ok(nostalgia > 0.85, `nostalgia ${nostalgia}`);
+});
+
+test('video quiz wording talks about first-time watches', () => {
+  const a = aboutYou({ kind: 'video', sittings: nightOwl(), titles, start, end });
+  const all = [...a.quiz.statements, a.quiz.reveal].join(' ');
+  assert.doesNotMatch(all, /started \d+ new video/);
 });
