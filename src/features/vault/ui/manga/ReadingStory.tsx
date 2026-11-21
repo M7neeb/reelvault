@@ -30,7 +30,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { ZoomIn } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 
@@ -49,6 +49,8 @@ import { sheet, useStyles } from '../theme';
 import type { ThumbSource } from '../types';
 import MangaCover from './MangaCover';
 import { SfxSet } from '../scenes';
+import { aboutYou } from '../../aboutYou';
+import { LieQuiz, TraitSliders } from '../aboutYouParts';
 import { BadgeGrid, cachedLoader, ChapterArt, ClockDial, CoverFan, GiantRank, Heatmap, PageStack, RatingBars, Shelf, StreakChain, TextQuiz, TitleChip, type PageLoader } from './mangaKit';
 import { BankMontage, PageBankProvider, PageScene, useBankLoader } from './pageScenes';
 import { PageTimeline, PanelQuiz, RacingStrip, SpeedFlip, StopPage } from './readingExtras';
@@ -168,6 +170,22 @@ export function RangeWrapped({
   }, [range.start, range.kind]);
   // All the numbers, worked out once.
   const st = useMemo(() => wrappedStory(items, reads, range.start, range.end, now, prevStart), [items, reads, range.start, range.end, now, prevStart]);
+  // What it says about you: profile, awards, two truths and a lie (same engine as the video Wrapped).
+  const about = useMemo(
+    () =>
+      aboutYou(
+        {
+          kind: 'manga',
+          sittings: reads.filter((r) => byId.has(r.seriesId)).map((r) => ({ titleId: r.seriesId, at: r.startedAt, ms: r.readMs })),
+          titles: new Map(items.map((i) => [i.id, { id: i.id, name: i.title, rating: i.rating, finished: i.status === 'completed' }])),
+          start: range.start,
+          end: Math.min(range.end, now),
+        },
+        st.w.prev.ms
+      ),
+    [reads, items, byId, range.start, range.end, now, st]
+  );
+  const typeName = about?.archetype.name ?? st.w.type.name;
   const topIds = useMemo(() => st.titles.map((t) => t.id), [st]);
   const coverPool = useMemo(
     () => [...topIds.map((id) => byId.get(id)?.coverSource), ...items.filter((i) => i.lastReadAt).map((i) => i.coverSource)].filter(Boolean).slice(0, 18) as ThumbSource[],
@@ -1128,6 +1146,33 @@ export function RangeWrapped({
       });
     }
 
+    if (about) {
+      out.push({
+        key: 'about-intro',
+        colors: ['#1C1C1E', '#000000'],
+        ms: 5000,
+        body: (
+          <>
+            {s.kicker('PART TWO', 0)}
+            {s.big('Enough numbers. Let’s talk about you.', 1)}
+            {s.line('What all that reading says about the person holding this phone.', 2)}
+          </>
+        ),
+      });
+      out.push({
+        key: 'profile',
+        backdrop: <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)' }]} />,
+        colors: ['#0A84FF', '#001433'],
+        ms: 9000,
+        body: (
+          <>
+            {s.kicker('YOUR PROFILE', 0)}
+            {s.big('Where you land', 1)}
+            <TraitSliders axes={about.axes} delay={450} />
+          </>
+        ),
+      });
+    }
     out.push({
       key: 'type',
       colors: TYPE_COLORS[w.type.key] ?? ['#FF375F', '#2B0612'],
@@ -1145,13 +1190,83 @@ export function RangeWrapped({
         <>
           {s.kicker('ALL OF THAT MAKES YOU', 0)}
           <Animated.Text entering={ZoomIn.delay(250).springify().damping(12)} style={styles.typeName}>
-            {w.type.name}
+            {typeName}
           </Animated.Text>
-          {s.line(w.type.line, 2)}
+          {s.line(about?.archetype.line ?? w.type.line, 2)}
           {st.badges.length > 0 && s.line(`With a touch of ${st.badges.slice(0, 2).map((b) => b.name).join(' and ')}.`, 3)}
         </>
       ),
     });
+
+    if (about) {
+      about.awards.forEach((aw, n) => {
+        const ser = get(aw.titleId);
+        out.push({
+          key: `award-${aw.key}`,
+          colors: ['#FFD60A', '#3A2A00'],
+          ms: 7000,
+          solid: !!ser,
+          backdrop: ser ? <PageScene i={out.length} focus={ser} dim={0.45} /> : undefined,
+          body: (
+            <>
+              {n === 0 && s.kicker('THE AWARDS', 0)}
+              {s.kicker(`${aw.title.toUpperCase()} GOES TO`, n === 0 ? 1 : 0)}
+              {s.big(ser?.title ?? 'A title', 2)}
+              {s.line(aw.line, 3)}
+            </>
+          ),
+        });
+      });
+      if (about.quiz) {
+        const q = about.quiz;
+        out.push({
+          key: 'truths',
+          backdrop: <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)' }]} />,
+          colors: ['#30D158', '#00230C'],
+          ms: 30000,
+          interactive: true,
+          body: (
+            <>
+              {s.kicker('TWO TRUTHS AND A LIE', 0)}
+              {s.big('One of these is made up.', 1)}
+              <LieQuiz statements={q.statements} lie={q.lie} reveal={q.reveal} onDone={() => undefined} />
+            </>
+          ),
+        });
+      }
+      out.push({
+        key: 'roast',
+        colors: ['#FF9F0A', '#331B00'],
+        ms: 8000,
+        backdrop: <SfxSet kind="impact" color="#FF9F0A" />,
+        body: (
+          <>
+            {s.kicker('A LITTLE ROAST', 0)}
+            {s.big(about.roast, 1)}
+            {s.kicker('AND A TOAST', 2)}
+            {s.line(about.toast, 3)}
+          </>
+        ),
+      });
+      if (about.predictions.length) {
+        out.push({
+          key: 'next',
+          backdrop: <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.6)' }]} />,
+          colors: ['#64D2FF', '#001A26'],
+          ms: 8000,
+          body: (
+            <>
+              {s.kicker('OUR GUESS FOR NEXT TIME', 0)}
+              {about.predictions.map((p, n) => (
+                <View key={p} style={{ marginTop: n ? 12 : 6 }}>
+                  {s.line(p, 1 + n)}
+                </View>
+              ))}
+            </>
+          ),
+        });
+      }
+    }
 
     const stopS = get(st.lastStop?.seriesId);
     const stopC = stopS?.chapters.find((c) => c.id === st.lastStop?.chapterId);
@@ -1194,7 +1309,7 @@ export function RangeWrapped({
 
     const summary = mix
       ? `Videos + Manga Wrapped · ${range.label}: ${orDash(mix.watchMs)} watching, ${orDash(mix.readMs)} reading, ${y.chapters} chapters.${one ? ` #1 manga: ${one.s.title}.` : ''}`
-      : `Reading Wrapped · ${range.label}: ${plural(y.chapters, 'chapter')}, ${orDash(y.ms)}, ${plural(y.titles, 'title')}. ${w.type.name}.${one ? ` #1: ${one.s.title}.` : ''}`;
+      : `Reading Wrapped · ${range.label}: ${plural(y.chapters, 'chapter')}, ${orDash(y.ms)}, ${plural(y.titles, 'title')}. ${typeName}.${one ? ` #1: ${one.s.title}.` : ''}`;
     const collage = top.slice(0, 4).map((t) => t.s);
     out.push({
       key: 'end',
@@ -1231,7 +1346,7 @@ export function RangeWrapped({
             {mix && <GrowBar share={mix.readShare} track="rgba(255,255,255,0.25)" color="#FF375F" />}
             {one && <Text style={styles.snapLine} numberOfLines={1}>#1 {one.s.title}</Text>}
             {w.genres[0] && <Text style={styles.snapLine2}>Top genre: {w.genres[0].name}</Text>}
-            {!mix && <Text style={styles.snapType}>{w.type.name}</Text>}
+            {!mix && <Text style={styles.snapType}>{typeName}</Text>}
             <Text style={styles.snapBrand}>ReelVault</Text>
           </View>
           <TouchableOpacity
@@ -1247,7 +1362,7 @@ export function RangeWrapped({
       ),
     });
     return out;
-  }, [st, items, reads, range, videos, load, byId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st, about, items, reads, range, videos, load, byId]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <PageBankProvider value={bank}>
       <StoryDeck cards={cards} onClose={onClose} ambient={ambient} />

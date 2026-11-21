@@ -26,6 +26,8 @@ import type { SimklBridge } from '@/features/simkl/ui/types';
 import { achievements, summarize, type AchEvent, type AchInput, listeningFrom, readingFrom, type AchListening, type AchReading } from '../achievements';
 import { buildOverview } from '../overview';
 import { customMemory, homeOf, memories as buildMemories, type CustomMemory, type Memory } from '../memories';
+import { aboutYou } from '../aboutYou';
+import { friendlyName } from '../names';
 import { growth, journey, levelFor, monthRanges, personalRecords, spaceForecast, spaceGrade, spaceIdeas, storyFacts, treemap, yearRange } from '../recap';
 import { fmtBytes, fmtMs, recentWeeks, storageStats, wrapped as buildWrapped, type Range, type RatingLabels, type VaultPlay } from '../stats';
 import Badges from './BadgesUI';
@@ -425,18 +427,29 @@ export default function VideoInsightsModal({
             })
         : undefined;
     const ly = yearBefore(r);
+    const prevFacts = prevR.start >= 0 && !group ? storyFacts(prevR, items_, plays_, now) : null;
     const groupKeys = only ? new Set(entries.filter((e) => e.episodes.some((ep) => only.has(ep.video.id))).map((e) => e.key)) : null;
     setStory({
       sprint,
       range: r,
       facts: storyFacts(r, items_, plays_, now),
-      prev: prevR.start >= 0 && !group ? storyFacts(prevR, items_, plays_, now) : null,
+      prev: prevFacts,
       w: buildWrapped(r, items_, plays_, skUse),
       earned: group ? [] : badgeList.filter((a) => a.unlocked && a.earnedAt !== null && a.earnedAt >= r.start && a.earnedAt < r.end),
       series,
       subject: group ? { kind: group.kind, name: group.name } : undefined,
       lastYear: group ? null : storyFacts(ly, items_, plays_, now),
       reviews: reviewsFor((key, at) => (groupKeys ? groupKeys.has(key) : at >= r.start && at < r.end)),
+      about: aboutYou(
+        {
+          kind: 'video',
+          sittings: plays_.map((x) => ({ titleId: x.videoId, at: x.startedAt, ms: x.watchedMs })),
+          titles: new Map(items_.map((v) => [v.id, { id: v.id, name: friendlyName(v), rating: v.rating }])),
+          start: r.start,
+          end: Math.min(r.end, now),
+        },
+        prevFacts?.watchedMs ?? 0
+      ),
     });
   };
 

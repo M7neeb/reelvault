@@ -111,7 +111,11 @@ export function StoryDeck({
   const reduce = useReducedMotion();
   // The browser preview can open a given card (`&card=3`), paused, for screenshots.
   const previewCard = Platform.OS === 'web' && typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('card') : null;
-  const [i, setI] = useState(() => Math.min(cards.length - 1, Math.max(0, Number(previewCard ?? 0) || 0)));
+  // A name works too (`&card=truths`).
+  const [i, setI] = useState(() => {
+    const named = previewCard ? cards.findIndex((c) => c.key === previewCard) : -1;
+    return named >= 0 ? named : Math.min(cards.length - 1, Math.max(0, Number(previewCard ?? 0) || 0));
+  });
   const [paused, setPaused] = useState(previewCard !== null);
   // How far the current card has run (0 to 1), animated on the UI thread: no re-render while it runs.
   const progress = useSharedValue(0);

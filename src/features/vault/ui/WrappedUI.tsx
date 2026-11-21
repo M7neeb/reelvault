@@ -37,6 +37,8 @@ import type { Memory } from '../memories';
 import { highlightAt, monthRanges, storyFacts, yearRange, type RRange, type StoryFacts } from '../recap';
 import { fmtBytes, fmtDay, fmtMs, presetRange, recentWeeks, wrapped as buildWrapped, type Range, type VaultPlay, type Wrapped } from '../stats';
 import { friendlyName } from '../names';
+import type { AboutYou } from '../aboutYou';
+import { LieQuiz, TraitSliders } from './aboutYouParts';
 import { useAudioControlsOptional } from './audio/playback';
 import { CLUBS, clubJourney, clubOf, quizFrom, rewatchMeter, videoAge, type ClubKey } from '../wrappedExtras';
 import Fade from './Fade';
@@ -448,6 +450,8 @@ export type StoryInput = {
   lastYear?: StoryFacts | null;
   /** Reviews you wrote (in the range, or of the subject). */
   reviews?: { title: string; text: string; videoId: string | null; rating: number }[];
+  /** What all of it says about you: profile, awards, two truths and a lie. */
+  about?: AboutYou | null;
 };
 
 /** A keyword, album or series that can have its own Wrapped. */
@@ -1626,7 +1630,39 @@ export function WrappedStory({
       });
     }
 
-    // 19 · persona
+    // 19 · about you: the profile, the name it adds up to, awards, two truths and a lie, a roast
+    const about = input.about ?? null;
+    const personaName = about?.archetype.name ?? f.persona.name;
+    if (about) {
+      out.push({
+        key: 'about-intro',
+        colors: ['#1C1C1E', '#000000'],
+        media: [],
+        ms: 5000,
+        backdrop: ticker('ABOUT YOU · ABOUT YOU', '12%'),
+        body: (
+          <>
+            {kicker('PART TWO', 0)}
+            {big('Enough numbers. Let’s talk about you.', 1)}
+            {line('What all that watching says about the person holding this phone.', 2)}
+          </>
+        ),
+      });
+      out.push({
+        key: 'profile',
+        focus: 'words',
+        colors: ['#0A84FF', '#001433'],
+        media: top.slice(0, 2).map((x) => x.id),
+        ms: 9000,
+        body: (
+          <>
+            {kicker('YOUR PROFILE', 0)}
+            {big('Where you land', 1)}
+            <TraitSliders axes={about.axes} delay={450} />
+          </>
+        ),
+      });
+    }
     out.push({
       key: 'persona',
       colors: ['#BF5AF2', '#FF375F'],
@@ -1641,8 +1677,8 @@ export function WrappedStory({
               <Icon name={iconOr(f.persona.icon)} size={38} color="#fff" />
             </Float>
           </Animated.View>
-          {big(f.persona.name, 2)}
-          {line(f.persona.blurb, 3)}
+          {big(personaName, 2)}
+          {line(about?.archetype.line ?? f.persona.blurb, 3)}
           <Animated.View entering={t(4)} style={styles.sChips}>
             {f.traits.map((x) => (
               <View key={x} style={styles.sChip}>
@@ -1653,6 +1689,83 @@ export function WrappedStory({
         </>
       ),
     });
+    if (about) {
+      about.awards.forEach((aw, n) => {
+        out.push({
+          key: `award-${aw.key}`,
+          colors: ['#FFD60A', '#3A2A00'],
+          media: [aw.titleId],
+          ms: 7000,
+          startFrac: 0.2 + 0.15 * n,
+          body: (
+            <>
+              {n === 0 && kicker('THE AWARDS', 0)}
+              {kicker(`${aw.title.toUpperCase()} GOES TO`, n === 0 ? 1 : 0)}
+              {big(name(aw.titleId), 2)}
+              {line(aw.line, 3)}
+            </>
+          ),
+        });
+      });
+      if (about.quiz) {
+        const q = about.quiz;
+        out.push({
+          key: 'truths',
+          focus: 'words',
+          colors: ['#30D158', '#00230C'],
+          media: [],
+          ms: 30000,
+          interactive: true,
+          backdrop: ticker('TWO TRUTHS · ONE LIE', '8%'),
+          body: (
+            <>
+              {kicker('TWO TRUTHS AND A LIE', 0)}
+              {big('One of these is made up.', 1)}
+              <LieQuiz statements={q.statements} lie={q.lie} reveal={q.reveal} onAnswer={(right) => onEvent?.(right ? 'quiz-right' : 'quiz-wrong')} onDone={() => advance.current()} />
+            </>
+          ),
+        });
+      }
+      out.push({
+        key: 'roast',
+        colors: ['#FF9F0A', '#331B00'],
+        media: top.slice(0, 1).map((x) => x.id),
+        ms: 8000,
+        startFrac: 0.6,
+        body: (
+          <>
+            {kicker('A LITTLE ROAST', 0)}
+            {big(about.roast, 1)}
+            {kicker('AND A TOAST', 2)}
+            {line(about.toast, 3)}
+          </>
+        ),
+      });
+      if (about.predictions.length) {
+        out.push({
+          key: 'next',
+          colors: ['#64D2FF', '#001A26'],
+          media: [],
+          ms: 8000,
+          backdrop: (
+            <>
+              <CoverWall sources={allCovers} opacity={0.35} tilt={8} />
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]} />
+            </>
+          ),
+          body: (
+            <>
+              {kicker('OUR GUESS FOR NEXT TIME', 0)}
+              {about.predictions.map((p, n) => (
+                <Animated.Text key={p} entering={t(1 + n)} style={[styles.sLine, { fontSize: 21, lineHeight: 28, fontWeight: '800', marginTop: n ? 14 : 8 }]}>
+                  {p}
+                </Animated.Text>
+              ))}
+            </>
+          ),
+        });
+      }
+    }
 
     // 20 · summary
     out.push({
@@ -1676,7 +1789,7 @@ export function WrappedStory({
               <View style={{ flex: 1 }}>
                 <Text style={styles.sKicker}>{input.subject ? `MY ${input.subject.name.toUpperCase()} WRAPPED` : `MY WRAPPED · ${f.range.label.toUpperCase()}`}</Text>
                 <Text style={styles.sSummaryTitle} numberOfLines={2}>
-                  {f.persona.name}
+                  {personaName}
                 </Text>
               </View>
             </View>
@@ -1716,7 +1829,7 @@ export function WrappedStory({
                 void Share.share({
                   message: `My ReelVault ${input.subject ? `${input.subject.name} ` : ''}Wrapped (${f.range.label}): ${minutesText(totalMin)} watched, ${f.plays} plays of ${f.videos} videos on ${f.activeDays} days${
                     top[0] ? `. My #1: "${top[0].label}"` : ''
-                  }${v.topTags[0] ? `, top tag #${v.topTags[0].label}` : ''}. I'm ${f.persona.name}.`,
+                  }${v.topTags[0] ? `, top tag #${v.topTags[0].label}` : ''}. I'm ${personaName}.`,
                 })
               }>
               <Icon name="share" size={16} color="#000" />
@@ -1768,7 +1881,11 @@ export function WrappedStory({
 
   // The browser preview can open a given card (`/preview?view=wrapped-story&card=6`), paused, for screenshots.
   const previewCard = Platform.OS === 'web' && typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('card') : null;
-  const [i, setI] = useState(() => Math.min(cards.length - 1, Math.max(0, Number(previewCard ?? 0) || 0)));
+  // A name works too (`&card=truths`).
+  const [i, setI] = useState(() => {
+    const named = previewCard ? cards.findIndex((c) => c.key === previewCard) : -1;
+    return named >= 0 ? named : Math.min(cards.length - 1, Math.max(0, Number(previewCard ?? 0) || 0));
+  });
   const [paused, setPaused] = useState(previewCard !== null);
   const [muted, setMuted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
