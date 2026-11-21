@@ -27,7 +27,7 @@ export const DELAYS: { minutes: number; label: string }[] = [
   { minutes: 0, label: 'When it airs' },
   { minutes: 60, label: '1 hour later' },
   { minutes: 180, label: '3 hours later' },
-  { minutes: 720, label: 'Next morning-ish (12 h)' },
+  { minutes: 720, label: '12 hours later' },
 ];
 
 export function parseReminderSettings(raw: string | null): ReminderSettings {

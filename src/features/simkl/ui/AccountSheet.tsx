@@ -5,10 +5,10 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Linking, Text, TextInput } from 'react-native';
+import { Linking, Text, TextInput, View } from 'react-native';
 
 import { confirmAction } from '@/features/vault/ui/confirm';
-import { Chip, Section, SheetFrame, ToggleRow, Wrap } from '@/features/vault/ui/sheets';
+import { Row, Rows, SheetFrame } from '@/features/vault/ui/sheets';
 import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { DELAYS } from '../reminders';
@@ -79,47 +79,48 @@ export function AccountSheet({
       .finally(() => setKeyBusy(false));
   }
 
+  const status = syncing ? 'Syncing…' : lastSyncAt ? `Synced ${fmtAgo(new Date(lastSyncAt).toISOString())}` : 'Not synced yet';
+  const delay = reminders ? (DELAYS.find((d) => d.minutes === reminders.delayMinutes) ?? DELAYS[0]) : DELAYS[0];
+
   return (
     <SheetFrame title="Simkl" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
       {!!note && <Text style={styles.note}>{note}</Text>}
-      <Section card label="Library">
-        <Text style={styles.body}>
-          {count} titles on this phone ·{' '}
-          {syncing ? 'syncing…' : lastSyncAt ? `synced ${fmtAgo(new Date(lastSyncAt).toISOString())}` : 'not synced yet'}
-        </Text>
-        <Wrap>
-          <Chip label="Sync now" onPress={() => void actions.sync(true)} />
-          <Chip label="Stats" onPress={onStats} />
-          <Chip label="Week / month / year review" onPress={onReview} />
-        </Wrap>
-        <Text style={styles.hint}>
-          ReelVault syncs when you open the app, at most every 15 minutes - pull down on a list to sync right away.
-        </Text>
-      </Section>
+      <Rows label="Library" footer="ReelVault syncs when you open the app, at most every 15 minutes. Pull down on a list to sync right away.">
+        <Row icon="sync" tint="#30D158" title="Sync now" sub={`${count} titles on this phone · ${status}`} onPress={() => void actions.sync(true)} />
+        <Row icon="stats" tint="#0A84FF" title="Stats" onPress={onStats} />
+        <Row icon="calendar" tint="#FF9F0A" title="Week, month and year review" onPress={onReview} />
+      </Rows>
 
-      <Section card label="Bring your history">
-        <Chip label="Import from IMDb or Letterboxd…" onPress={onImport} />
-        <Text style={styles.hint}>Your ratings, watched films and watchlists, from their CSV exports.</Text>
-      </Section>
+      <Rows label="Bring your history" footer="Your ratings, watched films and watchlists, from their CSV exports.">
+        <Row icon="import" tint="#5E5CE6" title="Import from IMDb or Letterboxd" onPress={onImport} />
+      </Rows>
 
-      <Section card label="Spoilers">
-        <ToggleRow
-          label="Hide unwatched episode titles and pictures"
-          value={spoilers}
-          onChange={(on) => {
-            setSpoilers(on);
-            void actions.setPrefs({ ...prefs, hideSpoilers: on });
+      <Rows label="Spoilers" footer={'Episode lists and Up Next show only "Episode 5" and a blurred still until you have seen it.'}>
+        <Row
+          icon="spoiler"
+          tint="#FF375F"
+          title="Hide unwatched episodes"
+          sub="Titles and pictures"
+          toggle={{
+            value: spoilers,
+            onChange: (on) => {
+              setSpoilers(on);
+              void actions.setPrefs({ ...prefs, hideSpoilers: on });
+            },
           }}
         />
-        <Text style={styles.hint}>Episode lists and Up Next show only "Episode 5" and a blurred still until you have seen it.</Text>
-      </Section>
+      </Rows>
 
-      <Section card label="Episode ratings">
-        <Text style={styles.body}>
-          {hasKey === null ? ' ' : hasKey ? 'IMDb ratings are on (your OMDb key is saved on this phone).' : 'Episodes show TVmaze ratings. Add a free OMDb key for IMDb ratings.'}
-        </Text>
+      <Rows
+        label="Episode ratings"
+        footer={
+          hasKey === false
+            ? 'On the OMDb page choose FREE, enter your email and open the link in the email they send. The key is in that email.'
+            : 'Your OMDb key stays on this phone.'
+        }>
+        <Row icon="star" tint="#FFD60A" title={hasKey ? 'IMDb ratings' : 'TVmaze ratings'} sub={hasKey === null ? undefined : hasKey ? 'Your OMDb key is saved' : 'Add a free OMDb key for IMDb ratings'} />
         {hasKey === false && (
-          <>
+          <View style={styles.keyRow}>
             <TextInput
               style={styles.input}
               value={keyText}
@@ -131,90 +132,69 @@ export function AccountSheet({
               keyboardAppearance={p.scheme}
               returnKeyType="done"
               onSubmitEditing={() => keyText.trim() && saveKey(keyText)}
+              accessibilityLabel="OMDb key"
             />
-            <Wrap>
-              <Chip label={keyBusy ? 'Checking…' : 'Save key'} on={!!keyText.trim() && !keyBusy} onPress={() => keyText.trim() && !keyBusy && saveKey(keyText)} />
-              <Chip label="Get a free key…" onPress={() => void Linking.openURL('https://www.omdbapi.com/apikey.aspx')} />
-            </Wrap>
-            <Text style={styles.hint}>
-              On the OMDb page choose FREE, enter your email and open the link in the email they send. The key is in that email.
-            </Text>
-          </>
+          </View>
         )}
+        {hasKey === false && !!keyText.trim() && <Row title={keyBusy ? 'Checking…' : 'Save key'} onPress={() => !keyBusy && saveKey(keyText)} />}
+        {hasKey === false && <Row icon="globe" tint="#8E8E93" title="Get a free key" sub="omdbapi.com" onPress={() => void Linking.openURL('https://www.omdbapi.com/apikey.aspx')} />}
         {hasKey && (
-          <Chip
-            label="Remove OMDb key"
+          <Row
+            title="Remove OMDb key"
             danger
             onPress={() => confirmAction('Remove the OMDb key?', 'Episodes then show TVmaze ratings instead of IMDb.', () => saveKey(''), { label: 'Remove', destructive: true })}
           />
         )}
-      </Section>
+      </Rows>
 
-      <Section card label="Notifications">
-        {reminders && (
-          <>
-            <ToggleRow
-              label="New episodes and releases"
-              value={reminders.enabled}
-              onChange={(enabled) => saveReminders({ ...reminders, enabled })}
+      {reminders && (
+        <Rows
+          label="Notifications"
+          footer="A notification when an episode of something you watch, put on hold or plan to watch comes out, and when a movie on your Plan to Watch list is released. Planned for the next three weeks, refreshed at every sync.">
+          <Row icon="bell" tint="#FF453A" title="New episodes and releases" toggle={{ value: reminders.enabled, onChange: (enabled) => saveReminders({ ...reminders, enabled }) }} />
+          {reminders.enabled && (
+            <Row
+              icon="clock"
+              tint="#8E8E93"
+              title="When"
+              value={delay.label}
+              onPress={() => saveReminders({ ...reminders, delayMinutes: DELAYS[(DELAYS.indexOf(delay) + 1) % DELAYS.length].minutes })}
             />
-            {reminders.enabled && (
-              <>
-                <Wrap>
-                  {DELAYS.map((d) => (
-                    <Chip
-                      key={d.minutes}
-                      label={d.label}
-                      on={reminders.delayMinutes === d.minutes}
-                      onPress={() => saveReminders({ ...reminders, delayMinutes: d.minutes })}
-                    />
-                  ))}
-                </Wrap>
-                <Wrap>
-                  <Chip label="Shows" on={reminders.types.show} onPress={() => saveReminders({ ...reminders, types: { ...reminders.types, show: !reminders.types.show } })} />
-                  <Chip label="Anime" on={reminders.types.anime} onPress={() => saveReminders({ ...reminders, types: { ...reminders.types, anime: !reminders.types.anime } })} />
-                  <Chip label="Movies" on={reminders.types.movie} onPress={() => saveReminders({ ...reminders, types: { ...reminders.types, movie: !reminders.types.movie } })} />
-                </Wrap>
-              </>
-            )}
-            <Text style={styles.hint}>
-              A notification when an episode of something you watch, put on hold or plan to watch comes out, and when a movie on
-              your Plan to Watch list is released. Planned on the phone for the next three weeks, refreshed at every sync.
-            </Text>
-          </>
-        )}
-      </Section>
+          )}
+          {reminders.enabled && <Row icon="tv" tint="#0A84FF" title="Shows" toggle={{ value: reminders.types.show, onChange: (show) => saveReminders({ ...reminders, types: { ...reminders.types, show } }) }} />}
+          {reminders.enabled && <Row icon="anime" tint="#BF5AF2" title="Anime" toggle={{ value: reminders.types.anime, onChange: (anime) => saveReminders({ ...reminders, types: { ...reminders.types, anime } }) }} />}
+          {reminders.enabled && <Row icon="movie" tint="#FF9F0A" title="Movies" toggle={{ value: reminders.types.movie, onChange: (movie) => saveReminders({ ...reminders, types: { ...reminders.types, movie } }) }} />}
+        </Rows>
+      )}
 
-      <Section card label="Rewatches">
-        <Text style={styles.body}>
-          Rewatches you log are always kept in ReelVault and count in Stats and the review.
-        </Text>
-        {rewatch && (
-          <>
-            <ToggleRow
-              label="Also save them on Simkl"
-              value={rewatch.on}
-              onChange={(on) =>
+      {rewatch && (
+        <Rows
+          label="Rewatches"
+          footer={`Rewatches you log are always kept in ReelVault and count in Stats and the review. Simkl keeps them only for PRO and VIP; your plan: ${rewatch.plan === 'unknown' ? 'not checked yet' : rewatch.plan.toUpperCase()}.`}>
+          <Row
+            icon="rewatch"
+            tint="#64D2FF"
+            title="Also save them on Simkl"
+            toggle={{
+              value: rewatch.on,
+              onChange: (on) =>
                 actions
                   .setRewatchSync(on)
                   .then((r) => {
                     setRewatch({ on: on && r.ok, plan: r.plan });
                     if (on && !r.ok) setNote('Saving rewatches on Simkl needs Simkl PRO or VIP (simkl.com/vip).');
                   })
-                  .catch((e) => setNote(String(e?.message ?? e)))
-              }
-            />
-            <Text style={styles.hint}>
-              Your Simkl plan: {rewatch.plan === 'unknown' ? 'not checked yet' : rewatch.plan.toUpperCase()}. Simkl keeps rewatches
-              only for PRO and VIP; on a free account they stay in ReelVault.
-            </Text>
-          </>
-        )}
-      </Section>
+                  .catch((e) => setNote(String(e?.message ?? e))),
+            }}
+          />
+        </Rows>
+      )}
 
-      <Section card label="Export">
-        <Chip
-          label="Export library as CSV…"
+      <Rows label="Export" footer="The CSV has title, status, your rating, episodes, IMDb rating and the Simkl link. The calendar file has the next two months of what you follow; no calendar permission needed.">
+        <Row
+          icon="share"
+          tint="#30D158"
+          title="Export library as CSV"
           onPress={() =>
             actions
               .exportCsv()
@@ -222,22 +202,22 @@ export function AccountSheet({
               .catch((e) => setNote(`Export failed: ${String(e?.message ?? e)}`))
           }
         />
-        <Text style={styles.hint}>Title, status, your rating, episodes, IMDb rating and the Simkl link - save it in Files.</Text>
-        <Chip
-          label="Add upcoming episodes to Calendar…"
+        <Row
+          icon="calendar"
+          tint="#FF453A"
+          title="Add upcoming episodes to Calendar"
           onPress={() =>
             actions
               .exportCalendar()
-              .then((n) => setNote(n ? `${n} dates ready - tap Add All in the next screen` : 'Nothing coming up in the next two months'))
+              .then((n) => setNote(n ? `${n} dates ready. Tap Add All on the next screen.` : 'Nothing coming up in the next two months'))
               .catch((e) => setNote(`Calendar export failed: ${String(e?.message ?? e)}`))
           }
         />
-        <Text style={styles.hint}>The next two months of episodes and releases you follow, as a calendar file. No calendar permission needed.</Text>
-      </Section>
+      </Rows>
 
-      <Section card label="Account">
-        <Chip
-          label="Sign out of Simkl"
+      <Rows label="Account">
+        <Row
+          title="Sign out of Simkl"
           danger
           onPress={() =>
             confirmAction(
@@ -250,15 +230,14 @@ export function AccountSheet({
             )
           }
         />
-      </Section>
+      </Rows>
     </SheetFrame>
   );
 }
 
 const makeStyles = (p: Palette) =>
   sheet({
-    body: { color: p.textSoft, fontSize: 14 },
-    hint: { color: p.textSecondary, fontSize: 12 },
     note: { color: p.link, fontSize: 13, fontWeight: '600' },
+    keyRow: { paddingHorizontal: 14, paddingVertical: 10 },
     input: { backgroundColor: p.circle, color: p.text, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   });
