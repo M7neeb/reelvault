@@ -16,7 +16,7 @@ import { GatedModal as Modal } from './screen';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -86,8 +86,9 @@ export function SlideshowModal({
   onClose: () => void;
 }) {
   const [opts, setOpts] = useState(options);
-  const [phase, setPhase] = useState<'setup' | 'play' | 'end'>(autoplay ? 'play' : 'setup');
   const [plan, setPlan] = useState(() => planShow(items, startIndex, opts));
+  // Nothing to show (say, Favourites only and none here): the setup page says why.
+  const [phase, setPhase] = useState<'setup' | 'play' | 'end'>(autoplay && plan.list.length ? 'play' : 'setup');
   const [run, setRun] = useState(0);
   const [stopped, setStopped] = useState(false);
   const set = (patch: Partial<SlideshowOptions>) => {
@@ -234,8 +235,7 @@ function Setup({
         <TextInput
           value={title}
           onChangeText={setTitle}
-          onEndEditing={() => title !== opts.title && onSet({ title: title.trim() })}
-          onBlur={() => title !== opts.title && onSet({ title: title.trim() })}
+          onBlur={() => title.trim() !== opts.title && onSet({ title: title.trim() })}
           placeholder="Give it a title (optional)"
           placeholderTextColor="rgba(255,255,255,0.45)"
           maxLength={60}
@@ -339,7 +339,7 @@ function Setup({
         <PressableScale
           style={[styles.playBtn, empty && { opacity: 0.4 }]}
           onPress={() => {
-            if (title !== opts.title) onSet({ title: title.trim() });
+            if (title.trim() !== opts.title) onSet({ title: title.trim() });
             onPlay();
           }}
           disabled={empty}
@@ -424,7 +424,7 @@ function Show({
     },
     [windowOf, clipMs, opts.speed]
   );
-  const videoVolume = music ? UNDER_MUSIC : 1;
+  const videoVolume = tune.playing ? UNDER_MUSIC : 1;
 
   /** Puts video `i` into a slot, at its start, paused. */
   const load = useCallback(
@@ -449,10 +449,26 @@ function Show({
     [list, enableVideo, windowOf, opts.sound, opts.speed, videoVolume] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  /** How long the current slow zoom runs from 1 to DRIFT, so a pause can carry on at the same pace. */
+  const driftMs = useRef<[number, number]>([0, 0]);
   const startDrift = (slot: Slot, v: VaultItem | undefined) => {
     dr[slot].value = 1;
-    if (opts.drift && v) dr[slot].value = withTiming(DRIFT, { duration: onScreenMs(v), easing: Easing.linear });
+    if (!opts.drift || !v) return;
+    driftMs.current[slot] = onScreenMs(v);
+    if (!pausedRef.current) dr[slot].value = withTiming(DRIFT, { duration: driftMs.current[slot], easing: Easing.linear });
   };
+  // The slow zoom stops with the show and goes on from where it was.
+  useEffect(() => {
+    if (!opts.drift) return;
+    const slot = st.current.active;
+    if (paused) cancelAnimation(dr[slot]);
+    else {
+      const left = driftMs.current[slot] * Math.max(0, (DRIFT - dr[slot].value) / (DRIFT - 1));
+      if (left > 0) dr[slot].value = withTiming(DRIFT, { duration: left, easing: Easing.linear });
+    }
+  }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const animateIn = (to: Slot, from: Slot, back: boolean) => {
     const t = opts.transition;
@@ -819,6 +835,10 @@ function useMusic(music: ShowMusic | null, paused: boolean) {
   });
   const track = useRef(0);
   const fade = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  /** Whether the music really plays (it may fail to load): the videos are turned down only then. */
+  const [on, setOn] = useState(false);
   const ramp = useCallback(
     (to: number, ms: number, then?: () => void) => {
       if (fade.current) clearInterval(fade.current);
@@ -842,16 +862,28 @@ function useMusic(music: ShowMusic | null, paused: boolean) {
   );
   useEffect(() => {
     if (!music) return;
+    let gone = false;
     track.current = 0;
-    void player.replaceAsync(music.trackUris[0]).then(() => {
-      player.play();
-      ramp(1, 1500);
-    });
+    const load = (i: number, first: boolean) =>
+      player
+        .replaceAsync(music.trackUris[i])
+        .then(() => {
+          if (gone) return;
+          setOn(true);
+          if (!pausedRef.current) player.play();
+          if (first) ramp(1, 1500);
+        })
+        .catch((e) => {
+          console.log(`[SLIDESHOW] music did not load: ${String(e)}`);
+          if (!gone) setOn(false);
+        });
+    void load(0, true);
     const sub = player.addListener('playToEnd', () => {
       track.current = (track.current + 1) % music.trackUris.length;
-      void player.replaceAsync(music.trackUris[track.current]).then(() => player.play());
+      void load(track.current, false);
     });
     return () => {
+      gone = true;
       sub.remove();
       if (fade.current) clearInterval(fade.current);
       try {
@@ -862,13 +894,14 @@ function useMusic(music: ShowMusic | null, paused: boolean) {
     };
   }, [music?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!music) return;
+    if (!music || !on) return;
     if (paused) player.pause();
     else player.play();
-  }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [paused, on]); // eslint-disable-line react-hooks/exhaustive-deps
   return {
+    playing: !!music && on,
     fadeOut: (then: () => void) => {
-      if (!music) return then();
+      if (!music || !on) return then();
       ramp(0, 1200, () => {
         player.pause();
         then();
