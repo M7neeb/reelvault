@@ -177,6 +177,7 @@ export function fixtureMangaData(): MangaData {
     orderDownloads: none,
     holdDownloads: none,
     pauseDownloads: () => undefined,
+    freeSpace: () => 6.4 * 1024 ** 3,
     exportCbz: async () => 'Saved 12 .cbz files to Files › On My iPhone › ReelVault › Exports › Lighthouse Keeper.',
     shareCbz: none,
     importBackup: none,

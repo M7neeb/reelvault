@@ -619,6 +619,13 @@ export function useMangaData(): MangaData {
         kickDownloads();
       },
       pauseDownloads: (paused) => setDownloadsPaused(paused),
+      freeSpace: () => {
+        try {
+          return Paths.availableDiskSpace;
+        } catch {
+          return null;
+        }
+      },
       exportCbz: async (seriesId, which) => {
         const series = allRef.current.find((x) => x.id === seriesId);
         if (!series) return '';

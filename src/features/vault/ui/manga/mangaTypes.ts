@@ -71,6 +71,8 @@ export type MangaActions = {
   setCoverFromImage?: (seriesId: string, img: ImageRef) => Promise<void>;
   /** A page through the share sheet, or saved to Photos (false = no permission). */
   sharePage?: (img: ImageRef) => Promise<void>;
+  /** Free space on the phone in bytes, or null when the system does not say. */
+  freeSpace: () => number | null;
   /** The cover's main colour, when it reads well as the title page's colour. */
   coverColor?: (seriesId: string) => Promise<string | null>;
   savePage?: (img: ImageRef) => Promise<boolean>;

@@ -342,7 +342,7 @@ export default function MangaScreen({
         </View>
       ) : (
       <View style={styles.titleRow}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
           {inDeleted ? 'Deleted' : 'Manga'}
         </Text>
         {!inDeleted && (

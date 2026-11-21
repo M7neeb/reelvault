@@ -101,6 +101,9 @@ export default function OverviewScreen({
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
   const { width } = useWindowDimensions();
+  // Four tiles in a row leave about 40 pt for a label under 360 pt (a small phone, or Display
+  // Zoom); words like "average" then break in the middle. Two by two there.
+  const narrow = width < 360;
 
   const [filter, setFilter] = useState<OvFilter>('all');
   const [sort, setSort] = useState<OvSort>('recent');
@@ -275,11 +278,11 @@ export default function OverviewScreen({
       )}
 
       {look !== 'simple' && (
-        <Animated.View entering={enterUp(1)} style={styles.stats}>
-          <Stat value={String(stats.titles)} label={stats.series ? `titles · ${stats.series} series` : 'titles'} />
-          <Stat value={stats.avgRating !== null ? `★ ${fmtStars(stats.avgRating)}` : '–'} label={`average of ${stats.rated} rated`} />
-          <Stat value={fmtMs(stats.watchedMs)} label="watched" />
-          <View style={styles.stat}>
+        <Animated.View entering={enterUp(1)} style={[styles.stats, narrow && styles.statsTwoByTwo]}>
+          <Stat value={String(stats.titles)} label={stats.series ? `titles · ${stats.series} series` : 'titles'} narrow={narrow} />
+          <Stat value={stats.avgRating !== null ? `★ ${fmtStars(stats.avgRating)}` : '–'} label={`average of ${stats.rated} rated`} narrow={narrow} />
+          <Stat value={fmtMs(stats.watchedMs)} label="watched" narrow={narrow} />
+          <View style={[styles.stat, narrow && styles.statHalf]}>
             <Ring size={40} stroke={5} progress={ins.ratedShare} color={p.rating}>
               <Text style={styles.ringText}>{Math.round(ins.ratedShare * 100)}</Text>
             </Ring>
@@ -755,10 +758,10 @@ function Spotlight({ entry, video, width, onOpen, onPlay }: { entry: OvEntry; vi
   );
 }
 
-function Stat({ value, label }: { value: string; label: string }) {
+function Stat({ value, label, narrow }: { value: string; label: string; narrow?: boolean }) {
   const styles = useStyles(makeStyles);
   return (
-    <View style={styles.stat}>
+    <View style={[styles.stat, narrow && styles.statHalf]}>
       <Text style={[styles.statValue, value.length > 7 && { fontSize: 15 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {value}
       </Text>
@@ -1081,6 +1084,8 @@ const makeStyles = (p: Palette) =>
     modeRow: { paddingHorizontal: SIDE, paddingTop: 10 },
 
     stats: { flexDirection: 'row', gap: 8, paddingHorizontal: SIDE, paddingTop: 14 },
+    statsTwoByTwo: { flexWrap: 'wrap' },
+    statHalf: { flexBasis: '45%' },
     ringText: { color: p.text, fontSize: 12, fontWeight: '900' },
     spot: { marginHorizontal: SIDE, marginTop: 14, borderRadius: 26, overflow: 'hidden', backgroundColor: p.elevated, justifyContent: 'flex-end' },
     spotDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 10 },

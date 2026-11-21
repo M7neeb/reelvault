@@ -11,7 +11,6 @@
  * done). Presentational only.
  */
 
-import { Paths } from 'expo-file-system';
 import { useMemo, useRef, useState } from 'react';
 import { Alert, Text, TouchableOpacity, View, type AlertButton } from 'react-native';
 
@@ -102,12 +101,7 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
   const now = cur ? label(cur.seriesId, cur.chapterId) : null;
   const sizeLeft = useMemo(() => downloadSizeLeft(items, queued), [items, queued]);
   const heldSize = useMemo(() => downloadSizeLeft(items, held), [items, held]);
-  let free: number | null = null;
-  try {
-    free = Paths.availableDiskSpace;
-  } catch {
-    // unknown
-  }
+  const free = actions.freeSpace();
 
   const [view, setView] = useState<'titles' | 'chapters'>('titles');
   const [list, setList] = useState<'queued' | 'held'>('queued');
