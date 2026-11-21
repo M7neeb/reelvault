@@ -202,6 +202,7 @@ export default function SimklScreen(props: SimklScreenProps) {
         : upNext(ofType).sort((a, b) => (b.nextDate ?? b.lastWatchedAt ?? '').localeCompare(a.nextDate ?? a.lastWatchedAt ?? '')),
     [ofType, category]
   );
+  const plannedHero = look !== 'compact' && look !== 'desktop';
   const planned = useMemo(
     () =>
       category === 'movie'
@@ -209,6 +210,8 @@ export default function SimklScreen(props: SimklScreenProps) {
         : [],
     [ofType, category]
   );
+  // The first one is the big card (except in the compact looks); the shelf holds the rest.
+  const plannedShelf = plannedHero ? planned.slice(1, 21) : planned.slice(0, 20);
   // This week on the home screen: what airs in the next seven days, and what came out lately.
   const [calRows, setCalRows] = useState<CatalogTitle[] | null>(null);
   useEffect(() => {
@@ -268,7 +271,9 @@ export default function SimklScreen(props: SimklScreenProps) {
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>{typeInfo.plural}</Text>
+        <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+          {typeInfo.plural}
+        </Text>
         {connected && (
           <View style={styles.buttons}>
             <IconButton icon="dice" label="Pick something for me" onPress={() => setPick(true)} />
@@ -378,23 +383,28 @@ export default function SimklScreen(props: SimklScreenProps) {
           {planned.length > 0 && (
             <>
               <SectionHead title="Plan to Watch" detail={`${planned.length}`} action="Pick one" onAction={() => setPick(true)} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
-                {planned.slice(0, 20).map((i) => (
-                  <TouchableOpacity key={i.simklId} style={{ width: 112 }} onPress={() => setOpen(asTitle(i))} accessibilityLabel={i.title}>
-                    <Poster path={i.poster} title={i.title} width={112} height={166} radius={10}>
-                      {i.imdbRating !== null && (
-                        <View style={styles.imdbBadge}>
-                          <Text style={styles.imdbBadgeText}>{i.imdbRating.toFixed(1)}</Text>
-                        </View>
-                      )}
-                    </Poster>
-                    <Text style={styles.shelfTitle} numberOfLines={1}>
-                      {i.title}
-                    </Text>
-                    <Text style={styles.shelfSub}>{[i.year, i.runtime ? `${i.runtime} min` : null].filter(Boolean).join(' · ')}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {plannedHero && (
+                <WatchlistHero key={planned[0].simklId} item={planned[0]} width={width - SIDE * 2} actions={actions} onOpen={() => setOpen(asTitle(planned[0]))} />
+              )}
+              {plannedShelf.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
+                  {plannedShelf.map((i) => (
+                    <TouchableOpacity key={i.simklId} style={{ width: 112 }} onPress={() => setOpen(asTitle(i))} accessibilityLabel={i.title}>
+                      <Poster path={i.poster} title={i.title} width={112} height={166} radius={10}>
+                        {i.imdbRating !== null && (
+                          <View style={styles.imdbBadge}>
+                            <Text style={styles.imdbBadgeText}>{i.imdbRating.toFixed(1)}</Text>
+                          </View>
+                        )}
+                      </Poster>
+                      <Text style={styles.shelfTitle} numberOfLines={1}>
+                        {i.title}
+                      </Text>
+                      <Text style={styles.shelfSub}>{[i.year, i.runtime ? `${i.runtime} min` : null].filter(Boolean).join(' · ')}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </>
           )}
 
@@ -979,6 +989,84 @@ function UpNextHero({
   );
 }
 
+/**
+ * The newest film on the watchlist, big: its wide picture (loaded once if the sync didn't bring it),
+ * title, year and length, and a way into its page. Same card as Up Next on Shows.
+ */
+function WatchlistHero({
+  item,
+  width,
+  actions,
+  onOpen,
+}: {
+  item: SimklItem;
+  width: number;
+  actions: SimklScreenProps['actions'];
+  onOpen: () => void;
+}) {
+  const styles = useStyles(makeStyles);
+  const [fan, setFan] = useState<string | null>(item.fanart ?? null);
+  useEffect(() => {
+    if (fan) return;
+    let on = true;
+    actions
+      .loadDetail(item.type, item.simklId)
+      .then((d) => on && setFan(d.fanart ?? null))
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, [item.simklId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const art = fanartUrl(fan);
+  // Each part keeps its words together, so a narrow screen wraps between parts, never inside "2 h 46 min".
+  const meta = ['On your watchlist', item.year, item.runtime ? fmtRuntime(item.runtime) : null]
+    .filter(Boolean)
+    .map((part) => String(part).replace(/ /g, '\u00a0'))
+    .join(' · ');
+  return (
+    <TouchableOpacity
+      style={[styles.hero, { width, height: Math.round(Math.max(200, width * 0.56)) }]}
+      onPress={onOpen}
+      activeOpacity={0.92}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.title}. ${meta}. Opens its page`}>
+      {art ? (
+        <Image source={{ uri: art }} style={StyleFill} contentFit="cover" transition={250} recyclingKey={art} />
+      ) : item.poster ? (
+        <Image source={{ uri: posterUrl(item.poster, '_m') }} style={StyleFill} contentFit="cover" blurRadius={26} />
+      ) : (
+        <View style={[StyleFill, { backgroundColor: `hsl(${hueFor(item.title)}, 38%, 24%)` }]} />
+      )}
+      <Fade color="0,0,0" from={0} to={0.9} style={[StyleFill, { top: '35%' }]} />
+      {item.imdbRating !== null && (
+        <View style={styles.heroChip}>
+          <Text style={styles.heroChipText}>IMDb {item.imdbRating.toFixed(1)}</Text>
+        </View>
+      )}
+      <View style={styles.heroBody}>
+        {!art && <Poster path={item.poster} title={item.title} width={70} height={104} radius={8} />}
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={styles.heroTitle} numberOfLines={2} maxFontSizeMultiplier={1.2}>
+            {item.title}
+          </Text>
+          <Text style={styles.upMeta} numberOfLines={2} maxFontSizeMultiplier={1.3}>
+            {meta}
+          </Text>
+        </View>
+        <Glass interactive clear fallback="rgba(255,255,255,0.22)" style={styles.heroRound}>
+          <Icon name="forward" size={18} color="#fff" weight="bold" />
+        </Glass>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+/** "2 h 46 min" from a runtime in minutes. */
+function fmtRuntime(min: number): string {
+  const h = Math.floor(min / 60);
+  return h ? (min % 60 ? `${h} h ${min % 60} min` : `${h} h`) : `${min} min`;
+}
+
 /** One title in the list: poster, next episode, progress, date, ratings. */
 function Row({ item, sort, detailed, onPress }: { item: SimklItem; sort: SimklSort; detailed?: boolean; onPress: () => void }) {
   const styles = useStyles(makeStyles);
@@ -1146,6 +1234,7 @@ const makeStyles = (p: Palette) =>
     heroWatchedText: { color: '#000', fontSize: 14, fontWeight: '800' },
     heroMore: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
     heroMoreText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    heroRound: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
     weekStrip: { flexDirection: 'row', gap: 6, paddingHorizontal: SIDE, paddingBottom: 12 },
     weekCell: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 14, backgroundColor: p.elevated },
     weekCellOn: { backgroundColor: p.text },

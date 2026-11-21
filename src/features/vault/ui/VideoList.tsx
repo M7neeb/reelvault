@@ -8,7 +8,7 @@
  */
 
 import { friendlyName } from '../names';
-import { FlatList, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Text, TouchableOpacity, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Image } from 'expo-image';
 
 import { fmtBytes, fmtClock, ratingLabel, type RatingLabels } from '../stats';
@@ -39,6 +39,8 @@ type Shared = {
   plays: Map<string, number>;
   onPress: (v: VaultItem) => void;
   onLongPress?: (v: VaultItem) => void;
+  /** Told about scrolling, e.g. to know when the header has left the picture at the top. */
+  onScroll?: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
 };
 
 function Check({ on }: { on: boolean }) {
@@ -58,6 +60,8 @@ export function DetailedList(props: Shared) {
       keyExtractor={(v) => v.id}
       ListHeaderComponent={props.header}
       ListEmptyComponent={props.empty}
+      onScroll={props.onScroll}
+      scrollEventThrottle={props.onScroll ? 32 : undefined}
       contentContainerStyle={{ paddingBottom: Math.max(40, tabSpace + 24) }}
       renderItem={({ item: v }) => {
         const saved = props.resume.get(v.id);

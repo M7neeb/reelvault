@@ -15,8 +15,8 @@
  * sidebar, viewer and every sheet live in their own files next to this one.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import type { VideoLink } from '@/features/simkl/ui/types';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,7 +42,7 @@ import {
   resolveScheme,
   safeBatchGb,
 } from './logic';
-import { setWatchInfo, watchInfoOf } from './logic';
+import { heroHeight, setWatchInfo, showsHero, watchInfoOf } from './logic';
 import { CompareModal } from './playback';
 import { SlideshowModal } from './slideshow';
 import { LiveProvider, useLiveScope } from './live';
@@ -101,6 +101,8 @@ import OverviewScreen from './OverviewScreen';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { DUR } from './motion';
 import { ModeSwitch } from './overviewParts';
+import ContinueHero from './ContinueHero';
+import { useWindowDimensions } from './screen';
 import PersonaliseSheet from './PersonaliseSheet';
 import { DesktopTable, DetailedList } from './VideoList';
 import { DEFAULT_VAULT_PREFS } from './types';
@@ -252,6 +254,16 @@ function VaultScreenBody({
   const [searchOpen, setSearchOpen] = useState(dev?.searchOpen ?? false);
   const [sidebarOpen, setSidebarOpen] = useState(dev?.sidebarOpen ?? false);
   const [viewOptionsOpen, setViewOptionsOpen] = useState(dev?.viewOptionsOpen ?? false);
+  // Whether the top of the list (the Continue watching picture) is still under the floating header.
+  const [overHero, setOverHero] = useState(true);
+  const { width: winW, height: winH } = useWindowDimensions();
+  const heroEnd = heroHeight(winW, winH) - (insets.top + 56);
+  const heroEndRef = useRef(heroEnd);
+  heroEndRef.current = heroEnd;
+  const watchHero = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const next = e.nativeEvent.contentOffset.y < heroEndRef.current;
+    setOverHero((was) => (was === next ? was : next));
+  }, []);
   const [bulkOpen, setBulkOpen] = useState(dev?.bulkOpen ?? false);
   const [settingsOpen, setSettingsOpen] = useState(dev?.settingsOpen ?? false);
   const [trimFor, setTrimFor] = useState<VaultItem[] | null>(null);
@@ -315,6 +327,12 @@ function VaultScreenBody({
         ? { kind: dev.filter }
         : { kind: 'all' }
   );
+  // The grid jumps to the top by itself when the filter changes (its resetKey), without a scroll
+  // event, so the header is over the picture again.
+  const gridResetKey = JSON.stringify(filter);
+  useEffect(() => {
+    if (viewOptions.look !== 'detailed') setOverHero(true);
+  }, [gridResetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [playing, setPlaying] = useState<VaultItem | null>(
     () => items.find((i) => i.id === dev?.viewerId) ?? null
   );
@@ -1127,6 +1145,30 @@ function VaultScreenBody({
 
   const look = viewOptions.look;
   const continuing = !special && !results && look !== 'desktop' ? shown.filter((v) => resume.has(v.id)).slice(0, 12) : [];
+  // The video stopped most recently goes big on top of All Videos (artwork look only; the
+  // "Backgrounds from the artwork" switch brings the plain row back). The rest stay in the row.
+  // Not with the phone turned sideways: the picture would be taller than the screen.
+  const heroItem =
+    showsHero({ art: !!p.art, look, filter: filter.kind, inPrivate, selectMode, width: winW, height: winH }) && continuing.length > 0
+      ? [...continuing].sort((a, b) => (resumeSavedAt(b.id) ?? 0) - (resumeSavedAt(a.id) ?? 0))[0]
+      : null;
+  const moreToFinish = heroItem ? continuing.filter((v) => v.id !== heroItem.id) : continuing;
+  const modeSwitch = !special && !inPrivate ? <ModeSwitch mode="watch" onChange={switchMode} /> : null;
+  // While the floating header sits on the picture it turns dark with white words (and so does the
+  // status bar), so in light mode it does not lay a white haze over the photo.
+  const onPicture = !!heroItem && overHero && prefs.videosMode === 'watch' &&
+    !playing && !slideshow && !sidebarOpen && !searchOpen && !viewOptionsOpen && !bulkOpen && !insights && !dupReview && !editingSmart;
+  const darkHeader = onPicture && p.scheme === 'light';
+  const liveScroll = live.scrollProps.onScroll;
+  // Always watched, hero or not: a picture can appear while the list is scrolled down (a video was
+  // just stopped halfway), and the header must then already know it is not over it.
+  const onGridScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      liveScroll?.(e);
+      watchHero(e);
+    },
+    [liveScroll, watchHero]
+  );
   // Pinned: your own shelf at the top of the library (All Videos only).
   const pinnedItems = filter.kind === 'all' && !results ? prefs.pinned.map((id) => publicItems.find((v) => v.id === id)).filter((v): v is VaultItem => !!v) : [];
   const unpin = (id: string) => {
@@ -1181,11 +1223,22 @@ function VaultScreenBody({
   }, [searchOpen, parsedSearch.text, items, allTags]);
 
   const listHeader = (
-    <View style={[styles.listHeader, { paddingTop: look === 'desktop' ? 8 : insets.top + 56 }]}>
-      {!special && !inPrivate && (
-        <View style={styles.modeRow}>
-          <ModeSwitch mode="watch" onChange={switchMode} />
-        </View>
+    <View style={[styles.listHeader, { paddingTop: heroItem ? 0 : look === 'desktop' ? 8 : insets.top + 56 }]}>
+      {heroItem ? (
+        <ContinueHero
+          item={heroItem}
+          name={friendlyName(heroItem)}
+          atMs={resume.get(heroItem.id) ?? 0}
+          topSpace={insets.top + 56}
+          top={modeSwitch && <View style={styles.modeRow}>{modeSwitch}</View>}
+          onResume={() => setPlaying(heroItem)}
+          onFavourite={(rating) => {
+            tick();
+            actions.onRate(heroItem.id, rating).catch(fail('RATE'));
+          }}
+        />
+      ) : (
+        modeSwitch && <View style={styles.modeRow}>{modeSwitch}</View>
       )}
       <View style={styles.subRow}>
         <Text style={styles.subText}>
@@ -1279,11 +1332,11 @@ function VaultScreenBody({
           </ScrollView>
         </View>
       )}
-      {continuing.length > 0 && (
+      {moreToFinish.length > 0 && (
         <View style={styles.continueBox}>
-          <Text style={styles.continueTitle}>Continue watching</Text>
+          <Text style={styles.continueTitle}>{heroItem ? 'More to finish' : 'Continue watching'}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.continueRow}>
-            {continuing.map((v) => {
+            {moreToFinish.map((v) => {
               const at = resume.get(v.id) ?? 0;
               return (
                 <TouchableOpacity key={v.id} style={styles.continueCard} onPress={() => setPlaying(v)} accessibilityLabel={`Continue ${friendlyName(v)}`}>
@@ -1406,6 +1459,7 @@ function VaultScreenBody({
           plays={playCounts}
           onPress={onPressTile}
           onLongPress={onLongPressTile}
+          onScroll={watchHero}
         />
       ) : look === 'desktop' && mode === 'normal' ? (
         <View style={{ flex: 1, paddingTop: insets.top + 56 }}>
@@ -1435,7 +1489,7 @@ function VaultScreenBody({
           viewOptions={gridOptions}
           header={listHeader}
           empty={empty}
-          resetKey={JSON.stringify(filter)}
+          resetKey={gridResetKey}
           selectMode={selectMode}
           selected={selected}
           mode={mode}
@@ -1448,19 +1502,20 @@ function VaultScreenBody({
           resume={look === 'simple' ? undefined : resume}
           seriesOf={seriesOf}
           onPinchSize={look === 'simple' || look === 'compact' ? undefined : pinchSize}
-          onScrollExtra={live.scrollProps.onScroll}
+          onScrollExtra={onGridScroll}
           livePreview={prefs.gridPreview && enableVideo && !playing && !slideshow && !insights}
         />
       )}
 
-      <Fade color={rgbOf(p.bg)} from={0} to={0.92} reverse style={[styles.headerFade, { height: insets.top + 64 }]} />
+      <Fade color={darkHeader ? '0,0,0' : rgbOf(p.bg)} from={0} to={darkHeader ? 0.4 : 0.92} reverse style={[styles.headerFade, { height: insets.top + 64 }]} />
+      {darkHeader && <StatusBar style="light" />}
       <View style={[styles.floatingHeader, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
         <IconButton icon="sidebar" label="Library" onPress={() => setSidebarOpen(true)} />
         <TouchableOpacity style={styles.headerTitleWrap} onPress={() => setSidebarOpen(true)} accessibilityLabel="Choose what to show">
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          <Text style={[styles.headerTitle, darkHeader && styles.headerTitleOnPicture]} numberOfLines={1}>
             {title}
           </Text>
-          <Icon name="down" size={11} color={p.textSecondary} weight="bold" />
+          <Icon name="down" size={11} color={darkHeader ? 'rgba(255,255,255,0.8)' : p.textSecondary} weight="bold" />
         </TouchableOpacity>
         <View style={styles.headerRight}>
           <IconButton icon="search" label="Search" onPress={() => setSearchOpen(true)} />
@@ -2167,6 +2222,7 @@ const makeStyles = (p: Palette) =>
     },
     headerTitleWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 6 },
     headerTitle: { flexShrink: 1, color: p.text, fontSize: 17, fontWeight: '700', textAlign: 'center' },
+    headerTitleOnPicture: { color: '#fff' },
     headerRight: { flexDirection: 'row', gap: 8 },
 
     listHeader: { paddingBottom: 8, gap: 6 },

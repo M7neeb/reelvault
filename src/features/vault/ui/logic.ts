@@ -766,3 +766,47 @@ export function pickKeeper<T extends KeeperTarget>(group: T[], plays: Map<string
       a.importedAt - b.importedAt
   )[0].id;
 }
+
+/**
+ * How much of a video is left, said the way a person would: seconds when it is nearly over, minutes
+ * and seconds for a short clip, minutes or hours for a long one. Home videos are often a few minutes,
+ * so "2 min" for 1:52 would be too rough.
+ */
+export function fmtTimeLeft(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${Math.max(1, s)} s`;
+  if (s < 600) {
+    const m = Math.floor(s / 60);
+    const rest = s % 60;
+    return rest ? `${m} min ${rest} s` : `${m} min`;
+  }
+  const m = Math.round(s / 60);
+  const h = Math.floor(m / 60);
+  return h ? (m % 60 ? `${h} h ${m % 60} min` : `${h} h`) : `${m} min`;
+}
+
+/** The line under a video you stopped halfway: where you stopped and how much is left. */
+export function stoppedLine(atMs: number, durationMs: number | null | undefined, clock: (ms: number) => string): string {
+  const where = `Stopped at ${clock(atMs)}`;
+  if (!durationMs || durationMs <= atMs) return where;
+  return `${where} · ${fmtTimeLeft(durationMs - atMs)} left`;
+}
+
+/**
+ * The height of the Continue watching picture: taller than wide on a phone, never more than about
+ * two thirds of the screen, and at least 400 pt, so the mode switch above and the title, line and
+ * buttons below never meet on a small phone with Larger Text.
+ */
+export function heroHeight(width: number, screenHeight: number): number {
+  const MIN = 400;
+  return Math.round(Math.min(Math.max(width * 1.15, MIN), Math.max(MIN, screenHeight * 0.62)));
+}
+
+/**
+ * Whether All Videos opens on the big Continue watching picture: the artwork look is on, the look is
+ * Standard or Detailed, nothing is being selected, it is the whole library (not Private, an album
+ * or a filter), and the phone is upright. Otherwise the plain "Continue watching" row stays.
+ */
+export function showsHero(o: { art: boolean; look: string; filter: string; inPrivate: boolean; selectMode: boolean; width: number; height: number }): boolean {
+  return o.art && (o.look === 'standard' || o.look === 'detailed') && o.filter === 'all' && !o.inPrivate && !o.selectMode && o.height >= o.width;
+}

@@ -381,3 +381,28 @@ export function chapterLabel(toc: TocLike[], chapter: number, bookTitle: string 
   }
   return own.title;
 }
+
+/**
+ * The plain shelf in two parts: the books still to read (want to read, or started but not in
+ * "Reading now") stand as covers in a row, the finished and dropped ones stay in the list. Every
+ * book lands in exactly one part, in the order it came. `heading` names the list part.
+ */
+export function splitShelf<T extends Pick<BookItem, 'status' | 'finishedAt' | 'lastReadAt'>>(books: readonly T[]): { toRead: T[]; listed: T[]; heading: string } {
+  const toRead: T[] = [];
+  const listed: T[] = [];
+  for (const b of books) (statusOf(b) === 'want' || statusOf(b) === 'reading' ? toRead : listed).push(b);
+  const dropped = listed.some((b) => statusOf(b) === 'dropped');
+  const finished = listed.some((b) => statusOf(b) === 'finished');
+  return { toRead, listed, heading: dropped ? (finished ? 'Finished and dropped' : 'Dropped') : 'Finished' };
+}
+
+/**
+ * The type size for a title set on a plain cover (a book without cover art): about an eighth of the
+ * cover's width, but small enough that the longest word fits on one line, so "Underground" never
+ * breaks into "Undergroun / d". Bold letters are taken as about 0.64 of the size wide.
+ */
+export function coverTitleSize(width: number, title: string): number {
+  const inner = width - 2 * Math.max(6, width * 0.1);
+  const longest = Math.max(1, ...title.split(/\s+/).map((w) => w.length));
+  return Math.max(9, Math.min(width * 0.13, inner / (longest * 0.64)));
+}

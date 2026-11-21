@@ -260,3 +260,29 @@ test('a sitting carries on across short breaks but not past midnight', () => {
   const after = new Date(2026, 10, 17, 0, 3).getTime();
   assert.equal(joinsSitting(t(23, 58), after, 60_000), false);
 });
+
+test('the plain shelf splits books to read (covers) from finished and dropped (list), each book once, order kept', async () => {
+  const { splitShelf } = await import('../src/features/vault/books/bookLogic.ts');
+  const b = (id, status, extra = {}) => ({ id, status, finishedAt: null, lastReadAt: null, ...extra });
+  const books = [b('a', 'want'), b('b', 'finished'), b('c', null), b('d', 'dropped'), b('e', null, { lastReadAt: 5 }), b('f', null, { finishedAt: 9 })];
+  const { toRead, listed, heading } = splitShelf(books);
+  assert.deepEqual(toRead.map((x) => x.id), ['a', 'c', 'e']);
+  assert.deepEqual(listed.map((x) => x.id), ['b', 'd', 'f']);
+  assert.equal(heading, 'Finished and dropped');
+  assert.equal(toRead.length + listed.length, books.length);
+  assert.equal(splitShelf([b('x', 'finished')]).heading, 'Finished');
+  assert.equal(splitShelf([b('y', 'dropped')]).heading, 'Dropped');
+  assert.deepEqual(splitShelf([]), { toRead: [], listed: [], heading: 'Finished' });
+});
+
+test('a plain cover sets its title small enough that the longest word stays whole', async () => {
+  const { coverTitleSize } = await import('../src/features/vault/books/bookLogic.ts');
+  // Short words: an eighth of the width, as before.
+  assert.equal(coverTitleSize(132, 'The Idiot'), 132 * 0.13);
+  // "Underground" (11 letters) on a 104 wide cover: smaller, so it fits the inner width.
+  const size = coverTitleSize(104, 'Notes from Underground');
+  assert.ok(size < 104 * 0.13);
+  assert.ok(11 * 0.64 * size <= 104 - 2 * 10.4 + 0.001);
+  // Never below 9, even for an absurd word.
+  assert.equal(coverTitleSize(104, 'Supercalifragilisticexpialidocious'), 9);
+});

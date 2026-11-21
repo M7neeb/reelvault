@@ -28,6 +28,8 @@ import {
   progressOf,
   shelfTags,
   sortBooks,
+  coverTitleSize,
+  splitShelf,
   statusOf,
   type BookFilter,
   type BookSort,
@@ -67,9 +69,10 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
         <Text style={[styles.plainInitial, { fontSize: Math.round(width * 0.46) }]}>{displayTitle(book).replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase()}</Text>
       </View>
     );
+  const titleSize = coverTitleSize(width, displayTitle(book));
   return (
     <View style={[styles.cover, styles.plainCover, { width, height, borderRadius: radius, padding: Math.max(6, width * 0.1) }]}>
-      <Text style={[styles.plainTitle, { fontSize: Math.max(9, width * 0.13), lineHeight: Math.max(11, width * 0.16) }]} numberOfLines={5}>
+      <Text style={[styles.plainTitle, { fontSize: titleSize, lineHeight: Math.round(titleSize * 1.23) }]} numberOfLines={5}>
         {displayTitle(book)}
       </Text>
       {width >= 80 && !!book.author && (
@@ -80,6 +83,9 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
     </View>
   );
 }
+
+/** Covers on the shelf row: three and a bit across a phone, so it reads as a row you can swipe. */
+const SHELF_COVER = 104;
 
 type Menu = 'more' | 'sort' | 'status' | 'tag' | 'rate' | 'newTag' | null;
 
@@ -173,6 +179,12 @@ export default function BooksScreen({
     const ids = new Set(reading.map((b) => b.id));
     return ids.size ? shown.filter((b) => !ids.has(b.id)) : shown;
   }, [reading, shown]);
+  // On the plain shelf with the artwork look, the books still to read stand as covers in a row;
+  // finished and dropped ones stay in the list below. Every book is in exactly one of the two.
+  const split = useMemo(() => (plain && p.art ? splitShelf(rest) : null), [plain, p.art, rest]);
+  const toRead = split?.toRead ?? [];
+  const listed = split && split.toRead.length ? split.listed : rest;
+  const listedTitle = split?.heading ?? '';
 
   const ids = selected ? [...selected] : [];
   const toggle = (id: string) =>
@@ -411,10 +423,59 @@ export default function BooksScreen({
 
       {!inDeleted && rest.length > 0 && (
         <TouchableOpacity style={styles.sectionRow} onPress={() => setMenu('sort')} accessibilityLabel="Change the order">
-          <Text style={styles.section}>{current ? 'On your shelf' : filter || query.trim() ? `${rest.length} ${rest.length === 1 ? 'book' : 'books'}` : 'Your shelf'}</Text>
+          <Text style={styles.section}>{current || toRead.length ? 'On your shelf' : filter || query.trim() ? `${rest.length} ${rest.length === 1 ? 'book' : 'books'}` : 'Your shelf'}</Text>
           <Text style={styles.sortText}>{BOOK_SORTS.find((s) => s.key === sort)?.label}</Text>
           <Icon name="sort" size={12} color={p.textSecondary} />
         </TouchableOpacity>
+      )}
+
+      {toRead.length > 0 && (
+        <FlatList
+          horizontal
+          data={toRead}
+          keyExtractor={(b) => b.id}
+          showsHorizontalScrollIndicator={false}
+          initialNumToRender={6}
+          contentContainerStyle={styles.coverShelf}
+          renderItem={({ item: b }) => (
+            <PressableScale
+              scaleTo={0.97}
+              style={styles.shelfBook}
+              onPress={() => onOpen(b)}
+              onLongPress={() => {
+                tick();
+                setMenuFor(b);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`${displayTitle(b)}${b.author ? ` by ${b.author}` : ''}, ${isStarted(b) ? fmtProgress(progressOf(b), true) : 'want to read'}. Hold for more`}>
+              <View style={styles.shelfCover}>
+                <BookCover book={b} width={SHELF_COVER} radius={4} />
+                {b.isPrivate && (
+                  <View style={styles.shelfLock}>
+                    <Icon name="lock" size={11} color="#fff" />
+                  </View>
+                )}
+              </View>
+              {isStarted(b) && (
+                <View style={styles.shelfBar}>
+                  <View style={[styles.barFill, { width: `${Math.round(progressOf(b) * 100)}%` }]} />
+                </View>
+              )}
+              {!!b.coverUri && (
+                <Text style={styles.shelfTitle} numberOfLines={2} maxFontSizeMultiplier={1.3}>
+                  {displayTitle(b)}
+                </Text>
+              )}
+            </PressableScale>
+          )}
+        />
+      )}
+
+      {toRead.length > 0 && listed.length > 0 && (
+        <View style={styles.listedHead}>
+          <Text style={styles.listedTitle}>{listedTitle}</Text>
+          <Text style={styles.listedCount}>{listed.length}</Text>
+        </View>
       )}
     </View>
   );
@@ -427,7 +488,7 @@ export default function BooksScreen({
     <View style={styles.empty}>
       <Text style={styles.emptyText}>No book matches that.</Text>
     </View>
-  ) : current ? null : (
+  ) : current || toRead.length ? null : (
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>No books yet</Text>
       <Text style={styles.emptyText}>
@@ -443,7 +504,7 @@ export default function BooksScreen({
   return (
     <View style={styles.screen}>
       <FlatList
-        data={rest}
+        data={listed}
         keyExtractor={(b) => b.id}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
@@ -674,6 +735,15 @@ const makeStyles = (p: Palette) =>
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: SIDE, marginTop: 30, marginBottom: 4, paddingTop: 12, borderTopWidth: 2, borderTopColor: p.text },
     section: { flex: 1, color: p.text, fontSize: 20, fontWeight: '800' },
     sortText: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
+    coverShelf: { gap: 14, paddingHorizontal: SIDE, paddingTop: 14, paddingBottom: 6 },
+    shelfBook: { width: SHELF_COVER },
+    shelfCover: { borderRadius: 4, shadowColor: '#000', shadowOpacity: p.scheme === 'dark' ? 0.4 : 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 6 } },
+    shelfLock: { position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+    shelfBar: { height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden', marginTop: 8 },
+    shelfTitle: { color: p.textSoft, fontSize: 13, fontWeight: '600', lineHeight: 17, marginTop: 8 },
+    listedHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginHorizontal: SIDE, marginTop: 26, marginBottom: 2 },
+    listedTitle: { color: p.text, fontSize: 18, fontWeight: '800' },
+    listedCount: { color: p.textSecondary, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
     row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: SIDE, paddingVertical: 12 },
     rowSel: { backgroundColor: p.accentSoft },
     rowText: { flex: 1 },
