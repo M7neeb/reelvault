@@ -10,6 +10,7 @@
  * here rather than imported from `repo.ts`/`tags.ts` - those pull in sqlite.
  */
 
+import { DEFAULT_SLIDESHOW, type SlideshowOptions } from '../slideshowPlan';
 import type { EditPlan } from '../edit';
 import type { CompressQuality } from '../smaller';
 
@@ -699,17 +700,7 @@ export const PLAYER_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 export const DEFAULT_PLAYER: PlayerOptions = { autoplayNext: false, endLoop: true, speed: 1, ambient: true, remaining: false, background: true, start: 'normal' };
 
-export type SlideshowOptions = {
-  order: 'shown' | 'shuffle' | 'oldest' | 'best';
-  /** Seconds of each video; 0 = the whole video. */
-  clipSec: number;
-  transition: 'fade' | 'zoom' | 'slide' | 'none';
-  titles: boolean;
-  sound: boolean;
-  repeat: boolean;
-};
-
-export const DEFAULT_SLIDESHOW: SlideshowOptions = { order: 'shown', clipSec: 0, transition: 'fade', titles: true, sound: true, repeat: false };
+export { DEFAULT_SLIDESHOW, type SlideshowOptions };
 
 export const DEFAULT_VAULT_PREFS: VaultPrefs = {
   ratingLabels: {},

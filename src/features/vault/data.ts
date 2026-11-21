@@ -6,6 +6,7 @@
  * preview (see the note at the top of `ui/types.ts`).
  */
 
+import { parseSlideshow } from './slideshowPlan';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Appearance, Linking } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -139,7 +140,7 @@ import {
   type OpenRequest,
 } from '@/features/vault/wrappedReminder';
 import { getAppIconName, setAlternateAppIcon, supportsAlternateIcons } from 'expo-alternate-app-icons';
-import { DEFAULT_PLAYER, DEFAULT_SLIDESHOW, DEFAULT_VAULT_PREFS, PLAYER_SPEEDS, WATCH_SORTS, type PlayerOptions, type SlideshowOptions, type VaultPrefs } from '@/features/vault/ui/types';
+import { DEFAULT_PLAYER, DEFAULT_VAULT_PREFS, PLAYER_SPEEDS, WATCH_SORTS, type PlayerOptions, type VaultPrefs } from '@/features/vault/ui/types';
 import { onThisDayPlan } from '@/features/vault/recap';
 import { weeklySummary } from '@/features/vault/yearHeat';
 import { ReelVaultMedia } from '../../../modules/reelvault-media';
@@ -307,20 +308,6 @@ const asRVideo = (v: Video) => ({
   rating: v.rating,
   tagNames: [] as string[],
 });
-
-function parseSlideshow(r: unknown): SlideshowOptions {
-  const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
-  const d = DEFAULT_SLIDESHOW;
-  const pick = <T extends string>(v: unknown, list: readonly T[], def: T): T => (list.includes(v as T) ? (v as T) : def);
-  return {
-    order: pick(o.order, ['shown', 'shuffle', 'oldest', 'best'] as const, d.order),
-    clipSec: typeof o.clipSec === 'number' && [0, 5, 10, 20, 30, 60].includes(o.clipSec) ? o.clipSec : d.clipSec,
-    transition: pick(o.transition, ['fade', 'zoom', 'slide', 'none'] as const, d.transition),
-    titles: typeof o.titles === 'boolean' ? o.titles : d.titles,
-    sound: typeof o.sound === 'boolean' ? o.sound : d.sound,
-    repeat: typeof o.repeat === 'boolean' ? o.repeat : d.repeat,
-  };
-}
 
 function parsePlayer(r: unknown): PlayerOptions {
   const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;

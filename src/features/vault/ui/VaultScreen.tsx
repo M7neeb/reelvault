@@ -44,7 +44,7 @@ import {
 } from './logic';
 import { heroHeight, setWatchInfo, showsHero, watchInfoOf } from './logic';
 import { CompareModal } from './playback';
-import { SlideshowModal } from './slideshow';
+import { SlideshowModal, type ShowMusic } from './slideshow';
 import { LiveProvider, useLiveScope } from './live';
 import { HomeRows } from './homeRowsUI';
 import { KeywordManager } from './keywordManager';
@@ -286,6 +286,15 @@ function VaultScreenBody({
   const [options, setOptions] = useState<{ title: string; options: OptionItem[] } | null>(null);
   const [dateFor, setDateFor] = useState<string[] | null>(null);
   const [slideshow, setSlideshow] = useState<{ items: VaultItem[]; start: number } | null>(null);
+  // Songs from the Audio section (not books, not private) that can play under a slideshow.
+  const showMusic = useMemo<ShowMusic[]>(
+    () =>
+      (audio?.items ?? [])
+        .filter((a) => a.kind === 'audio' && !a.isPrivate && a.trackUris.length > 0)
+        .sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
+        .map((a) => ({ id: a.id, title: a.title || a.filename, coverSource: a.coverSource, trackUris: a.trackUris })),
+    [audio?.items]
+  );
   const [keywordsOpen, setKeywordsOpen] = useState(dev?.keywordsOpen ?? false);
   const [triage, setTriage] = useState<{ mode: TriageMode; queue: VaultItem[] } | null>(null);
   const [compare, setCompare] = useState<[VaultItem, VaultItem] | null>(null);
@@ -2050,6 +2059,7 @@ function VaultScreenBody({
           startIndex={slideshow.start}
           enableVideo={enableVideo}
           options={prefs.slideshow}
+          music={showMusic}
           autoplay={dev?.slideshowPlay}
           onOptions={(o) => actions.setPrefs({ ...prefs, slideshow: o }).catch(fail('PREFS'))}
           onOpenVideo={(item) => {

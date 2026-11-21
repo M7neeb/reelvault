@@ -1,89 +1,73 @@
 /**
  * Slideshow: your videos one after another, full screen.
  *
- * First a setup page (order, how much of each video, transition, titles,
- * sound, repeat; remembered), then the show: two players take turns so each
- * video crossfades, zooms or slides into the next with no black gap, story
- * bars at the top, the video's name and date fading in, and taps to move on
- * (left / right third), pause (middle) or close (swipe down). The end card
- * offers Play again. In the browser preview the covers stand in for videos.
+ * First a setup page (a title, which videos, order, how long, transition, music, speed, look,
+ * sleep timer; remembered), then the show: two players take turns so each video crossfades,
+ * dips, zooms, slides or rises into the next with no black gap, music from your Audio library
+ * underneath if you picked some, story bars at the top, the name and date (or a bigger date when
+ * a new day starts) fading in, and taps to move on (left / right third), pause (middle) or close
+ * (swipe down). The end card offers Play again. In the browser preview the covers stand in for
+ * videos.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { GatedModal as Modal } from './screen';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { friendlyName } from '../names';
 import { highlightAt } from '../recap';
 import { allowRotation, restoreRotation } from '../rotate';
+import { CLIP_SECONDS, clipWindow, FIT_MINUTES, pickFor, planShow, showLength, SPEEDS, startsDay, STOP_AFTER } from '../slideshowPlan';
+import { useAudioControlsOptional } from './audio/playback';
 import { success, tick } from './haptics';
 import Icon from './Icon';
+import type { IconName } from './icons';
 import { gradient } from './insightParts';
 import { PressableScale } from './motion';
 import { Aurora, CoverWall, KenBurns, Words } from './storyKit';
-import { DEFAULT_SLIDESHOW, type SlideshowOptions, type VaultItem } from './types';
+import { DEFAULT_SLIDESHOW, type SlideshowOptions, type ThumbSource, type VaultItem } from './types';
+
+/** A piece of music from your Audio library that can play under a show. */
+export type ShowMusic = { id: string; title: string; coverSource: ThumbSource | null; trackUris: string[] };
 
 const ORDERS: { key: SlideshowOptions['order']; label: string }[] = [
   { key: 'shown', label: 'As shown' },
   { key: 'shuffle', label: 'Shuffle' },
   { key: 'oldest', label: 'Oldest first' },
+  { key: 'newest', label: 'Newest first' },
   { key: 'best', label: 'Best rated' },
 ];
-const CLIPS: { key: number; label: string }[] = [
-  { key: 0, label: 'Whole' },
-  { key: 5, label: '5 s' },
-  { key: 10, label: '10 s' },
-  { key: 20, label: '20 s' },
-  { key: 30, label: '30 s' },
-  { key: 60, label: '1 min' },
-];
-const TRANSITIONS: { key: SlideshowOptions['transition']; label: string; icon: 'eye' | 'search' | 'forward' | 'close' }[] = [
+const TRANSITIONS: { key: SlideshowOptions['transition']; label: string; icon: IconName }[] = [
   { key: 'fade', label: 'Fade', icon: 'eye' },
+  { key: 'dip', label: 'Dip', icon: 'moon' },
   { key: 'zoom', label: 'Zoom', icon: 'search' },
   { key: 'slide', label: 'Slide', icon: 'forward' },
+  { key: 'rise', label: 'Rise', icon: 'arrowUp' },
   { key: 'none', label: 'Cut', icon: 'close' },
 ];
 
 const FADE_MS = 700;
+/** How far the slow zoom goes over one video. */
+const DRIFT = 1.08;
+/** The video's own sound while music plays with "Video sound" on. */
+const UNDER_MUSIC = 0.3;
+const INTRO_MS = 3800;
 
-function shuffle<T>(list: T[]): T[] {
-  const a = [...list];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function ordered(items: VaultItem[], start: number, order: SlideshowOptions['order']): VaultItem[] {
-  switch (order) {
-    case 'shuffle':
-      return shuffle(items);
-    case 'oldest':
-      return [...items].sort((a, b) => a.createdAt - b.createdAt);
-    case 'best':
-      return [...items].sort((a, b) => b.rating - a.rating || b.createdAt - a.createdAt);
-    default:
-      return [...items.slice(start), ...items.slice(0, start)];
-  }
-}
-
-const fmtLength = (ms: number) => {
-  const m = Math.round(ms / 60_000);
-  return m < 1 ? 'under a minute' : m < 60 ? `about ${m} min` : `about ${Math.floor(m / 60)} h ${m % 60} min`;
-};
+const clipLabel = (s: number) => (s === 0 ? 'Whole' : s < 60 ? `${s} s` : `${s / 60} min`);
+const speedLabel = (s: number) => `${s}×`;
 
 export function SlideshowModal({
   items,
   startIndex,
   enableVideo,
   options = DEFAULT_SLIDESHOW,
+  music = [],
   autoplay = false,
   onOptions,
   onOpenVideo,
@@ -93,6 +77,8 @@ export function SlideshowModal({
   startIndex: number;
   enableVideo: boolean;
   options?: SlideshowOptions;
+  /** Your music (Audio library items that are not books). */
+  music?: ShowMusic[];
   /** Skip the setup page (the browser preview). */
   autoplay?: boolean;
   onOptions?: (o: SlideshowOptions) => void;
@@ -101,8 +87,9 @@ export function SlideshowModal({
 }) {
   const [opts, setOpts] = useState(options);
   const [phase, setPhase] = useState<'setup' | 'play' | 'end'>(autoplay ? 'play' : 'setup');
-  const [list, setList] = useState<VaultItem[]>(() => ordered(items, startIndex, opts.order));
+  const [plan, setPlan] = useState(() => planShow(items, startIndex, opts));
   const [run, setRun] = useState(0);
+  const [stopped, setStopped] = useState(false);
   const set = (patch: Partial<SlideshowOptions>) => {
     tick();
     const next = { ...opts, ...patch };
@@ -115,9 +102,25 @@ export function SlideshowModal({
     else restoreRotation();
   }, [phase]);
   useEffect(() => restoreRotation, []);
+  // Your audiobook pauses for the show and carries on when it closes.
+  const app = useAudioControlsOptional();
+  const appRef = useRef(app);
+  appRef.current = app;
+  useEffect(() => {
+    if (!enableVideo) return;
+    const was = appRef.current?.playing ?? false;
+    if (was) appRef.current?.pause();
+    return () => {
+      if (was) appRef.current?.resume();
+    };
+  }, [enableVideo]);
+  const track = music.find((m) => m.id === opts.music && m.trackUris.length) ?? null;
   const play = () => {
+    const next = planShow(items, startIndex, opts);
+    if (!next.list.length) return;
     success();
-    setList(ordered(items, startIndex, opts.order));
+    setPlan(next);
+    setStopped(false);
     setRun((n) => n + 1);
     setPhase('play');
   };
@@ -125,21 +128,30 @@ export function SlideshowModal({
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent supportedOrientations={['portrait', 'landscape']}>
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
-        {phase === 'setup' && <Setup items={items} opts={opts} onSet={set} onPlay={play} onClose={onClose} />}
-        {phase === 'play' && (
+        {phase === 'setup' && <Setup items={items} startIndex={startIndex} music={music} opts={opts} onSet={set} onPlay={play} onClose={onClose} />}
+        {phase === 'play' && plan.list.length > 0 && (
           <Show
             key={run}
-            list={list}
+            list={plan.list}
+            clipMs={plan.clipMs}
             opts={opts}
+            music={track}
+            intro={run === 1 || !opts.repeat}
             enableVideo={enableVideo}
             onSet={set}
             onSetup={() => setPhase('setup')}
-            onEnd={() => (opts.repeat ? play() : setPhase('end'))}
+            onEnd={(byTimer) => {
+              if (byTimer) {
+                setStopped(true);
+                setPhase('end');
+              } else if (opts.repeat) play();
+              else setPhase('end');
+            }}
             onOpenVideo={onOpenVideo}
             onClose={onClose}
           />
         )}
-        {phase === 'end' && <EndCard list={list} onReplay={play} onSetup={() => setPhase('setup')} onClose={onClose} />}
+        {phase === 'end' && <EndCard list={plan.list} title={opts.title} stoppedAfter={stopped ? opts.stopAfterMin : 0} onReplay={play} onSetup={() => setPhase('setup')} onClose={onClose} />}
       </GestureHandlerRootView>
     </Modal>
   );
@@ -147,13 +159,13 @@ export function SlideshowModal({
 
 /* ------------------------------------------------------------------ setup */
 
-function Chips<K extends string | number>({ options, value, onChange }: { options: { key: K; label: string }[]; value: K; onChange: (k: K) => void }) {
+function Chips<K extends string | number>({ options, value, onChange }: { options: { key: K; label: string }[]; value: K | null; onChange: (k: K) => void }) {
   return (
     <View style={styles.chips}>
       {options.map((o) => {
         const on = o.key === value;
         return (
-          <TouchableOpacity key={String(o.key)} style={[styles.chip, on && styles.chipOn]} onPress={() => onChange(o.key)} accessibilityState={{ selected: on }}>
+          <TouchableOpacity key={String(o.key)} style={[styles.chip, on && styles.chipOn]} onPress={() => onChange(o.key)} accessibilityRole="button" accessibilityState={{ selected: on }}>
             <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
           </TouchableOpacity>
         );
@@ -162,19 +174,46 @@ function Chips<K extends string | number>({ options, value, onChange }: { option
   );
 }
 
-function Toggle({ label, icon, on, onPress }: { label: string; icon: 'sound' | 'rewatch' | 'edit'; on: boolean; onPress: () => void }) {
+function Toggle({ label, icon, on, onPress }: { label: string; icon: IconName; on: boolean; onPress: () => void }) {
   return (
-    <TouchableOpacity style={[styles.toggle, on && styles.toggleOn]} onPress={onPress} accessibilityState={{ checked: on }}>
+    <TouchableOpacity style={[styles.toggle, on && styles.toggleOn]} onPress={onPress} accessibilityRole="switch" accessibilityState={{ checked: on }}>
       <Icon name={icon} size={16} color={on ? '#000' : '#fff'} />
       <Text style={[styles.toggleText, on && { color: '#000' }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-function Setup({ items, opts, onSet, onPlay, onClose }: { items: VaultItem[]; opts: SlideshowOptions; onSet: (p: Partial<SlideshowOptions>) => void; onPlay: () => void; onClose: () => void }) {
+function Setup({
+  items,
+  startIndex,
+  music,
+  opts,
+  onSet,
+  onPlay,
+  onClose,
+}: {
+  items: VaultItem[];
+  startIndex: number;
+  music: ShowMusic[];
+  opts: SlideshowOptions;
+  onSet: (p: Partial<SlideshowOptions>) => void;
+  onPlay: () => void;
+  onClose: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const total = items.reduce((a, v) => a + (opts.clipSec ? Math.min(opts.clipSec * 1000, v.durationMs ?? opts.clipSec * 1000) : (v.durationMs ?? 0)), 0);
+  // Shuffling here would only be for the count and length: any order gives the same numbers.
+  const plan = useMemo(() => planShow(items, startIndex, { ...opts, order: opts.order === 'shuffle' ? 'shown' : opts.order }), [items, startIndex, opts]);
+  const favourites = useMemo(() => pickFor(items, 'favourites').length, [items]);
+  const rated = useMemo(() => pickFor(items, 'rated').length, [items]);
+  const [title, setTitle] = useState(opts.title);
+  const count = plan.list.length;
+  const empty = count === 0;
+  const sub = empty
+    ? opts.pick === 'favourites'
+      ? 'None of these are favourites yet. Rate a video 8 or more to make it one.'
+      : 'None of these are rated yet.'
+    : `${plan.totalMs > 0 ? showLength(plan.totalMs) : 'Ready when you are'}${plan.leftOut ? ` · ${plan.leftOut} left out to fit` : ''}`;
   return (
     <View style={{ flex: 1 }}>
       <Aurora colors={['#2B1055', '#000000']} accent="#FF375F" width={width} height={height} />
@@ -182,42 +221,129 @@ function Setup({ items, opts, onSet, onPlay, onClose }: { items: VaultItem[]; op
         <CoverWall sources={items.slice(0, 24).map((v) => v.thumbSource)} rows={5} tile={110} />
       </View>
       <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.75) 45%, rgba(0,0,0,0.95) 100%)', 'rgba(0,0,0,0.7)')]} />
-      <ScrollView contentContainerStyle={[styles.setup, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 110 }]}>
+      <ScrollView contentContainerStyle={[styles.setup, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 110 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <View style={styles.setupTop}>
           <TouchableOpacity style={styles.round} onPress={onClose} accessibilityLabel="Close">
             <Icon name="close" size={16} color="#fff" />
           </TouchableOpacity>
         </View>
         <Text style={styles.setupKicker}>SLIDESHOW</Text>
-        <Words text={`${items.length} ${items.length === 1 ? 'video' : 'videos'}`} style={styles.setupTitle} />
-        <Text style={styles.setupSub}>{total > 0 ? fmtLength(total) : 'Ready when you are'}</Text>
+        <Words text={`${count} ${count === 1 ? 'video' : 'videos'}`} style={styles.setupTitle} />
+        <Text style={styles.setupSub}>{sub}</Text>
 
+        <TextInput
+          value={title}
+          onChangeText={setTitle}
+          onEndEditing={() => title !== opts.title && onSet({ title: title.trim() })}
+          onBlur={() => title !== opts.title && onSet({ title: title.trim() })}
+          placeholder="Give it a title (optional)"
+          placeholderTextColor="rgba(255,255,255,0.45)"
+          maxLength={60}
+          returnKeyType="done"
+          style={styles.titleInput}
+          accessibilityLabel="Slideshow title, shown at the start"
+        />
+
+        <Text style={styles.label}>Videos</Text>
+        <Chips
+          options={[
+            { key: 'all' as const, label: `All · ${items.length}` },
+            { key: 'favourites' as const, label: `Favourites · ${favourites}` },
+            { key: 'rated' as const, label: `Rated · ${rated}` },
+          ]}
+          value={opts.pick}
+          onChange={(pick) => onSet({ pick })}
+        />
         <Text style={styles.label}>Order</Text>
         <Chips options={ORDERS} value={opts.order} onChange={(order) => onSet({ order })} />
+
         <Text style={styles.label}>Of each video</Text>
-        <Chips options={CLIPS} value={opts.clipSec} onChange={(clipSec) => onSet({ clipSec })} />
-        <Text style={styles.hint}>{opts.clipSec ? 'The best part of each: around your bookmarks, else the middle.' : 'Every video plays to its end.'}</Text>
+        <Chips options={CLIP_SECONDS.map((s) => ({ key: s as number, label: clipLabel(s) }))} value={opts.fitMin ? null : opts.clipSec} onChange={(clipSec) => onSet({ clipSec, fitMin: 0 })} />
+        <Text style={styles.label}>Or make the whole show</Text>
+        <Chips options={FIT_MINUTES.filter((m) => m > 0).map((m) => ({ key: m as number, label: `${m} min` }))} value={opts.fitMin || null} onChange={(fitMin) => onSet({ fitMin: fitMin === opts.fitMin ? 0 : fitMin })} />
+        <Text style={styles.hint}>
+          {opts.fitMin
+            ? `Every video gets an equal part${plan.clipMs ? ` (about ${Math.round(plan.clipMs / opts.speed / 1000)} s)` : ''}, from its best moment. Tap again to turn it off.`
+            : opts.clipSec
+              ? 'The best part of each: around your bookmarks, else the middle.'
+              : 'Every video plays to its end.'}
+        </Text>
+
         <Text style={styles.label}>Between videos</Text>
         <View style={styles.chips}>
           {TRANSITIONS.map((t) => {
             const on = opts.transition === t.key;
             return (
-              <TouchableOpacity key={t.key} style={[styles.trans, on && styles.chipOn]} onPress={() => onSet({ transition: t.key })}>
+              <TouchableOpacity key={t.key} style={[styles.trans, on && styles.chipOn]} onPress={() => onSet({ transition: t.key })} accessibilityRole="button" accessibilityState={{ selected: on }}>
                 <Icon name={t.icon} size={18} color={on ? '#000' : '#fff'} />
                 <Text style={[styles.chipText, on && styles.chipTextOn]}>{t.label}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
-        <Text style={styles.label}>Extras</Text>
+
+        <Text style={styles.label}>Music</Text>
+        {music.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.musicRow}>
+            <TouchableOpacity style={[styles.music, !opts.music && styles.musicOn]} onPress={() => onSet({ music: null })} accessibilityRole="button" accessibilityState={{ selected: !opts.music }}>
+              <View style={[styles.musicArt, styles.musicNone]}>
+                <Icon name="muted" size={20} color="#fff" />
+              </View>
+              <Text style={styles.musicTitle} numberOfLines={2}>
+                No music
+              </Text>
+            </TouchableOpacity>
+            {music.map((m) => {
+              const on = opts.music === m.id;
+              return (
+                <TouchableOpacity key={m.id} style={[styles.music, on && styles.musicOn]} onPress={() => onSet({ music: m.id })} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`Music: ${m.title}`}>
+                  {m.coverSource ? (
+                    <Image source={m.coverSource} style={styles.musicArt} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.musicArt, styles.musicNone]}>
+                      <Icon name="audio" size={20} color="#fff" />
+                    </View>
+                  )}
+                  <Text style={styles.musicTitle} numberOfLines={2}>
+                    {m.title}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <Text style={styles.hint}>Add songs in the Audio section and they can play under your slideshows.</Text>
+        )}
+        {!!opts.music && <Text style={styles.hint}>{opts.sound ? 'The videos’ own sound plays quietly under the music.' : 'Only the music plays. Turn on Video sound to hear both.'}</Text>}
+
+        <Text style={styles.label}>Speed</Text>
+        <Chips options={SPEEDS.map((s) => ({ key: s as number, label: speedLabel(s) }))} value={opts.speed} onChange={(speed) => onSet({ speed })} />
+
+        <Text style={styles.label}>Look</Text>
         <View style={styles.chips}>
-          <Toggle label="Titles" icon="edit" on={opts.titles} onPress={() => onSet({ titles: !opts.titles })} />
-          <Toggle label="Sound" icon="sound" on={opts.sound} onPress={() => onSet({ sound: !opts.sound })} />
+          <Toggle label="Fill the screen" icon="fill" on={opts.fill} onPress={() => onSet({ fill: !opts.fill })} />
+          <Toggle label="Slow zoom" icon="search" on={opts.drift} onPress={() => onSet({ drift: !opts.drift })} />
+          <Toggle label="Names" icon="edit" on={opts.titles} onPress={() => onSet({ titles: !opts.titles })} />
+          <Toggle label="Date for each day" icon="calendar" on={opts.dayTitles} onPress={() => onSet({ dayTitles: !opts.dayTitles })} />
+        </View>
+
+        <Text style={styles.label}>Sound and repeat</Text>
+        <View style={styles.chips}>
+          <Toggle label="Video sound" icon="sound" on={opts.sound} onPress={() => onSet({ sound: !opts.sound })} />
           <Toggle label="Repeat" icon="rewatch" on={opts.repeat} onPress={() => onSet({ repeat: !opts.repeat })} />
         </View>
+        <Text style={styles.label}>Stop after</Text>
+        <Chips options={STOP_AFTER.map((m) => ({ key: m as number, label: m ? `${m} min` : 'Off' }))} value={opts.stopAfterMin} onChange={(stopAfterMin) => onSet({ stopAfterMin })} />
       </ScrollView>
       <View style={[styles.playBar, { paddingBottom: insets.bottom + 16 }]}>
-        <PressableScale style={styles.playBtn} onPress={onPlay} accessibilityLabel="Play the slideshow">
+        <PressableScale
+          style={[styles.playBtn, empty && { opacity: 0.4 }]}
+          onPress={() => {
+            if (title !== opts.title) onSet({ title: title.trim() });
+            onPlay();
+          }}
+          disabled={empty}
+          accessibilityLabel="Play the slideshow">
           <Icon name="play" size={20} color="#000" />
           <Text style={styles.playText}>Play</Text>
         </PressableScale>
@@ -232,7 +358,10 @@ type Slot = 0 | 1;
 
 function Show({
   list,
+  clipMs,
   opts,
+  music,
+  intro,
   enableVideo,
   onSet,
   onSetup,
@@ -241,11 +370,16 @@ function Show({
   onClose,
 }: {
   list: VaultItem[];
+  clipMs: number;
   opts: SlideshowOptions;
+  music: ShowMusic | null;
+  /** Show the title at the start (not again on every repeat). */
+  intro: boolean;
   enableVideo: boolean;
   onSet: (p: Partial<SlideshowOptions>) => void;
   onSetup: () => void;
-  onEnd: () => void;
+  /** The show ran out, or the sleep timer stopped it (`byTimer`). */
+  onEnd: (byTimer: boolean) => void;
   onOpenVideo?: (item: VaultItem) => void;
   onClose: () => void;
 }) {
@@ -258,6 +392,7 @@ function Show({
   const [controls, setControls] = useState(true);
   const [titleKey, setTitleKey] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [showIntro, setShowIntro] = useState(intro && !!opts.title);
 
   const p0 = useVideoPlayer(null, (pl) => {
     pl.loop = false;
@@ -268,24 +403,28 @@ function Show({
     pl.timeUpdateEventInterval = 0.25;
   });
   const players: [VideoPlayer, VideoPlayer] = [p0, p1];
+  const tune = useMusic(enableVideo ? music : null, paused);
 
   const op = [useSharedValue(1), useSharedValue(0)];
   const sc = [useSharedValue(1), useSharedValue(1)];
   const tx = [useSharedValue(0), useSharedValue(0)];
+  const ty = [useSharedValue(0), useSharedValue(0)];
+  const dr = [useSharedValue(1), useSharedValue(1)];
   const drag = useSharedValue(0);
 
-  const st = useRef({ index: 0, active: 0 as Slot, busy: false, ends: [0, 0] as [number, number], starts: [0, 0] as [number, number], layer: [0, 1] as [number, number] });
+  const st = useRef({ index: 0, active: 0 as Slot, busy: false, ends: [Infinity, Infinity] as [number, number], starts: [0, 0] as [number, number], layer: [0, 1] as [number, number] });
 
-  /** Where a video starts and stops in this show (ms). */
-  const clipWindow = useCallback(
+  const windowOf = useCallback((v: VaultItem) => clipWindow(v.durationMs, clipMs, (d, c) => highlightAt(d, [], c)), [clipMs]);
+  /** How long a video stays on screen, on the clock (for the slow zoom). */
+  const onScreenMs = useCallback(
     (v: VaultItem) => {
-      const d = v.durationMs ?? 0;
-      if (!opts.clipSec || !d || d <= opts.clipSec * 1000 + 1500) return { start: 0, end: d || Infinity };
-      const start = highlightAt(d, [], opts.clipSec * 1000);
-      return { start, end: start + opts.clipSec * 1000 };
+      const w = windowOf(v);
+      const media = w.end === Infinity ? (clipMs || 8000) : w.end - w.start;
+      return Math.max(1500, media / opts.speed);
     },
-    [opts.clipSec]
+    [windowOf, clipMs, opts.speed]
   );
+  const videoVolume = music ? UNDER_MUSIC : 1;
 
   /** Puts video `i` into a slot, at its start, paused. */
   const load = useCallback(
@@ -294,33 +433,52 @@ function Show({
       st.current.layer[slot] = i;
       setLayer((l) => (slot === 0 ? [i, l[1]] : [l[0], i]));
       if (!enableVideo || !v?.uri) return;
-      const w = clipWindow(v);
+      const w = windowOf(v);
       st.current.starts[slot] = w.start;
       st.current.ends[slot] = w.end;
       try {
         await players[slot].replaceAsync(v.uri);
         players[slot].muted = !opts.sound;
-        players[slot].volume = 1;
+        players[slot].volume = videoVolume;
+        players[slot].playbackRate = opts.speed;
         players[slot].currentTime = w.start / 1000;
       } catch (e) {
         console.log(`[SLIDESHOW] could not load ${v.filename}: ${String(e)}`);
       }
     },
-    [list, enableVideo, clipWindow, opts.sound] // eslint-disable-line react-hooks/exhaustive-deps
+    [list, enableVideo, windowOf, opts.sound, opts.speed, videoVolume] // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  const startDrift = (slot: Slot, v: VaultItem | undefined) => {
+    dr[slot].value = 1;
+    if (opts.drift && v) dr[slot].value = withTiming(DRIFT, { duration: onScreenMs(v), easing: Easing.linear });
+  };
 
   const animateIn = (to: Slot, from: Slot, back: boolean) => {
     const t = opts.transition;
-    const dur = t === 'none' ? 0 : FADE_MS;
+    const dur = t === 'none' ? 0 : t === 'dip' ? FADE_MS * 1.4 : FADE_MS;
     const ease = { duration: dur, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+    tx[to].value = 0;
+    ty[to].value = 0;
+    sc[to].value = 1;
     if (t === 'slide') {
       tx[to].value = back ? -width : width;
       op[to].value = 1;
       tx[to].value = withTiming(0, ease);
       tx[from].value = withTiming(back ? width * 0.35 : -width * 0.35, ease);
-      op[from].value = withTiming(0.0, { duration: dur });
+      op[from].value = withTiming(0, { duration: dur });
+    } else if (t === 'rise') {
+      ty[to].value = back ? -height : height;
+      op[to].value = 1;
+      ty[to].value = withTiming(0, ease);
+      ty[from].value = withTiming(back ? height * 0.25 : -height * 0.25, ease);
+      op[from].value = withTiming(0, { duration: dur });
+    } else if (t === 'dip') {
+      // Through black: the old one goes out, then the new one comes in.
+      op[from].value = withTiming(0, { duration: dur / 2 });
+      op[to].value = 0;
+      op[to].value = withSequence(withTiming(0, { duration: dur / 2 }), withTiming(1, { duration: dur / 2 }));
     } else {
-      tx[to].value = 0;
       sc[to].value = t === 'zoom' ? 1.14 : 1;
       sc[to].value = withTiming(1, { duration: dur + 300, easing: Easing.out(Easing.quad) });
       op[to].value = withTiming(1, { duration: dur });
@@ -334,7 +492,7 @@ function Show({
     async (target: number) => {
       const s = st.current;
       if (s.busy) return;
-      if (target >= list.length) return onEnd();
+      if (target >= list.length) return onEnd(false);
       if (target < 0) target = 0;
       if (target === s.index) return;
       s.busy = true;
@@ -343,6 +501,7 @@ function Show({
       if (s.layer[to] !== target) await load(to, target);
       if (enableVideo && !paused) players[to].play();
       const dur = animateIn(to, from, target < s.index);
+      startDrift(to, list[target]);
       s.active = to;
       s.index = target;
       setActive(to);
@@ -353,11 +512,12 @@ function Show({
         players[from].pause();
         sc[from].value = 1;
         tx[from].value = 0;
+        ty[from].value = 0;
         if (target + 1 < list.length) void load(from, target + 1);
         s.busy = false;
       }, dur + 60);
     },
-    [list.length, load, enableVideo, paused, onEnd] // eslint-disable-line react-hooks/exhaustive-deps
+    [list, load, enableVideo, paused, onEnd] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // Start: the first video in slot 0, the second waiting in slot 1.
@@ -365,12 +525,22 @@ function Show({
     (async () => {
       await load(0, 0);
       if (enableVideo) p0.play();
+      startDrift(0, list[0]);
       if (list.length > 1) await load(1, 1);
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The title at the start fades away by itself.
+  useEffect(() => {
+    if (!showIntro) return;
+    const t = setTimeout(() => setShowIntro(false), INTRO_MS);
+    return () => clearTimeout(t);
+  }, [showIntro]);
+
   // The clip ends (or the video does): on to the next.
   useEffect(() => {
+    // Without videos (the browser preview) the timer below moves the show on.
+    if (!enableVideo) return;
     const subs = ([0, 1] as Slot[]).flatMap((slot) => [
       players[slot].addListener('timeUpdate', ({ currentTime }) => {
         const s = st.current;
@@ -378,7 +548,8 @@ function Show({
         const ms = currentTime * 1000;
         const len = Math.max(1, Math.min(s.ends[slot], (players[slot].duration || Infinity) * 1000) - s.starts[slot]);
         setProgress(Math.max(0, Math.min(1, (ms - s.starts[slot]) / len)));
-        if (s.ends[slot] !== Infinity && ms >= s.ends[slot] - (opts.transition === 'none' ? 0 : FADE_MS * 0.6)) void go(s.index + 1);
+        // The transition starts a little early so it ends as the clip does (in the video's own time).
+        if (s.ends[slot] !== Infinity && ms >= s.ends[slot] - (opts.transition === 'none' ? 0 : FADE_MS * 0.6 * opts.speed)) void go(s.index + 1);
       }),
       players[slot].addListener('playToEnd', () => {
         if (slot === st.current.active) void go(st.current.index + 1);
@@ -390,7 +561,7 @@ function Show({
   // The browser preview: covers, moving on by a timer.
   useEffect(() => {
     if (enableVideo || paused) return;
-    const ms = (opts.clipSec || 5) * 1000;
+    const ms = clipMs ? clipMs / opts.speed : 5000;
     const started = Date.now();
     const t = setInterval(() => {
       const f = (Date.now() - started) / ms;
@@ -401,11 +572,31 @@ function Show({
       }
     }, 100);
     return () => clearInterval(t);
-  }, [index, paused, enableVideo, opts.clipSec, go]);
+  }, [index, paused, enableVideo, clipMs, opts.speed, go]);
 
   useEffect(() => {
-    for (const pl of players) pl.muted = !opts.sound;
-  }, [opts.sound]); // eslint-disable-line react-hooks/exhaustive-deps
+    for (const pl of players) {
+      pl.muted = !opts.sound;
+      pl.volume = videoVolume;
+    }
+  }, [opts.sound, videoVolume]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sleep timer: the show stops by itself after the time you chose (paused time does not count).
+  const played = useRef(0);
+  useEffect(() => {
+    if (!opts.stopAfterMin || paused) return;
+    let last = Date.now();
+    const t = setInterval(() => {
+      played.current += Date.now() - last;
+      last = Date.now();
+      if (played.current >= opts.stopAfterMin * 60_000) {
+        clearInterval(t);
+        for (const pl of players) pl.pause();
+        tune.fadeOut(() => onEnd(true));
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [opts.stopAfterMin, paused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Controls hide themselves after a moment.
   useEffect(() => {
@@ -457,12 +648,19 @@ function Show({
   const stage = useAnimatedStyle(() => ({ transform: [{ translateY: drag.value }, { scale: 1 - Math.min(0.12, drag.value / 2400) }], borderRadius: drag.value > 4 ? 24 : 0 }));
   const layerStyle = (slot: Slot) =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    useAnimatedStyle(() => ({ opacity: op[slot].value, transform: [{ translateX: tx[slot].value }, { scale: sc[slot].value }] }));
+    useAnimatedStyle(() => ({ opacity: op[slot].value, transform: [{ translateX: tx[slot].value }, { translateY: ty[slot].value }, { scale: sc[slot].value }] }));
+  const driftStyle = (slot: Slot) =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useAnimatedStyle(() => ({ transform: [{ scale: dr[slot].value }] }));
   const l0 = layerStyle(0);
   const l1 = layerStyle(1);
+  const d0 = driftStyle(0);
+  const d1 = driftStyle(1);
 
   const item = list[index];
   const many = list.length > 40;
+  const newDay = opts.dayTitles && startsDay(list, index);
+  const caption = item && (opts.titles || newDay) && !showIntro;
 
   return (
     <GestureDetector gesture={gestures}>
@@ -471,16 +669,19 @@ function Show({
           const v = list[layer[slot]];
           return (
             <Animated.View key={slot} style={[StyleSheet.absoluteFill, slot === 0 ? l0 : l1, { zIndex: active === slot ? 2 : 1 }]} pointerEvents="none">
-              {enableVideo ? (
-                <VideoView player={players[slot]} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls={false} allowsPictureInPicture={false} />
-              ) : v ? (
-                <KenBurns key={`${slot}-${layer[slot]}`} source={v.thumbSource} ms={(opts.clipSec || 5) * 1000 + 2000} seed={layer[slot]} />
-              ) : null}
+              <Animated.View style={[StyleSheet.absoluteFill, slot === 0 ? d0 : d1]}>
+                {enableVideo ? (
+                  <VideoView player={players[slot]} style={StyleSheet.absoluteFill} contentFit={opts.fill ? 'cover' : 'contain'} nativeControls={false} allowsPictureInPicture={false} />
+                ) : v ? (
+                  <KenBurns key={`${slot}-${layer[slot]}`} source={v.thumbSource} ms={(clipMs ? clipMs / opts.speed : 5000) + 2000} seed={layer[slot]} />
+                ) : null}
+              </Animated.View>
             </Animated.View>
           );
         })}
 
         <View style={[styles.topShade, { height: insets.top + 110 }, gradient('linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 100%)', 'transparent')]} pointerEvents="none" />
+        {caption && <View style={[styles.bottomShade, { height: insets.bottom + 260 }, gradient('linear-gradient(0deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 100%)', 'transparent')]} pointerEvents="none" />}
         <View style={[styles.bars, { top: insets.top + 8 }]} pointerEvents="none">
           {many ? (
             <View style={styles.bar}>
@@ -495,12 +696,30 @@ function Show({
           )}
         </View>
 
-        {opts.titles && item && (
+        {showIntro && (
+          <Animated.View entering={FadeIn.duration(700)} exiting={FadeOut.duration(600)} style={[StyleSheet.absoluteFill, styles.intro]} pointerEvents="none">
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.35)' }]} />
+            <Words text={opts.title} style={styles.introTitle} delay={250} stagger={90} maxWidth={width - 48} />
+            <Text style={styles.introSub}>{dateSpan(list)}</Text>
+          </Animated.View>
+        )}
+
+        {caption && (
           <Animated.View key={titleKey} entering={FadeIn.duration(500).delay(250)} exiting={FadeOut.duration(250)} style={[styles.caption, { bottom: insets.bottom + 110 }]} pointerEvents="none">
-            <Text style={styles.captionDate}>
-              {new Date(item.createdAt).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase()}
-            </Text>
-            <Words text={friendlyName(item)} style={styles.captionTitle} delay={300} stagger={60} />
+            {newDay ? (
+              <>
+                <Text style={styles.captionDate}>{new Date(item.createdAt).toLocaleDateString(undefined, { weekday: 'long' }).toUpperCase()}</Text>
+                <Words text={new Date(item.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })} style={styles.dayTitle} delay={250} stagger={70} />
+                {opts.titles && <Text style={styles.captionSmall}>{friendlyName(item)}</Text>}
+              </>
+            ) : (
+              <>
+                <Text style={styles.captionDate}>
+                  {new Date(item.createdAt).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase()}
+                </Text>
+                <Words text={friendlyName(item)} style={styles.captionTitle} delay={300} stagger={60} />
+              </>
+            )}
           </Animated.View>
         )}
 
@@ -512,9 +731,10 @@ function Show({
               </TouchableOpacity>
               <Text style={styles.count}>
                 {index + 1} / {list.length}
+                {opts.speed !== 1 ? `  ·  ${speedLabel(opts.speed)}` : ''}
               </Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity style={styles.round} onPress={() => onSet({ sound: !opts.sound })} accessibilityLabel={opts.sound ? 'Mute' : 'Sound on'}>
+                <TouchableOpacity style={styles.round} onPress={() => onSet({ sound: !opts.sound })} accessibilityLabel={opts.sound ? 'Mute the videos' : 'Video sound on'}>
                   <Icon name={opts.sound ? 'sound' : 'muted'} size={16} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -528,6 +748,14 @@ function Show({
                 </TouchableOpacity>
               </View>
             </View>
+            {music && (
+              <View style={[styles.nowMusic, { top: insets.top + 72 }]} pointerEvents="none">
+                <Icon name="audio" size={12} color="#fff" />
+                <Text style={styles.nowMusicText} numberOfLines={1}>
+                  {music.title}
+                </Text>
+              </View>
+            )}
             <View style={[styles.ctlBottom, { bottom: insets.bottom + 24 }]}>
               <TouchableOpacity style={[styles.round, index === 0 && { opacity: 0.4 }]} disabled={index === 0} onPress={() => go(index - 1)} accessibilityLabel="Previous video">
                 <Icon name="back" size={18} color="#fff" />
@@ -557,15 +785,101 @@ function Show({
             <Text style={styles.pausedText}>Paused</Text>
           </View>
         )}
-        {height < width && <View />}
       </Animated.View>
     </GestureDetector>
   );
 }
 
+/** "14 October 2026", "3 – 9 October 2026", "October 2025 – March 2026". */
+function dateSpan(list: VaultItem[]): string {
+  if (!list.length) return '';
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of list) {
+    lo = Math.min(lo, v.createdAt);
+    hi = Math.max(hi, v.createdAt);
+  }
+  const a = new Date(lo);
+  const b = new Date(hi);
+  const full = (d: Date) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  if (a.toDateString() === b.toDateString()) return full(a);
+  if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) return `${a.getDate()} – ${full(b)}`;
+  const my = (d: Date) => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return my(a) === my(b) ? my(a) : `${my(a)} – ${my(b)}`;
+}
+
+/**
+ * Music under the show: the tracks of one Audio item, one after another and round again, fading
+ * in at the start and out at the end; paused with the show.
+ */
+function useMusic(music: ShowMusic | null, paused: boolean) {
+  const player = useVideoPlayer(null, (pl) => {
+    pl.loop = false;
+    pl.volume = 0;
+  });
+  const track = useRef(0);
+  const fade = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ramp = useCallback(
+    (to: number, ms: number, then?: () => void) => {
+      if (fade.current) clearInterval(fade.current);
+      const from = player.volume;
+      const started = Date.now();
+      fade.current = setInterval(() => {
+        const f = Math.min(1, (Date.now() - started) / ms);
+        try {
+          player.volume = from + (to - from) * f;
+        } catch {
+          // the player is gone with the show
+        }
+        if (f >= 1) {
+          if (fade.current) clearInterval(fade.current);
+          fade.current = null;
+          then?.();
+        }
+      }, 50);
+    },
+    [player]
+  );
+  useEffect(() => {
+    if (!music) return;
+    track.current = 0;
+    void player.replaceAsync(music.trackUris[0]).then(() => {
+      player.play();
+      ramp(1, 1500);
+    });
+    const sub = player.addListener('playToEnd', () => {
+      track.current = (track.current + 1) % music.trackUris.length;
+      void player.replaceAsync(music.trackUris[track.current]).then(() => player.play());
+    });
+    return () => {
+      sub.remove();
+      if (fade.current) clearInterval(fade.current);
+      try {
+        player.pause();
+      } catch {
+        // already released
+      }
+    };
+  }, [music?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!music) return;
+    if (paused) player.pause();
+    else player.play();
+  }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
+  return {
+    fadeOut: (then: () => void) => {
+      if (!music) return then();
+      ramp(0, 1200, () => {
+        player.pause();
+        then();
+      });
+    },
+  };
+}
+
 /* ------------------------------------------------------------------- end */
 
-function EndCard({ list, onReplay, onSetup, onClose }: { list: VaultItem[]; onReplay: () => void; onSetup: () => void; onClose: () => void }) {
+function EndCard({ list, title, stoppedAfter, onReplay, onSetup, onClose }: { list: VaultItem[]; title: string; stoppedAfter: number; onReplay: () => void; onSetup: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const total = list.length;
@@ -577,8 +891,8 @@ function EndCard({ list, onReplay, onSetup, onClose }: { list: VaultItem[]; onRe
       </View>
       <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.85) 70%)', 'rgba(0,0,0,0.6)')]} />
       <View style={[styles.end, { paddingBottom: insets.bottom + 30 }]}>
-        <Text style={styles.setupKicker}>THAT WAS THE SLIDESHOW</Text>
-        <Words text={`${total} ${total === 1 ? 'video' : 'videos'}, start to finish`} style={styles.setupTitle} />
+        <Text style={styles.setupKicker}>{stoppedAfter ? `STOPPED AFTER ${stoppedAfter} MINUTES` : title ? title.toUpperCase() : 'THAT WAS THE SLIDESHOW'}</Text>
+        <Words text={stoppedAfter ? 'Sleep well.' : `${total} ${total === 1 ? 'video' : 'videos'}, start to finish`} style={styles.setupTitle} />
         <View style={styles.endThumbs}>
           {list.slice(0, 5).map((v, i) => (
             <Image key={v.id} source={v.thumbSource} style={[styles.endThumb, { transform: [{ rotate: `${(i - 2) * 5}deg` }], marginLeft: i ? -16 : 0 }]} contentFit="cover" />
@@ -607,32 +921,47 @@ const styles = StyleSheet.create({
   setupKicker: { color: '#FF375F', fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
   setupTitle: { color: '#fff', fontSize: 40, fontWeight: '900', letterSpacing: -1.2, lineHeight: 44 },
   setupSub: { color: 'rgba(255,255,255,0.75)', fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  titleInput: { color: '#fff', fontSize: 17, fontWeight: '700', paddingHorizontal: 16, paddingVertical: 13, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
   label: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '900', letterSpacing: 1, marginTop: 14, textTransform: 'uppercase' },
-  hint: { color: 'rgba(255,255,255,0.55)', fontSize: 13 },
+  hint: { color: 'rgba(255,255,255,0.55)', fontSize: 13, lineHeight: 18 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
   chipOn: { backgroundColor: '#fff', borderColor: '#fff' },
   chipText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   chipTextOn: { color: '#000' },
-  trans: { width: 76, height: 70, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  trans: { width: 70, height: 66, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', gap: 6 },
   toggle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.12)' },
   toggleOn: { backgroundColor: '#fff' },
   toggleText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  musicRow: { gap: 10, paddingRight: 20 },
+  music: { width: 86, gap: 6, padding: 4, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
+  musicOn: { borderColor: '#fff' },
+  musicArt: { width: 74, height: 74, borderRadius: 10 },
+  musicNone: { backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  musicTitle: { color: '#fff', fontSize: 12, fontWeight: '700', lineHeight: 15 },
   playBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 14 },
   playBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#fff', borderRadius: 999, paddingVertical: 16, alignSelf: 'stretch' },
   playText: { color: '#000', fontSize: 18, fontWeight: '900' },
   round: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   roundBig: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   topShade: { position: 'absolute', left: 0, right: 0, top: 0, zIndex: 3 },
+  bottomShade: { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3 },
   bars: { position: 'absolute', left: 10, right: 10, flexDirection: 'row', gap: 3, zIndex: 4 },
   bar: { flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.3)', overflow: 'hidden' },
   barFill: { height: 3, backgroundColor: '#fff' },
+  intro: { zIndex: 4, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 10 },
+  introTitle: { color: '#fff', fontSize: 44, fontWeight: '900', letterSpacing: -1.4, lineHeight: 48, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 16 },
+  introSub: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '900', letterSpacing: 1.4, textTransform: 'uppercase', textAlign: 'center' },
   caption: { position: 'absolute', left: 20, right: 20, zIndex: 4, gap: 4 },
   captionDate: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '900', letterSpacing: 1.2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 8 },
   captionTitle: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8, lineHeight: 34, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 12 },
+  captionSmall: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '700', marginTop: 2, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 8 },
+  dayTitle: { color: '#fff', fontSize: 40, fontWeight: '900', letterSpacing: -1.2, lineHeight: 44, textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 14 },
   ctlTop: { position: 'absolute', left: 14, right: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', zIndex: 5 },
   ctlBottom: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 34, zIndex: 5 },
   count: { color: '#fff', fontSize: 14, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  nowMusic: { position: 'absolute', alignSelf: 'center', maxWidth: '70%', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, zIndex: 5 },
+  nowMusicText: { color: '#fff', fontSize: 12, fontWeight: '700', flexShrink: 1 },
   openBtn: { position: 'absolute', alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8, zIndex: 5 },
   openText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   pausedPill: { position: 'absolute', alignSelf: 'center', bottom: 40, flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, zIndex: 5 },
