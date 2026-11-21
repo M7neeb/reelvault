@@ -815,3 +815,24 @@ export function renameTabKey(p: TabPrefs, from: string, to: string): TabPrefs {
     extra: [...new Set(p.extra.map((t) => (`#${t}` === from ? to.replace(/^#/, '') : t)))],
   };
 }
+
+/**
+ * What the main button of a series says: where you are in it. "Continue Ch. 12 · page 8" in the
+ * middle of a chapter, "Read Ch. 13" between chapters, "Start reading" before the first, and
+ * "Read again from the start" once every chapter is read. Null when there are no chapters.
+ */
+export function continueLabel(s: Pick<MangaSeries, 'chapters'>): string | null {
+  if (!s.chapters.length) return null;
+  const next = nextChapter(s);
+  if (!next) return 'Read again from the start';
+  if (next.lastPage > 0) return `Continue ${chapterLabel(next, true)} · page ${next.lastPage + 1}`;
+  return s.chapters.some(isRead) ? `Read ${chapterLabel(next, true)}` : 'Start reading';
+}
+
+/** The same, short enough for a pill: "Ch. 12 · p. 8", "Ch. 13", "Start" or "Read again". */
+export function shortContinueLabel(s: Pick<MangaSeries, 'chapters'>): string {
+  const next = nextChapter(s);
+  if (!next) return 'Read again';
+  if (next.lastPage > 0) return `${chapterLabel(next, true)} · p. ${next.lastPage + 1}`;
+  return s.chapters.some(isRead) ? chapterLabel(next, true) : 'Start';
+}

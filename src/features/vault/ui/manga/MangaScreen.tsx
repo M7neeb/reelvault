@@ -23,6 +23,8 @@ import {
   type TabPrefs,
   MANGA_STATUSES,
   chapterLabel,
+  continueLabel,
+  shortContinueLabel,
   continueReading,
   downloadedCount,
   fmtRating,
@@ -47,7 +49,8 @@ import { tick } from '../haptics';
 import { confirmAction } from '../confirm';
 import Icon from '../Icon';
 import IconButton from '../IconButton';
-import { enterUp } from '../motion';
+import { enterUp, PressableScale } from '../motion';
+import Ambient from '../Ambient';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
 import { OptionsSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
@@ -308,8 +311,14 @@ export default function MangaScreen({
     ...(privateCount > 0 && !showPrivate && onUnlockPrivate ? [{ label: `Show Private · ${privateCount}`, onPress: onUnlockPrivate }] : []),
   ];
 
+  // The series read last goes big at the top, on its cover's colours (artwork look only, like Books).
+  const heroSeries = p.art && !selected && !inDeleted ? (resume[0] ?? null) : null;
+  const moreResume = heroSeries ? resume.slice(1) : resume;
+  const heroCover = width < 360 ? 100 : 132;
+
   const header = (
     <View style={{ paddingTop: insets.top + 8 }}>
+      {heroSeries && <Ambient uri={heroSeries.coverSource} height={insets.top + 620} />}
       {/* While picking: how many, and All / Invert for the tab you are on. */}
       {selected ? (
         <View>
@@ -430,11 +439,52 @@ export default function MangaScreen({
         </View>
       )}
 
-      {resume.length > 0 && !selected && (
-        <View style={{ marginTop: 16 }}>
-          <Text style={styles.section}>Continue reading</Text>
+      {heroSeries && (
+        <PressableScale
+          scaleTo={0.98}
+          style={styles.hero}
+          onPress={() => onOpen(heroSeries)}
+          accessibilityRole="button"
+          accessibilityLabel={`${heroSeries.title}, ${unreadCount(heroSeries)} unread. Opens the title page`}>
+          <View style={styles.heroCover}>
+            <MangaCover series={heroSeries} width={heroCover} radius={8} />
+          </View>
+          <View style={styles.heroText}>
+            <Text style={styles.heroLabel}>{resume.length > 1 ? `Reading now · ${resume.length} series` : 'Reading now'}</Text>
+            <Text style={styles.heroTitle} numberOfLines={3}>
+              {heroSeries.title}
+            </Text>
+            {!!heroSeries.author && (
+              <Text style={styles.heroAuthor} numberOfLines={1}>
+                {heroSeries.author}
+              </Text>
+            )}
+            <View style={styles.heroBar}>
+              <View style={[styles.resumeFill, { width: `${Math.max(3, Math.round(progressOf(heroSeries) * 100))}%` }]} />
+            </View>
+            <Text style={styles.heroMeta} numberOfLines={2}>
+              {unreadCount(heroSeries) === 1 ? '1 chapter unread' : `${unreadCount(heroSeries)} chapters unread`}
+            </Text>
+            <PressableScale
+              style={styles.heroPill}
+              onPress={() => onContinue(heroSeries)}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`${continueLabel(heroSeries) ?? 'Continue'}, ${heroSeries.title}`}>
+              <Icon name="bookOpen" size={14} color={p.bg} />
+              <Text style={styles.heroPillText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+                {shortContinueLabel(heroSeries)}
+              </Text>
+            </PressableScale>
+          </View>
+        </PressableScale>
+      )}
+
+      {moreResume.length > 0 && !selected && (
+        <View style={{ marginTop: heroSeries ? 26 : 16 }}>
+          <Text style={styles.section}>{heroSeries ? 'More to read' : 'Continue reading'}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SIDE, gap: 12 }}>
-            {resume.map((s, n) => {
+            {moreResume.map((s, n) => {
               const next = nextChapter(s);
               const pr = progressOf(s);
               return (
@@ -850,6 +900,16 @@ const makeStyles = (p: Palette) =>
     searchInput: { flex: 1, color: p.text, fontSize: 16 },
     section: { color: p.text, fontSize: 20, fontWeight: '800', paddingHorizontal: SIDE, marginBottom: 10 },
     resume: { width: 112, gap: 5 },
+    hero: { flexDirection: 'row', gap: 18, marginHorizontal: SIDE, marginTop: 22 },
+    heroCover: { borderRadius: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
+    heroText: { flex: 1, paddingTop: 2 },
+    heroLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
+    heroTitle: { color: p.text, fontSize: 24, fontWeight: '800', lineHeight: 28, marginTop: 6, letterSpacing: -0.5 },
+    heroAuthor: { color: p.textSecondary, fontSize: 14, marginTop: 3 },
+    heroBar: { height: 3, borderRadius: 2, backgroundColor: p.elevated, overflow: 'hidden', marginTop: 14 },
+    heroMeta: { color: p.textSecondary, fontSize: 13, marginTop: 6, fontVariant: ['tabular-nums'] },
+    heroPill: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: p.text, borderRadius: 999, paddingHorizontal: 18, minHeight: 44, marginTop: 14, maxWidth: '100%' },
+    heroPillText: { color: p.bg, fontSize: 15, fontWeight: '700', flexShrink: 1 },
     resumePlay: { position: 'absolute', right: 7, bottom: 7, width: 26, height: 26, borderRadius: 13, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },
     resumeBar: { height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden', marginTop: 3 },
     resumeFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },

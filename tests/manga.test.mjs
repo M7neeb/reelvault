@@ -241,3 +241,18 @@ test('library view: filters, sort both ways, saved view repaired', async () => {
   assert.equal(bad.badges.unread, false);
   assert.deepEqual(parseLibraryView('broken'), DEFAULT_LIBRARY_VIEW);
 });
+
+test('the main button says where you are in a series', async () => {
+  const { continueLabel } = await import('../src/features/vault/manga/mangaLogic.ts');
+  const ch = (n, extra = {}) => ({ id: `c${n}`, number: n, volume: null, title: null, filename: null, readAt: null, lastPage: 0, ...extra });
+  assert.equal(continueLabel({ chapters: [] }), null);
+  assert.equal(continueLabel({ chapters: [ch(1), ch(2)] }), 'Start reading');
+  assert.equal(continueLabel({ chapters: [ch(1, { readAt: 5 }), ch(2)] }), 'Read Ch. 2');
+  assert.equal(continueLabel({ chapters: [ch(1, { readAt: 5 }), ch(2, { lastPage: 7 })] }), 'Continue Ch. 2 · page 8');
+  assert.equal(continueLabel({ chapters: [ch(1, { readAt: 5 }), ch(2, { readAt: 6 })] }), 'Read again from the start');
+  const { shortContinueLabel } = await import('../src/features/vault/manga/mangaLogic.ts');
+  assert.equal(shortContinueLabel({ chapters: [ch(1), ch(2)] }), 'Start');
+  assert.equal(shortContinueLabel({ chapters: [ch(1, { readAt: 5 }), ch(2)] }), 'Ch. 2');
+  assert.equal(shortContinueLabel({ chapters: [ch(1, { readAt: 5 }), ch(2, { lastPage: 7 })] }), 'Ch. 2 · p. 8');
+  assert.equal(shortContinueLabel({ chapters: [ch(1, { readAt: 5 })] }), 'Read again');
+});

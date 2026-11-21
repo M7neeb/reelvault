@@ -17,6 +17,7 @@ import {
   MANGA_STATUSES,
   READING_MODES,
   chapterLabel,
+  continueLabel,
   fmtRating,
   isRead,
   modeOf,
@@ -148,15 +149,7 @@ export default function MangaDetail({
     actions.update([series.id], { [f.key]: value } as MangaEdit).catch(() => undefined);
   };
 
-  const continueLabel = !series.chapters.length
-    ? null
-    : !next
-      ? 'Read again from the start'
-      : next.lastPage > 0
-        ? `Continue ${chapterLabel(next, true)} · page ${next.lastPage + 1}`
-        : series.chapters.some(isRead)
-          ? `Read ${chapterLabel(next, true)}`
-          : 'Start reading';
+  const mainLabel = continueLabel(series);
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -245,7 +238,7 @@ export default function MangaDetail({
                 )}
               </TouchableOpacity>
             )}
-            {continueLabel && (
+            {mainLabel && (
               <TouchableOpacity
                 style={styles.primary}
                 onPress={() => {
@@ -253,9 +246,9 @@ export default function MangaDetail({
                   if (next) onRead(next);
                   else if (series.chapters[0]) onRead(series.chapters[0], true);
                 }}>
-                <Icon name="bookOpen" size={17} color="#fff" />
-                <Text style={styles.primaryText} numberOfLines={1}>
-                  {continueLabel}
+                <Icon name="bookOpen" size={17} color={p.bg} />
+                <Text style={styles.primaryText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+                  {mainLabel}
                 </Text>
               </TouchableOpacity>
             )}
@@ -538,7 +531,9 @@ const makeStyles = (p: Palette) =>
     screen: { flex: 1, backgroundColor: p.bg },
     hero: { overflow: 'hidden', paddingBottom: 6 },
     heroBg: { position: 'absolute', top: -40, left: -40, right: -40, bottom: -40, opacity: 0.85 },
-    heroShade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' },
+    // Dark mode darkens the blurred cover; light mode washes it with the page colour (like Books),
+    // so the dark title and the grey facts under it keep their contrast.
+    heroShade: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: p.scheme === 'dark' ? 'rgba(0,0,0,0.35)' : `rgba(${rgbOf(p.bg)},0.62)` },
     heroFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '70%' },
     heroBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 14 },
     circle: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
@@ -555,8 +550,8 @@ const makeStyles = (p: Palette) =>
     actText: { color: p.textSecondary, fontSize: 13, fontWeight: '700', textAlign: 'center' },
     more: { alignItems: 'center', marginTop: 2 },
     body: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },
-    primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, backgroundColor: p.accent, borderRadius: 999, paddingVertical: 16, paddingHorizontal: 18, marginTop: 6 },
-    primaryText: { color: '#fff', fontSize: 17, fontWeight: '800', flexShrink: 1 },
+    primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, backgroundColor: p.text, borderRadius: 999, paddingVertical: 16, paddingHorizontal: 18, marginTop: 6 },
+    primaryText: { color: p.bg, fontSize: 17, fontWeight: '800', flexShrink: 1 },
     bar: { height: 4, borderRadius: 2, backgroundColor: p.card, overflow: 'hidden' },
     barFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     quick: { flexDirection: 'row', gap: 8, marginTop: 6 },
