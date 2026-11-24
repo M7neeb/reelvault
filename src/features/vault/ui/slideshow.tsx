@@ -215,7 +215,7 @@ function Setup({
     ? opts.pick === 'favourites'
       ? 'None of these are favourites yet. Rate a video 8 or more to make it one.'
       : 'None of these are rated yet.'
-    : `${plan.totalMs > 0 ? showLength(plan.totalMs) : 'Ready when you are'}${plan.leftOut ? ` · ${plan.leftOut} left out to fit` : ''}`;
+    : `Slideshow · ${plan.totalMs > 0 ? showLength(plan.totalMs) : 'ready when you are'}${plan.leftOut ? ` · ${plan.leftOut} left out to fit` : ''}`;
   return (
     <View style={{ flex: 1 }}>
       <Aurora colors={['#2B1055', '#000000']} accent="#FF375F" width={width} height={height} />
@@ -229,7 +229,6 @@ function Setup({
             <Icon name="close" size={16} color="#fff" />
           </TouchableOpacity>
         </View>
-        <Text style={styles.setupKicker}>SLIDESHOW</Text>
         <Words text={`${count} ${count === 1 ? 'video' : 'videos'}`} style={styles.setupTitle} />
         <Text style={styles.setupSub}>{sub}</Text>
 
@@ -956,7 +955,7 @@ const styles = StyleSheet.create({
   setupTitle: { color: '#fff', fontSize: 40, fontWeight: '900', letterSpacing: -1.2, lineHeight: 44 },
   setupSub: { color: 'rgba(255,255,255,0.75)', fontSize: 16, fontWeight: '700', marginBottom: 8 },
   titleInput: { color: '#fff', fontSize: 17, fontWeight: '700', paddingHorizontal: 16, paddingVertical: 13, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
-  label: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '900', letterSpacing: 1, marginTop: 14, textTransform: 'uppercase' },
+  label: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: -0.2, marginTop: 18 },
   hint: { color: 'rgba(255,255,255,0.55)', fontSize: 13, lineHeight: 18 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },

@@ -5,14 +5,16 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal } from './screen';
 
 import { tick } from './haptics';
+import Icon from './Icon';
+import type { IconName } from './icons';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 
-export type OptionItem = { label: string; hint?: string; danger?: boolean; onPress: () => void };
+export type OptionItem = { label: string; hint?: string; danger?: boolean; /** A small icon before the label. */ icon?: IconName; onPress: () => void };
 
 /**
  * iOS shows one sheet, picker or page at a time, and refuses a new one while
@@ -29,6 +31,7 @@ export function OptionsSheet({
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
+  const p = usePalette();
   const insets = useSafeAreaInsets();
   const [visible, setVisible] = useState(true);
   const after = useRef<(() => void) | null>(null);
@@ -58,38 +61,66 @@ export function OptionsSheet({
   );
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => close()} onDismiss={finish}>
-      <View style={[styles.backdrop, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={() => close()} />
+      <View style={[styles.backdrop, { paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 10) + 8 }]}>
+        <TouchableOpacity style={styles.backdropTap} activeOpacity={1} onPress={() => close()} accessibilityLabel="Close" />
         {/* A long list scrolls instead of running off the top of the screen. */}
         <View style={[styles.card, { flexShrink: 1 }]}>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-          <ScrollView bounces={false} style={{ flexShrink: 1 }}>
-          {options.map((o) => (
-            <TouchableOpacity
-              key={o.label}
-              style={[styles.row, long(o) && styles.rowStacked]}
-              onPress={() => {
-                tick();
-                close(o.onPress);
-              }}>
-              <Text style={[styles.rowLabel, o.danger && styles.danger, !long(o) && styles.rowLabelShrink]}>{o.label}</Text>
-              {!!o.hint && <Text style={[styles.rowHint, o.hint === '✓' && styles.rowCheck, long(o) && styles.rowHintStacked]}>{o.hint}</Text>}
+          <View style={styles.head}>
+            <Text style={styles.title} numberOfLines={2} accessibilityRole="header">
+              {title}
+            </Text>
+            <TouchableOpacity style={styles.close} onPress={() => close()} accessibilityLabel="Cancel" hitSlop={8}>
+              <Icon name="close" size={13} color={p.icon} weight="bold" />
             </TouchableOpacity>
-          ))}
+          </View>
+          <ScrollView bounces={false} style={{ flexShrink: 1 }} contentContainerStyle={styles.list}>
+            {options.map((o, i) => {
+              const { checked, hint } = splitCheck(o.hint);
+              const stacked = long(o);
+              return (
+                <TouchableOpacity
+                  key={o.label}
+                  style={[styles.row, i > 0 && styles.rowLine, stacked && styles.rowStacked]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: checked }}
+                  accessibilityLabel={hint ? `${o.label}, ${hint}` : o.label}
+                  onPress={() => {
+                    tick();
+                    close(o.onPress);
+                  }}>
+                  {o.icon && (
+                    <View style={styles.rowIcon}>
+                      <Icon name={o.icon} size={17} color={o.danger ? p.dangerText : p.text} />
+                    </View>
+                  )}
+                  <View style={[styles.rowBody, stacked && styles.rowBodyStacked]}>
+                    <Text style={[styles.rowLabel, o.danger && styles.danger, !stacked && styles.rowLabelShrink, checked && styles.rowLabelOn]}>{o.label}</Text>
+                    {!!hint && <Text style={[styles.rowHint, stacked && styles.rowHintStacked]}>{hint}</Text>}
+                  </View>
+                  {checked && <Icon name="check" size={15} color={p.accent} weight="bold" />}
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>
-        <TouchableOpacity style={styles.cancelCard} onPress={() => close()}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
       </View>
     </Modal>
   );
 }
 
+/** Hints may mark the current choice with a leading check ("✓", "✓ Keep full size"): drawn as an icon. */
+function splitCheck(hint: string | undefined): { checked: boolean; hint: string } {
+  if (!hint) return { checked: false, hint: '' };
+  const t = hint.trim();
+  if (t.startsWith('✓')) return { checked: true, hint: t.slice(1).trim() };
+  return { checked: false, hint: t };
+}
+
 /** A label and hint too long for one line: the hint goes under the label. */
-const long = (o: OptionItem) => !!o.hint && o.hint !== '✓' && o.label.length + o.hint.length > 34;
+const long = (o: OptionItem) => {
+  const hint = splitCheck(o.hint).hint;
+  return !!hint && o.label.length + hint.length > 34;
+};
 
 export function PromptSheet({
   title,
@@ -155,28 +186,25 @@ export function PromptSheet({
 const makeStyles = (p: Palette) =>
   sheet({
     kav: { flex: 1 },
-    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop, padding: 10, paddingBottom: 34 },
+    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop, paddingHorizontal: 10 },
     backdropTap: { flex: 1 },
-    card: { backgroundColor: p.panel, borderRadius: 26, paddingVertical: 4, overflow: 'hidden' },
-    cancelCard: { backgroundColor: p.panel, borderRadius: 26, alignItems: 'center', paddingVertical: 17, marginTop: 8 },
-    rowCheck: { color: p.accent, fontSize: 17, fontWeight: '700' },
-    title: { color: p.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, paddingHorizontal: 16 },
-    row: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 18,
-      paddingVertical: 14,
-      borderTopWidth: 1,
-      borderTopColor: p.separator,
-    },
-    rowStacked: { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 3, paddingVertical: 12 },
-    rowLabel: { color: p.text, fontSize: 17 },
+    card: { backgroundColor: p.panel, borderRadius: 28, overflow: 'hidden' },
+    head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 20, paddingRight: 14, paddingTop: 16, paddingBottom: 8 },
+    title: { flex: 1, color: p.text, fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
+    close: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: p.circle },
+    list: { marginHorizontal: 10, marginBottom: 10, backgroundColor: p.card, borderRadius: 18, overflow: 'hidden' },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, minHeight: 52, paddingVertical: 12 },
+    rowLine: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: p.separator },
+    rowStacked: { paddingVertical: 11 },
+    rowIcon: { width: 22, alignItems: 'center' },
+    rowBody: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    rowBodyStacked: { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 3 },
+    rowLabel: { color: p.text, fontSize: 16, fontWeight: '500' },
+    rowLabelOn: { fontWeight: '700' },
     rowLabelShrink: { flexShrink: 1, marginRight: 12 },
     rowHint: { color: p.textSecondary, fontSize: 14, textAlign: 'right', flexShrink: 1 },
     rowHintStacked: { textAlign: 'left', fontSize: 13 },
     danger: { color: p.dangerText },
-    cancelText: { color: p.text, fontSize: 17, fontWeight: '700' },
 
     backdropCenter: { flex: 1, justifyContent: 'center', backgroundColor: p.backdrop, padding: 32 },
     dialog: { backgroundColor: p.panel, borderRadius: 26, padding: 20, gap: 12 },

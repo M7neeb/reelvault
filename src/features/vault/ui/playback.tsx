@@ -18,8 +18,9 @@ import { fmtDuration, fmtSize } from './format';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 import Glyph from './Glyph';
+import Icon from './Icon';
 
-function ComparePane({ item, enableVideo, label }: { item: VaultItem; enableVideo: boolean; label: string }) {
+function ComparePane({ item, enableVideo, label, notes }: { item: VaultItem; enableVideo: boolean; label: string; /** What this one has over the other ("More pixels", "Longer"). */ notes: string[] }) {
   const styles = useStyles(makeStyles);
   const player = useVideoPlayer(enableVideo && item.uri ? item.uri : null, (pl) => {
     pl.loop = true;
@@ -33,11 +34,22 @@ function ComparePane({ item, enableVideo, label }: { item: VaultItem; enableVide
       ) : (
         <Image source={item.thumbSource} style={styles.full} contentFit="contain" />
       )}
+      <View style={styles.paneBadge}>
+        <Text style={styles.paneBadgeText}>{label}</Text>
+      </View>
       <View style={styles.paneInfo}>
-        <Text style={styles.paneLabel}>{label}</Text>
         <Text style={styles.paneText} numberOfLines={1}>
           {item.filename}
         </Text>
+        {notes.length > 0 && (
+          <View style={styles.notes}>
+            {notes.map((n) => (
+              <Text key={n} style={styles.note}>
+                {n}
+              </Text>
+            ))}
+          </View>
+        )}
         <Text style={styles.paneMeta}>
           {[
             item.width && item.height ? `${item.width}×${item.height}` : null,
@@ -51,6 +63,16 @@ function ComparePane({ item, enableVideo, label }: { item: VaultItem; enableVide
       </View>
     </View>
   );
+}
+
+/** What `x` has over `y`, in a few words. */
+function edge(x: VaultItem, y: VaultItem): string[] {
+  const out: string[] = [];
+  const px = (v: VaultItem) => (v.width ?? 0) * (v.height ?? 0);
+  if (px(x) > px(y) * 1.1) out.push('More pixels');
+  if ((x.durationMs ?? 0) > (y.durationMs ?? 0) + 1500) out.push('Longer');
+  if (x.rating > y.rating) out.push('Rated higher');
+  return out;
 }
 
 /** Two videos, one above the other. Keeping one moves the other to Recently Deleted. */
@@ -74,19 +96,26 @@ export function CompareModal({
     <Modal fullBleed visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={[styles.dark, { paddingTop: insets.top }]}>
         <View style={styles.compareHeader}>
-          <TouchableOpacity onPress={onClose}>
+          <TouchableOpacity style={styles.headerClose} onPress={onClose} accessibilityLabel="Close, keep both" hitSlop={8}>
+            <Icon name="close" size={14} color="#fff" weight="bold" />
+          </TouchableOpacity>
+          <Text style={styles.compareTitle} accessibilityRole="header">
+            Which one stays?
+          </Text>
+          <TouchableOpacity onPress={onClose} hitSlop={8} accessibilityRole="button">
             <Text style={styles.headerLink}>Keep both</Text>
           </TouchableOpacity>
-          <Text style={styles.compareTitle}>Compare and Pick</Text>
-          <View style={styles.headerSpacer} />
         </View>
-        <ComparePane item={a} enableVideo={enableVideo} label="A" />
-        <ComparePane item={b} enableVideo={enableVideo} label="B" />
+        <View style={styles.panes}>
+          <ComparePane item={a} enableVideo={enableVideo} label="A" notes={edge(a, b)} />
+          <ComparePane item={b} enableVideo={enableVideo} label="B" notes={edge(b, a)} />
+        </View>
+        <Text style={styles.compareHint}>The one you don't keep goes to Recently Deleted.</Text>
         <View style={[styles.compareBar, { paddingBottom: insets.bottom + 14 }]}>
-          <TouchableOpacity style={styles.keep} onPress={() => onKeep(a, b)}>
+          <TouchableOpacity style={styles.keep} onPress={() => onKeep(a, b)} accessibilityRole="button">
             <Text style={styles.keepText}>Keep A</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.keep} onPress={() => onKeep(b, a)}>
+          <TouchableOpacity style={styles.keep} onPress={() => onKeep(b, a)} accessibilityRole="button">
             <Text style={styles.keepText}>Keep B</Text>
           </TouchableOpacity>
         </View>
@@ -143,31 +172,21 @@ const makeStyles = (p: Palette) =>
     roundGhost: { width: 44, height: 44 },
     roundText: { color: '#fff', fontSize: 18, fontWeight: '700' },
 
-    compareHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-    },
-    compareTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-    headerLink: { color: '#4aa8ff', fontSize: 15, fontWeight: '600', width: 80 },
-    headerSpacer: { width: 80 },
-    pane: { flex: 1, borderBottomWidth: 1, borderBottomColor: '#222' },
-    paneInfo: {
-      position: 'absolute',
-      left: 10,
-      right: 10,
-      bottom: 8,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      borderRadius: 8,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-    },
-    paneLabel: { color: p.rating, fontSize: 12, fontWeight: '800' },
-    paneText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-    paneMeta: { color: '#c9ccd1', fontSize: 11 },
-    compareBar: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingTop: 12 },
-    keep: { flex: 1, backgroundColor: p.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-    keepText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+    compareHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
+    headerClose: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(120,120,128,0.36)' },
+    compareTitle: { flex: 1, color: '#fff', fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+    headerLink: { color: '#fff', fontSize: 15, fontWeight: '600', opacity: 0.8 },
+    panes: { flex: 1, gap: 8, paddingHorizontal: 10 },
+    pane: { flex: 1, borderRadius: 20, overflow: 'hidden', backgroundColor: '#111' },
+    paneBadge: { position: 'absolute', top: 10, left: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+    paneBadgeText: { color: '#000', fontSize: 16, fontWeight: '900' },
+    paneInfo: { position: 'absolute', left: 10, right: 10, bottom: 10, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, gap: 2 },
+    paneText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    paneMeta: { color: 'rgba(255,255,255,0.75)', fontSize: 12, fontVariant: ['tabular-nums'] },
+    notes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingVertical: 2 },
+    note: { color: '#30D158', fontSize: 12, fontWeight: '800' },
+    compareHint: { color: 'rgba(255,255,255,0.6)', fontSize: 13, textAlign: 'center', paddingTop: 12 },
+    compareBar: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 12 },
+    keep: { flex: 1, backgroundColor: '#fff', borderRadius: 26, height: 52, alignItems: 'center', justifyContent: 'center' },
+    keepText: { color: '#000', fontWeight: '800', fontSize: 17 },
   });

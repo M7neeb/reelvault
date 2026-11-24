@@ -70,6 +70,9 @@ export type Palette = {
   art?: boolean;
 };
 
+/** A card on the screen background (not on a sheet): `card` is white in light mode, the same as the background. */
+export const raised = (p: Palette): string => (p.scheme === 'light' ? p.elevated : p.card);
+
 /** The original ReelVault / HashPhotos dark look. */
 export const DARK: Palette = {
   scheme: 'dark',

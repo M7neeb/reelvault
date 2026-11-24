@@ -113,6 +113,7 @@ import { DuplicatePrompt } from './dupPrompt';
 import AudioSection from './audio/AudioSection';
 import MangaSection from './manga/MangaSection';
 import BooksSection from './books/BooksSection';
+import { useReadReminder } from './books/readReminder';
 import type { MixVideos } from './manga/MangaWrapped';
 import { useAudioControlsOptional } from './audio/playback';
 
@@ -182,6 +183,7 @@ function VaultScreenBody({
 }: VaultScreenProps) {
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
+  useReadReminder(books, audio);
   const styles = useStyles(makeStyles);
   const p = usePalette();
 
@@ -859,14 +861,14 @@ function VaultScreenBody({
     setOptions({
       title: 'Import',
       options: [
-        { label: 'From Photos', hint: 'Original files', onPress: () => importWithSpaceCheck('photos') },
-        { label: 'From Files', hint: 'HashPhotos exports', onPress: () => importWithSpaceCheck('files') },
-        { label: 'Record with Camera', onPress: () => actions.onImport('camera') },
-        { label: 'Paste Link…', hint: 'Direct video link', onPress: pasteLink },
-        { label: 'Whole Folder from Files…', hint: 'Copies', onPress: actions.onImportFolder },
-        ...(actions.cloud ? [{ label: 'From Dropbox or OneDrive…', hint: 'Sign in, pick videos', onPress: () => setCloudOpen(true) }] : []),
-        { label: 'From Computer (Wi-Fi)…', hint: 'Drop videos in a browser', onPress: () => setWifiOpen(true) },
-        { label: 'HashPhotos Info…', hint: 'Keywords, ratings', onPress: () => setMetaOpen(true) },
+        { icon: 'photo', label: 'From Photos', hint: 'Original files', onPress: () => importWithSpaceCheck('photos') },
+        { icon: 'folder', label: 'From Files', hint: 'HashPhotos exports', onPress: () => importWithSpaceCheck('files') },
+        { icon: 'videos', label: 'Record with Camera', onPress: () => actions.onImport('camera') },
+        { icon: 'link', label: 'Paste Link…', hint: 'Direct video link', onPress: pasteLink },
+        { icon: 'folder', label: 'Whole Folder from Files…', hint: 'Copies', onPress: actions.onImportFolder },
+        ...(actions.cloud ? [{ icon: 'globe' as const, label: 'From Dropbox or OneDrive…', hint: 'Sign in, pick videos', onPress: () => setCloudOpen(true) }] : []),
+        { icon: 'wifi', label: 'From Computer (Wi-Fi)…', hint: 'Drop videos in a browser', onPress: () => setWifiOpen(true) },
+        { icon: 'tag', label: 'HashPhotos Info…', hint: 'Keywords, ratings', onPress: () => setMetaOpen(true) },
       ],
     });
   }

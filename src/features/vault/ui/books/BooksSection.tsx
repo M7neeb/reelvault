@@ -178,7 +178,12 @@ export default function BooksSection({
   const streak = useMemo(() => streaks(withListening, now).current, [withListening, now]);
 
   // The evening reminder: planned again as today's reading changes, and dropped for today once the goal is met.
-  const metToday = !!today?.met;
+  // Counted over every book, private ones too, the same way as readReminder.ts (both plan the same reminders).
+  const metToday = useMemo(() => {
+    let ms = 0;
+    for (const b of data.items) ms += readToday.get(b.id) ?? 0;
+    return !!dayGoal(ms, data.goals.dailyMin)?.met;
+  }, [data.items, readToday, data.goals.dailyMin]);
   useEffect(() => {
     if (!data.loaded || Platform.OS === 'web') return;
     planReadReminders(reminderTimes(data.goals, metToday, Date.now()), data.goals.dailyMin).catch(() => undefined);

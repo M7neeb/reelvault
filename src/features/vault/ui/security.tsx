@@ -7,13 +7,15 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal } from './screen';
 
 import { QUALITIES } from '../smaller';
 import { Row, Rows, SheetFrame } from './sheets';
 import { OptionsSheet } from './prompts';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import Icon from './Icon';
+import { raised, sheet, usePalette, useStyles, type Palette } from './theme';
 import { PASSCODE_KINDS, type CompressQuality, type PasscodeKind, type SecurityState } from './types';
 
 const DIGITS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
@@ -50,6 +52,7 @@ export function PasscodeSheet({
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const insets = useSafeAreaInsets();
   const [code, setCode] = useState('');
   const [first, setFirst] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -141,10 +144,16 @@ export function PasscodeSheet({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <TouchableOpacity style={styles.cancel} onPress={onClose}>
-          <Text style={styles.cancelText}>Cancel</Text>
+        <TouchableOpacity style={[styles.cancel, { top: insets.top + 12 }]} onPress={onClose} accessibilityLabel="Cancel" hitSlop={8}>
+          <Icon name="close" size={15} color={p.icon} weight="bold" />
         </TouchableOpacity>
-        <Text style={styles.title}>{title}</Text>
+        <View style={styles.lockBadge}>
+          <View style={[StyleSheet.absoluteFill, styles.lockWash]} />
+          <Icon name="lock" size={24} color={p.accent} />
+        </View>
+        <Text style={styles.title} accessibilityRole="header">
+          {title}
+        </Text>
         <Text style={styles.message}>{locked ? `Try again in ${Math.ceil((lockedUntil - now) / 1000)} s` : message}</Text>
 
         {length !== null ? (
@@ -162,7 +171,7 @@ export function PasscodeSheet({
                   disabled={!d || locked}
                   onPress={() => press(d)}
                   accessibilityLabel={d === '⌫' ? 'Delete' : d}>
-                  <Text style={styles.keyText}>{d}</Text>
+                  {d === '⌫' ? <Icon name="deleteKey" size={24} color={p.text} /> : <Text style={styles.keyText}>{d}</Text>}
                 </TouchableOpacity>
               ))}
             </View>
@@ -197,6 +206,7 @@ export function PasscodeSheet({
                 .then((ok) => ok && onClose())
                 .catch(() => {})
             }>
+            <Icon name="faceId" size={18} color={p.text} />
             <Text style={styles.faceIdText}>Use Face ID</Text>
           </TouchableOpacity>
         )}
@@ -407,21 +417,22 @@ const makeStyles = (p: Palette) =>
     logTime: { color: p.textSecondary, fontSize: 12, fontVariant: ['tabular-nums'] },
 
     screen: { flex: 1, backgroundColor: p.bg, alignItems: 'center', paddingTop: 70, paddingHorizontal: 24 },
-    cancel: { position: 'absolute', top: 56, left: 20, padding: 8 },
-    cancelText: { color: p.link, fontSize: 17 },
-    title: { color: p.text, fontSize: 22, fontWeight: '700', marginTop: 40 },
+    cancel: { position: 'absolute', right: 20, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: p.circle, zIndex: 2 },
+    lockBadge: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginTop: 24 },
+    lockWash: { backgroundColor: p.accent, opacity: 0.16 },
+    title: { color: p.text, fontSize: 24, fontWeight: '800', letterSpacing: -0.4, marginTop: 18 },
     message: { color: p.textSecondary, fontSize: 14, marginTop: 10, minHeight: 20, textAlign: 'center' },
-    dots: { flexDirection: 'row', gap: 16, marginTop: 28, marginBottom: 36 },
-    dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: p.text },
-    dotOn: { backgroundColor: p.text },
+    dots: { flexDirection: 'row', gap: 18, marginTop: 28, marginBottom: 40 },
+    dot: { width: 13, height: 13, borderRadius: 7, borderWidth: 1.5, borderColor: p.textSecondary },
+    dotOn: { backgroundColor: p.accent, borderColor: p.accent },
     pad: { width: 270, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 16 },
-    key: { width: 78, height: 78, borderRadius: 39, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center' },
+    key: { width: 78, height: 78, borderRadius: 39, backgroundColor: raised(p), alignItems: 'center', justifyContent: 'center' },
     keyEmpty: { backgroundColor: 'transparent' },
     keyText: { color: p.text, fontSize: 30, fontWeight: '400' },
     textEntry: { flexDirection: 'row', gap: 10, marginTop: 30, alignSelf: 'stretch' },
     input: {
       flex: 1,
-      backgroundColor: p.card,
+      backgroundColor: raised(p),
       borderRadius: 12,
       paddingHorizontal: 14,
       paddingVertical: 13,
@@ -432,8 +443,8 @@ const makeStyles = (p: Palette) =>
     },
     ok: { backgroundColor: p.accent, borderRadius: 12, paddingHorizontal: 22, justifyContent: 'center' },
     okText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-    faceId: { marginTop: 30, padding: 10 },
-    faceIdText: { color: p.link, fontSize: 16, fontWeight: '600' },
+    faceId: { marginTop: 30, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: raised(p), borderRadius: 999, paddingHorizontal: 18, height: 44 },
+    faceIdText: { color: p.text, fontSize: 16, fontWeight: '700' },
   });
 
 /** The weekly copies of your info kept on the phone: when, restore one, or make one now. */

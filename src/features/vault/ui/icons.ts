@@ -130,6 +130,8 @@ export const ICONS = {
   overview: { sf: 'square.grid.2x2', ion: 'apps-outline' },
   settings: { sf: 'gearshape', ion: 'settings-outline' },
   similar: { sf: 'photo.stack', ion: 'albums-outline' },
+  deleteKey: { sf: 'delete.left', ion: 'backspace-outline' },
+  faceId: { sf: 'faceid', ion: 'scan-outline' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

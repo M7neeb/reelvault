@@ -79,6 +79,7 @@ import { confirmAction } from './confirm';
 import { OptionsSheet } from './prompts';
 import { success, tick } from './haptics';
 import Icon from './Icon';
+import type { IconName } from './icons';
 import IconButton from './IconButton';
 import LinkSheet from './LinkSheet';
 import DateSheet from './DateSheet';
@@ -1378,7 +1379,7 @@ function ViewerPage({
                 {item.filename}
               </Text>
               <ScrollView style={styles.menuScroll}>
-                <MenuRow
+                <MenuRow icon="heart"
                   label="Favourite"
                   hint={isFavourite ? 'On' : 'Off'}
                   onPress={() => {
@@ -1386,7 +1387,7 @@ function ViewerPage({
                     void onRate(isFavourite ? 0 : FAVOURITE_RATING);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="star"
                   label="Rate with Decimals…"
                   hint={rating > 0 ? `${Number.isInteger(rating) ? rating : rating.toFixed(1)}/10` : 'e.g. 9.7'}
                   onPress={() => {
@@ -1394,7 +1395,7 @@ function ViewerPage({
                     setPickerOpen(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="status"
                   label="Status"
                   hint={statusLabel(watch)}
                   onPress={() => {
@@ -1402,7 +1403,7 @@ function ViewerPage({
                     setInfoOpen(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="tag"
                   label="Keyword, title, caption"
                   hint={`${videoTags.length}`}
                   onPress={() => {
@@ -1411,7 +1412,7 @@ function ViewerPage({
                   }}
                 />
                 {!item.isPrivate && (
-                  <MenuRow
+                  <MenuRow icon="pin"
                     label={(prefs.pinned ?? []).includes(item.id) ? 'Unpin from the Top' : 'Pin to the Top'}
                     hint={(prefs.pinned ?? []).includes(item.id) ? 'Pinned' : 'Library shelf'}
                     onPress={() => {
@@ -1423,7 +1424,7 @@ function ViewerPage({
                     }}
                   />
                 )}
-                <MenuRow
+                <MenuRow icon="options"
                   label="Player…"
                   hint="Speed, loop, bookmarks, full screen"
                   onPress={() => {
@@ -1432,7 +1433,7 @@ function ViewerPage({
                   }}
                 />
                 {simkl && (
-                  <MenuRow
+                  <MenuRow icon="link"
                     label={link ? 'Simkl Link…' : 'Link to Simkl…'}
                     hint={
                       link
@@ -1447,7 +1448,7 @@ function ViewerPage({
                     }}
                   />
                 )}
-                <MenuRow
+                <MenuRow icon="tray"
                   label={inTray ? 'Remove from Tray' : 'Add to Tray'}
                   hint=""
                   onPress={() => {
@@ -1456,7 +1457,7 @@ function ViewerPage({
                     run(inTray ? 'Removed from the Tray' : 'Added to the Tray', actions.onSetTray([item.id], !inTray));
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="calendar"
                   label="Adjust Date & Time"
                   hint=""
                   onPress={() => {
@@ -1464,7 +1465,7 @@ function ViewerPage({
                     setDateOpen(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="share"
                   label="Share / Save to Files"
                   hint=""
                   onPress={() => {
@@ -1472,7 +1473,7 @@ function ViewerPage({
                     void actions.onShare(item);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="photo"
                   label="Save to Photos"
                   hint="Copy"
                   onPress={() => {
@@ -1480,7 +1481,7 @@ function ViewerPage({
                     run('Saved to Photos', actions.onSaveToPhotos([item]));
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="frame"
                   label="Save This Frame as Image"
                   hint={fmtDuration(elapsed * 1000) ?? '0:00'}
                   onPress={() => {
@@ -1489,7 +1490,7 @@ function ViewerPage({
                   }}
                 />
                 {actions.canSaveSound() && (
-                  <MenuRow
+                  <MenuRow icon="audio"
                     label="Save Sound to Audio"
                     hint="Listen without the picture"
                     onPress={() => {
@@ -1502,7 +1503,7 @@ function ViewerPage({
                     }}
                   />
                 )}
-                <MenuRow
+                <MenuRow icon="frame"
                   label="Use This Frame as Cover"
                   hint={fmtDuration(elapsed * 1000) ?? '0:00'}
                   onPress={() => {
@@ -1510,7 +1511,7 @@ function ViewerPage({
                     run('Cover changed', actions.onSetCoverFrame(item, progress * totalSec * 1000));
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="frame"
                   label="Choose Cover Frame…"
                   hint="Scrub to the exact frame"
                   onPress={() => {
@@ -1519,7 +1520,7 @@ function ViewerPage({
                     setCoverOpen(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="photo"
                   label="Choose Cover Photo…"
                   hint=""
                   onPress={() => {
@@ -1531,7 +1532,7 @@ function ViewerPage({
                   }}
                 />
                 {item.customCover && (
-                  <MenuRow
+                  <MenuRow icon="rewatch"
                     label="Reset Cover"
                     hint="First frame"
                     onPress={() => {
@@ -1540,7 +1541,7 @@ function ViewerPage({
                     }}
                   />
                 )}
-                <MenuRow
+                <MenuRow icon="edit"
                   label="Trim, Crop & Resize…"
                   hint=""
                   onPress={() => {
@@ -1549,7 +1550,7 @@ function ViewerPage({
                     setEditorTab('trim');
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="storage"
                   label="Make Smaller…"
                   hint={fmtSize(item.sizeBytes)}
                   onPress={() => {
@@ -1558,7 +1559,7 @@ function ViewerPage({
                     setSmallerOpen(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="slideshow"
                   label="Slideshow from Here"
                   hint=""
                   onPress={() => {
@@ -1566,7 +1567,7 @@ function ViewerPage({
                     onSlideshow(item);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="duplicate"
                   label="Duplicate"
                   hint=""
                   onPress={() => {
@@ -1574,7 +1575,7 @@ function ViewerPage({
                     run('Duplicated - the copy is in the library', actions.onDuplicate(item));
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="lock"
                   label={item.isPrivate ? 'Remove from Private' : 'Move to Private'}
                   hint={item.isPrivate ? '' : 'Locked'}
                   onPress={() => {
@@ -1582,7 +1583,7 @@ function ViewerPage({
                     togglePrivate();
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="trash"
                   label="Delete"
                   danger
                   hint=""
@@ -1609,8 +1610,8 @@ function ViewerPage({
               <View style={styles.grabber} />
               <Text style={styles.menuTitle}>Player</Text>
               <ScrollView style={styles.menuScroll}>
-                <MenuRow label="Speed" hint={`${opts.speed}×`} onPress={cycleSpeed} />
-                <MenuRow
+                <MenuRow icon="speed" label="Speed" hint={`${opts.speed}×`} onPress={cycleSpeed} />
+                <MenuRow icon="repeat"
                   label="When It Ends"
                   hint={opts.endLoop ? 'Loop' : opts.autoplayNext ? 'Play the next one' : 'Stop'}
                   onPress={() => {
@@ -1621,7 +1622,7 @@ function ViewerPage({
                     else setOpt({ endLoop: true, autoplayNext: false });
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="bookmarkAdd"
                   label="Bookmark This Moment"
                   hint={fmtDuration(elapsed * 1000) ?? '0:00'}
                   onPress={() => {
@@ -1630,9 +1631,9 @@ function ViewerPage({
                   }}
                 />
                 {marks.map((m) => (
-                  <MenuRow
+                  <MenuRow icon="bookmark"
                     key={m.id}
-                    label={`   ${fmtClock(m.atMs)}${m.label ? `  ${m.label}` : ''}`}
+                    label={`${fmtClock(m.atMs)}${m.label ? `  ${m.label}` : ''}`}
                     hint="Hold for more"
                     onPress={() => {
                       setPlayerMenu(false);
@@ -1646,9 +1647,9 @@ function ViewerPage({
                 ))}
                 {chapters.length > 0 && <Text style={styles.menuTitle}>Chapters</Text>}
                 {chapters.map((c, i) => (
-                  <MenuRow
+                  <MenuRow icon="chapters"
                     key={`ch${i}`}
-                    label={`   ${c.title}`}
+                    label={c.title}
                     hint={fmtClock(c.startMs)}
                     onPress={() => {
                       setPlayerMenu(false);
@@ -1657,7 +1658,7 @@ function ViewerPage({
                   />
                 ))}
                 {prefs.resumeEnabled && canResume(item.durationMs) && (
-                  <MenuRow
+                  <MenuRow icon="later"
                     label="Continue Another Time"
                     hint={`From ${fmtClock(Math.max(0, elapsed * 1000 - 150_000))}`}
                     onPress={() => {
@@ -1666,7 +1667,7 @@ function ViewerPage({
                     }}
                   />
                 )}
-                <MenuRow
+                <MenuRow icon="fast"
                   label="Skip the Start…"
                   hint={skipSec > 0 ? `First ${fmtClock(skipSec * 1000)}` : 'For an album'}
                   onPress={() => {
@@ -1674,7 +1675,7 @@ function ViewerPage({
                     setSkipMenu(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="fill"
                   label="Fill the Screen"
                   hint={fillScreen ? 'On' : 'Off (pinch works too)'}
                   onPress={() => {
@@ -1682,7 +1683,7 @@ function ViewerPage({
                     setFillScreen(!fillScreen);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="glow"
                   label="Ambient Glow"
                   hint={opts.ambient ? 'On' : 'Off'}
                   onPress={() => {
@@ -1690,7 +1691,7 @@ function ViewerPage({
                     setOpt({ ambient: !opts.ambient });
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="fullScreen"
                   label={overlay ? 'Exit Full Screen' : 'Full Screen'}
                   hint={wide && canRotate && !overlay ? 'Turns sideways' : ''}
                   onPress={() => {
@@ -1699,7 +1700,7 @@ function ViewerPage({
                   }}
                 />
                 {enableVideo && (
-                  <MenuRow
+                  <MenuRow icon="pip"
                     label="Picture in Picture"
                     hint=""
                     onPress={() => {
@@ -1708,7 +1709,7 @@ function ViewerPage({
                     }}
                   />
                 )}
-                <MenuRow
+                <MenuRow icon="lock"
                   label="Lock the Screen"
                   hint="Ignores touches"
                   onPress={() => {
@@ -1719,7 +1720,7 @@ function ViewerPage({
                     setLockHint(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="frame"
                   label="Choose Cover Frame…"
                   hint="Scrub to the exact frame"
                   onPress={() => {
@@ -1728,7 +1729,7 @@ function ViewerPage({
                     setCoverOpen(true);
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="sound"
                   label="Keep Playing in the Background"
                   hint={opts.background ? 'On' : 'Off'}
                   onPress={() => {
@@ -1736,7 +1737,7 @@ function ViewerPage({
                     setOpt({ background: !opts.background });
                   }}
                 />
-                <MenuRow
+                <MenuRow icon="open"
                   label="Open Videos"
                   hint={PLAYER_STARTS.find((x) => x.key === opts.start)?.label ?? ''}
                   onPress={() => {
@@ -1745,7 +1746,7 @@ function ViewerPage({
                   }}
                 />
                 {overlay && (
-                  <MenuRow
+                  <MenuRow icon="more"
                     label="More…"
                     hint="Rate, share, albums"
                     onPress={() => {
@@ -1777,7 +1778,7 @@ function ViewerPage({
                 </TouchableOpacity>
               </View>
               <ScrollView style={styles.menuScroll}>
-                <MenuRow
+                <MenuRow icon="plus"
                   label="New Album…"
                   hint=""
                   onPress={() => {
@@ -2062,21 +2063,31 @@ function Detail({ label, value }: { label: string; value?: string | null }) {
 function MenuRow({
   label,
   hint,
+  icon,
   danger,
   onPress,
   onLongPress,
 }: {
   label: string;
   hint: string;
+  icon?: IconName;
   danger?: boolean;
   onPress: () => void;
   onLongPress?: () => void;
 }) {
   const styles = useStyles(makeStyles);
+  const p = usePalette();
   return (
-    <TouchableOpacity style={styles.menuRow} onPress={onPress} onLongPress={onLongPress}>
-      <Text style={[styles.menuLabel, danger && styles.menuLabelDanger]}>{label}</Text>
-      {!!hint && <Text style={styles.menuHint}>{hint}</Text>}
+    <TouchableOpacity style={styles.menuRow} onPress={onPress} onLongPress={onLongPress} accessibilityRole="button" accessibilityLabel={hint ? `${label}, ${hint}` : label}>
+      <View style={styles.menuIcon}>{icon && <Icon name={icon} size={17} color={danger ? p.dangerText : p.text} />}</View>
+      <Text style={[styles.menuLabel, danger && styles.menuLabelDanger]} numberOfLines={1}>
+        {label}
+      </Text>
+      {!!hint && (
+        <Text style={styles.menuHint} numberOfLines={1}>
+          {hint}
+        </Text>
+      )}
     </TouchableOpacity>
   );
 }
@@ -2336,23 +2347,17 @@ const makeStyles = (p: Palette) =>
       bottom: 0,
       maxHeight: '80%',
       backgroundColor: p.panel,
-      borderTopLeftRadius: 18,
-      borderTopRightRadius: 18,
-      paddingTop: 10,
-      paddingHorizontal: 8,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      paddingTop: 8,
+      paddingHorizontal: 10,
     },
     menuScroll: { flexGrow: 0 },
-    grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: p.grabber },
-    menuTitle: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 },
-    menuRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 12,
-      paddingVertical: 14,
-      borderRadius: 10,
-    },
-    menuLabel: { color: p.textSoft, fontSize: 16 },
+    grabber: { alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: p.grabber },
+    menuTitle: { color: p.text, fontSize: 17, fontWeight: '800', letterSpacing: -0.2, paddingHorizontal: 10, paddingTop: 12, paddingBottom: 8 },
+    menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, minHeight: 50, paddingVertical: 10, borderRadius: 14 },
+    menuIcon: { width: 22, alignItems: 'center' },
+    menuLabel: { color: p.text, fontSize: 16, fontWeight: '500', flexShrink: 0, maxWidth: '68%' },
     menuLabelDanger: { color: p.dangerText },
-    menuHint: { color: p.textSecondary, fontSize: 14 },
+    menuHint: { flex: 1, color: p.textSecondary, fontSize: 14, textAlign: 'right' },
   });

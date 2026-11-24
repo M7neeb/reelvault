@@ -14,7 +14,7 @@ import { dayKey, matchesRule } from './logic';
 import { tick } from './haptics';
 import { SPRING } from './motion';
 import Icon from './Icon';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import { raised, sheet, usePalette, useStyles, type Palette } from './theme';
 import {
   GROUPINGS,
   LAYOUTS,
@@ -1083,7 +1083,7 @@ const makeStyles = (p: Palette) =>
     cardBox: { backgroundColor: p.card, borderRadius: 18, padding: 14, gap: 12 },
     footer: { color: p.textSecondary, fontSize: 13, lineHeight: 18, paddingHorizontal: 6 },
     rows: { backgroundColor: p.card, borderRadius: 18, overflow: 'hidden' },
-    rowsOnPage: { backgroundColor: p.scheme === 'light' ? p.elevated : p.card },
+    rowsOnPage: { backgroundColor: raised(p) },
     rowLine: { height: StyleSheet.hairlineWidth, backgroundColor: p.separator, marginLeft: 60 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, minHeight: 54, paddingVertical: 10 },
     rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },

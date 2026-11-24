@@ -17,7 +17,7 @@ import { sameFilter, type Filter } from './filters';
 import { describeRule, matchesRule, safeBatchGb } from './logic';
 import Icon from './Icon';
 import type { IconName } from './icons';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import { raised, sheet, usePalette, useStyles, type Palette } from './theme';
 import { STATUSES, type SmartFilter, type UiAlbum, type UiFolder, type UiTag, type VaultItem } from './types';
 
 function DrawerRow({
@@ -537,18 +537,18 @@ const makeStyles = (p: Palette) =>
     add: { color: p.link, fontSize: 15, fontWeight: '600', flex: 1 },
 
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 10 },
-    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', backgroundColor: raised(p), borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
     chipOn: { backgroundColor: p.accent },
     chipText: { color: p.text, fontSize: 14, fontWeight: '600', flexShrink: 1 },
     chipCount: { color: p.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
     chipTextOn: { color: '#fff' },
 
     browse: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 10 },
-    browseTile: { width: '48%', flexGrow: 1, gap: 14, backgroundColor: p.card, borderRadius: 18, padding: 14 },
+    browseTile: { width: '48%', flexGrow: 1, gap: 14, backgroundColor: raised(p), borderRadius: 18, padding: 14 },
     browseLabel: { color: p.text, fontSize: 15, fontWeight: '700' },
 
     storage: { gap: 8, paddingHorizontal: 10 },
-    bar: { flexDirection: 'row', height: 8, borderRadius: 4, backgroundColor: p.card, overflow: 'hidden' },
+    bar: { flexDirection: 'row', height: 8, borderRadius: 4, backgroundColor: raised(p), overflow: 'hidden' },
     barUsed: { backgroundColor: p.accent, borderRadius: 4 },
     stat: { color: p.textSecondary, fontSize: 14 },
     statStrong: { color: p.text, fontWeight: '700' },
