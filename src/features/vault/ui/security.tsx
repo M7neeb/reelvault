@@ -223,6 +223,8 @@ export function SettingsSheet({
   importQuality,
   onImportQuality,
   onPersonalise,
+  autoCover,
+  onAutoCover,
   loadPasscodeLog,
   onClearPasscodeLog,
   backups,
@@ -254,6 +256,9 @@ export function SettingsSheet({
   importQuality: CompressQuality | null;
   onImportQuality: (quality: CompressQuality | null) => void;
   onPersonalise?: () => void;
+  /** The app picks the best looking frame as the cover; null when this app build can't. */
+  autoCover?: boolean | null;
+  onAutoCover?: (on: boolean) => void;
   onClose: () => void;
 }) {
   const styles = useStyles(makeStyles);
@@ -274,10 +279,22 @@ export function SettingsSheet({
   const faceFails = log?.filter((x) => x.kind === 'faceid-failed').length ?? 0;
 
   return (
-    <SheetFrame title="Settings" onClose={onClose} action={{ label: 'Done', onPress: onClose }}>
+    <SheetFrame title="Settings" onClose={onClose} page>
       {onPersonalise && (
         <Rows>
           <Row icon="paint" tint="#FF9F0A" title="Personalise" sub="Layout, accent colour, app icon, rating words" onPress={onPersonalise} />
+        </Rows>
+      )}
+
+      {autoCover !== undefined && autoCover !== null && onAutoCover && (
+        <Rows
+          label="Covers"
+          footer={
+            autoCover
+              ? 'Videos still showing the frame from one second in get the sharpest, best lit frame instead, with faces first. It happens in the background while the app is open. A cover you choose yourself is never changed.'
+              : 'Covers stay on the frame from one second in, unless you choose one.'
+          }>
+          <Row icon="photo" tint="#FF375F" title="Pick the best frame" sub="For videos without a cover you chose" toggle={{ value: autoCover, onChange: onAutoCover }} />
         </Rows>
       )}
 

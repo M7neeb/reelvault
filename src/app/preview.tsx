@@ -265,7 +265,7 @@ function SimklPreview({ category, surface, look }: { category: Exclude<Category,
   );
 }
 
-function SearchPreview({ q, mine }: { q?: string; mine?: boolean }) {
+function SearchPreview({ q, mine, scope }: { q?: string; mine?: boolean; scope?: string }) {
   const [items, setItems] = useState<SimklItem[]>(FIXTURE_SIMKL);
   const actions = useMemo(() => fixtureSimklActions(setItems, items), [items]);
   const local = useMemo<LocalSearch>(() => {
@@ -298,7 +298,7 @@ function SearchPreview({ q, mine }: { q?: string; mine?: boolean }) {
       clearRecent: () => undefined,
     };
   }, [items]);
-  return <SearchScreen connected items={items} lists={FIXTURE_LISTS} actions={actions} local={local} initialQuery={q} key={mine ? 'mine' : 'all'} />;
+  return <SearchScreen connected items={items} lists={FIXTURE_LISTS} actions={actions} local={local} initialQuery={q} initialScope={scope} key={mine ? 'mine' : 'all'} />;
 }
 
 const noop = async () => {};
@@ -569,6 +569,9 @@ export default function PreviewRoute() {
       onCancelMakeSmaller: () => {},
       getImportQuality: async () => null,
       setImportQuality: noop,
+      getAutoCover: async () => true,
+      setAutoCover: noop,
+      canAutoCover: () => true,
       onOpenMap: () => {},
       onExportBackup: noop,
       onExportSpreadsheet: noop,
@@ -693,7 +696,7 @@ export default function PreviewRoute() {
     return (
       <ThemeContext.Provider value={palette}>
         <TabBarSpace.Provider value={MOCK_TAB_SPACE}>
-          {category === 'search' ? <SearchPreview q={q} /> : <SimklPreview category={category} surface={sview ?? 'list'} look={viewOptions.look} />}
+          {category === 'search' ? <SearchPreview q={q} scope={sview} /> : <SimklPreview category={category} surface={sview ?? 'list'} look={viewOptions.look} />}
           <TabBarMock active={category} />
         </TabBarSpace.Provider>
       </ThemeContext.Provider>

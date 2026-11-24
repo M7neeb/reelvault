@@ -5,7 +5,7 @@
  */
 
 import { useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, SlideInLeft } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,6 +26,8 @@ function DrawerRow({
   count,
   f,
   current,
+  icon,
+  dot,
   indent,
   onPick,
   onLongPress,
@@ -37,18 +39,28 @@ function DrawerRow({
   count: number | null;
   f: Filter;
   current: Filter;
+  icon?: IconName;
+  /** A small coloured dot instead of an icon (statuses). */
+  dot?: string;
   indent?: boolean;
   onPick: (f: Filter) => void;
   onLongPress?: () => void;
 }) {
   const styles = useStyles(makeStyles);
+  const p = usePalette();
   const active = sameFilter(f, current);
   return (
     <TouchableOpacity
       style={[styles.row, active && styles.rowOn, indent && styles.indent]}
       onPress={() => onPick(f)}
       onLongPress={onLongPress}
-      delayLongPress={350}>
+      delayLongPress={350}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={count !== null ? `${label}, ${count}` : label}>
+      <View style={styles.rowLead}>
+        {icon ? <Icon name={icon} size={17} color={active ? p.accent : p.textSecondary} /> : dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : null}
+      </View>
       <View style={styles.rowText}>
         <Text style={[styles.label, active && styles.labelOn]} numberOfLines={1}>
           {label}
@@ -59,17 +71,40 @@ function DrawerRow({
           </Text>
         )}
       </View>
-      {count !== null && <Text style={styles.count}>{count}</Text>}
+      {count !== null && <Text style={[styles.count, count === 0 && styles.countZero, active && styles.countOn]}>{count}</Text>}
     </TouchableOpacity>
   );
 }
 
-function ActionRow({ label, onPress }: { label: string; onPress: () => void }) {
+function ActionRow({ label, onPress, indent }: { label: string; onPress: () => void; indent?: boolean }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  return (
+    <TouchableOpacity style={[styles.row, indent && styles.indent]} onPress={onPress} accessibilityRole="button">
+      <View style={styles.rowLead}>
+        <Icon name="plus" size={15} color={p.link} weight="bold" />
+      </View>
+      <Text style={styles.add} numberOfLines={1}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+/** A section title, with an optional small action on the right. */
+function Heading({ title, action }: { title: string; action?: { label: string; onPress: () => void; a11y?: string } }) {
   const styles = useStyles(makeStyles);
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress}>
-      <Text style={styles.add}>{label}</Text>
-    </TouchableOpacity>
+    <View style={styles.headingRow}>
+      <Text style={styles.heading} accessibilityRole="header">
+        {title}
+      </Text>
+      {action && (
+        <TouchableOpacity hitSlop={10} onPress={action.onPress} accessibilityLabel={action.a11y ?? action.label}>
+          <Text style={styles.headingAction}>{action.label}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
   );
 }
 
@@ -123,6 +158,16 @@ const TILES: { tab: 'dashboard' | 'history' | 'wrapped' | 'badges' | 'storage'; 
   { tab: 'storage', label: 'Storage', icon: 'storage', color: '#30D158' },
 ];
 
+const STATUS_DOT: Record<string, string> = {
+  watching: '#0A84FF',
+  plantowatch: '#8E8E93',
+  completed: '#30D158',
+  hold: '#FF9F0A',
+  dropped: '#FF453A',
+};
+
+const ALBUM_SORT_LABEL = { name: 'A to Z', watched: 'Most watched', recent: 'Recently used' } as const;
+
 export default function Sidebar(props: SidebarProps) {
   const {
     items,
@@ -145,6 +190,10 @@ export default function Sidebar(props: SidebarProps) {
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
   const reduce = useReducedMotion();
+  const { width } = useWindowDimensions();
+  const drawerWidth = Math.min(340, Math.round(width * 0.86));
+  // A bit over four tiles across, so the last one peeks in and says "scroll".
+  const tileWidth = Math.floor((drawerWidth - 20 - 4 * 8) / 4.3);
   const [openFolders, setOpenFolders] = useState<number[]>([]);
 
   const favorites = items.filter((v) => v.rating >= 8).length;
@@ -157,6 +206,7 @@ export default function Sidebar(props: SidebarProps) {
   const counted = new Set(albums.filter((a) => !a.excludeUncategorized).map((a) => a.id));
   const uncategorized = items.filter((v) => !v.albumIds.some((id) => counted.has(id))).length;
   const totalBytes = items.reduce((sum, v) => sum + v.sizeBytes, 0);
+  const usedGb = Number(gbFromBytes(totalBytes));
   const row = { current: filter, onPick };
 
   const albumCount = (a: UiAlbum) => (a.isPrivate ? privateItems ?? [] : items).filter((v) => v.albumIds.includes(a.id)).length;
@@ -169,6 +219,7 @@ export default function Sidebar(props: SidebarProps) {
       {...row}
       key={`a${a.id}`}
       indent={indent}
+      icon={a.isPrivate ? 'lock' : a.pinned ? 'pin' : 'photo'}
       label={a.name}
       hint={a.pinned ? 'Pinned' : undefined}
       count={albumCount(a)}
@@ -181,6 +232,7 @@ export default function Sidebar(props: SidebarProps) {
       {...row}
       key={`s${s.id}`}
       indent={indent}
+      icon="wand"
       label={s.name}
       hint={describeRule(s.rule)}
       count={items.filter((v) => matchesRule(v, s.rule)).length}
@@ -188,6 +240,12 @@ export default function Sidebar(props: SidebarProps) {
       onLongPress={() => props.onSmartOptions(s)}
     />
   );
+  const browse: { label: string; icon: IconName; onPress: () => void }[] = [
+    { label: 'Calendar', icon: 'calendar', onPress: props.onCalendar },
+    { label: 'Timeline', icon: 'timeline', onPress: props.onTimeline },
+    { label: 'Places', icon: 'mapPin', onPress: props.onMap },
+    { label: 'Overview', icon: 'overview', onPress: props.onOverview },
+  ];
 
   return (
     <Animated.View style={styles.root} exiting={FadeOut.duration(DUR.fast)}>
@@ -195,35 +253,51 @@ export default function Sidebar(props: SidebarProps) {
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} accessibilityLabel="Close the library panel" />
       </Animated.View>
       <Animated.View
-        style={[styles.drawer, { paddingTop: insets.top + 12, paddingBottom: (tabSpace > 0 ? tabSpace : insets.bottom) + 10 }]}
+        style={[styles.drawer, { width: drawerWidth, paddingTop: insets.top + 10, paddingBottom: (tabSpace > 0 ? tabSpace : insets.bottom) + 10 }]}
         entering={reduce ? FadeIn.duration(DUR.fast) : SlideInLeft.duration(DUR.base).easing(EASE_OUT)}>
-        <Text style={styles.title}>ReelVault</Text>
-        <ScrollView contentContainerStyle={styles.scroll}>
-          <View style={styles.tiles}>
+        <View style={styles.top}>
+          <View style={styles.topText}>
+            <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} accessibilityRole="header">
+              Library
+            </Text>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {items.length} {items.length === 1 ? 'video' : 'videos'} · {usedGb} GB
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.close} onPress={onClose} accessibilityLabel="Close" hitSlop={6}>
+            <Icon name="close" size={14} color={p.icon} weight="bold" />
+          </TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tiles} style={styles.tilesBleed}>
             {TILES.map((t) => (
-              <TouchableOpacity key={t.tab} style={styles.tileBtn} onPress={() => props.onInsights(t.tab)}>
-                <View style={[styles.tileIcon, { backgroundColor: t.color }]}>
-                  <Icon name={t.icon} size={15} color="#fff" />
+              <TouchableOpacity key={t.tab} style={[styles.tile, { width: tileWidth }]} onPress={() => props.onInsights(t.tab)} accessibilityRole="button" accessibilityLabel={t.label}>
+                <View style={styles.tileIcon}>
+                  <View style={[StyleSheet.absoluteFill, styles.tileWash, { backgroundColor: t.color }]} />
+                  <Icon name={t.icon} size={18} color={t.color} />
                 </View>
-                <Text style={styles.tileLabel}>{t.label}</Text>
+                <Text style={styles.tileLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  {t.label}
+                </Text>
               </TouchableOpacity>
             ))}
-          </View>
-          <Text style={styles.section}>Library</Text>
-          <DrawerRow {...row} label="All Videos" count={items.length} f={{ kind: 'all' }} />
-          <DrawerRow {...row} label="★ Favorites" count={favorites} f={{ kind: 'favorites' }} />
-          <DrawerRow {...row} label="Rated" count={rated} f={{ kind: 'rated' }} />
-          <DrawerRow {...row} label="Picks" count={picks} f={{ kind: 'picks' }} />
-          <DrawerRow {...row} label="Rejects" count={rejects} f={{ kind: 'rejects' }} />
-          <DrawerRow {...row} label="Untagged" count={untagged} f={{ kind: 'untagged' }} />
-          <DrawerRow {...row} label="Uncategorized" hint="In no album" count={uncategorized} f={{ kind: 'uncategorized' }} />
-          <DrawerRow {...row} label="With Location" count={located} f={{ kind: 'located' }} />
-          <DrawerRow {...row} label="Tray" count={tray} f={{ kind: 'tray' }} />
-          <DrawerRow {...row} label="Duplicates" count={duplicateCount} f={{ kind: 'duplicates' }} />
-          <DrawerRow {...row} label="Similar Videos" count={similarCount} f={{ kind: 'similar' }} />
-          <DrawerRow {...row} label="Recently Deleted" count={deletedCount} f={{ kind: 'deleted' }} />
+          </ScrollView>
+
+          <DrawerRow {...row} icon="videos" label="All Videos" count={items.length} f={{ kind: 'all' }} />
+          <DrawerRow {...row} icon="heart" label="Favorites" count={favorites} f={{ kind: 'favorites' }} />
+          <DrawerRow {...row} icon="star" label="Rated" count={rated} f={{ kind: 'rated' }} />
+          <DrawerRow {...row} icon="flag" label="Picks" count={picks} f={{ kind: 'picks' }} />
+          <DrawerRow {...row} icon="reject" label="Rejects" count={rejects} f={{ kind: 'rejects' }} />
+          <DrawerRow {...row} icon="untagged" label="Untagged" count={untagged} f={{ kind: 'untagged' }} />
+          <DrawerRow {...row} icon="folder" label="Uncategorized" hint="In no album" count={uncategorized} f={{ kind: 'uncategorized' }} />
+          <DrawerRow {...row} icon="mapPin" label="With Location" count={located} f={{ kind: 'located' }} />
+          <DrawerRow {...row} icon="tray" label="Tray" count={tray} f={{ kind: 'tray' }} />
+          <DrawerRow {...row} icon="duplicate" label="Duplicates" count={duplicateCount} f={{ kind: 'duplicates' }} />
+          <DrawerRow {...row} icon="similar" label="Similar Videos" count={similarCount} f={{ kind: 'similar' }} />
+          <DrawerRow {...row} icon="trash" label="Recently Deleted" count={deletedCount} f={{ kind: 'deleted' }} />
           <DrawerRow
             {...row}
+            icon={privateItems === null ? 'lock' : 'unlock'}
             label="Private"
             hint={privateItems === null ? 'Locked' : 'Unlocked'}
             count={privateItems === null ? null : privateItems.length}
@@ -232,23 +306,22 @@ export default function Sidebar(props: SidebarProps) {
           {privateItems !== null && (
             <>
               {albums.filter((a) => a.isPrivate).map((a) => albumRow(a, true))}
-              <ActionRow label="   + New Private Album" onPress={() => props.onNewAlbum({ isPrivate: true })} />
+              <ActionRow indent label="New private album" onPress={() => props.onNewAlbum({ isPrivate: true })} />
             </>
           )}
 
-          <View style={styles.sectionRow}>
-            <Text style={styles.section}>Albums</Text>
-            {props.onAlbumSort && (
-              <TouchableOpacity
-                hitSlop={8}
-                onPress={() => props.onAlbumSort!(props.albumSort === 'name' ? 'watched' : props.albumSort === 'watched' ? 'recent' : 'name')}
-                accessibilityLabel="Change how albums are sorted">
-                <Text style={styles.sectionSort}>
-                  {props.albumSort === 'watched' ? 'Most watched' : props.albumSort === 'recent' ? 'Recently used' : 'A–Z'} ⇅
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          <Heading
+            title="Albums"
+            action={
+              props.onAlbumSort
+                ? {
+                    label: ALBUM_SORT_LABEL[props.albumSort ?? 'name'],
+                    a11y: 'Change how albums are sorted',
+                    onPress: () => props.onAlbumSort!(props.albumSort === 'name' ? 'watched' : props.albumSort === 'watched' ? 'recent' : 'name'),
+                  }
+                : undefined
+            }
+          />
           {topAlbums.map((a) => albumRow(a))}
           {folders.map((folder) => {
             const open = openFolders.includes(folder.id);
@@ -258,96 +331,153 @@ export default function Sidebar(props: SidebarProps) {
               <View key={`f${folder.id}`}>
                 <TouchableOpacity
                   style={styles.row}
-                  onPress={() =>
-                    setOpenFolders((ids) => (open ? ids.filter((x) => x !== folder.id) : [...ids, folder.id]))
-                  }
+                  onPress={() => setOpenFolders((ids) => (open ? ids.filter((x) => x !== folder.id) : [...ids, folder.id]))}
                   onLongPress={() => props.onFolderOptions(folder)}
-                  delayLongPress={350}>
-                  <Text style={styles.label} numberOfLines={1}>
-                    {open ? '▾' : '▸'}  {folder.name}
+                  delayLongPress={350}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: open }}>
+                  <View style={styles.rowLead}>
+                    <Icon name="folder" size={17} color={p.textSecondary} />
+                  </View>
+                  <Text style={[styles.label, styles.rowText]} numberOfLines={1}>
+                    {folder.name}
                   </Text>
                   <Text style={styles.count}>{inside.length + filters.length}</Text>
+                  <View style={styles.chevron}>
+                    <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} color={p.textMuted} />
+                  </View>
                 </TouchableOpacity>
                 {open && (
                   <>
                     {inside.map((a) => albumRow(a, true))}
                     {filters.map((s) => smartRow(s, true))}
-                    <ActionRow label="   + New Album here" onPress={() => props.onNewAlbum({ folderId: folder.id })} />
+                    <ActionRow indent label="New album here" onPress={() => props.onNewAlbum({ folderId: folder.id })} />
                   </>
                 )}
               </View>
             );
           })}
-          <ActionRow label="+ New Album" onPress={() => props.onNewAlbum({})} />
-          <ActionRow label="+ New Folder" onPress={props.onNewFolder} />
+          <ActionRow label="New album" onPress={() => props.onNewAlbum({})} />
+          <ActionRow label="New folder" onPress={props.onNewFolder} />
 
-          <Text style={styles.section}>Smart Filters</Text>
+          <Heading title="Smart Filters" />
           {topFilters.map((s) => smartRow(s))}
-          <ActionRow label="+ New Smart Filter" onPress={props.onNewSmart} />
+          <ActionRow label="New smart filter" onPress={props.onNewSmart} />
 
-          <Text style={styles.section}>Status</Text>
+          <Heading title="Status" />
           {STATUSES.map((s) => (
             <DrawerRow
               {...row}
               key={s.key}
+              dot={STATUS_DOT[s.key] ?? p.textMuted}
               label={s.label}
               count={items.filter((v) => v.status === s.key).length}
               f={{ kind: 'status', status: s.key }}
             />
           ))}
 
-          <Text style={styles.section}>Keywords</Text>
-          {tags.length === 0 && <Text style={styles.muted}>No keywords yet.</Text>}
-          {tags.length > 0 && props.onManageKeywords && <ActionRow label="Manage keywords…" onPress={props.onManageKeywords} />}
-          {tags.map((t) => (
-            <DrawerRow
-              {...row}
-              key={t.id}
-              label={`# ${t.name}`}
-              hint={t.pinned ? 'Pinned' : undefined}
-              count={tagCounts[t.name] ?? 0}
-              f={{ kind: 'tag', tag: t.name }}
-              onLongPress={() => props.onTagOptions(t)}
-            />
-          ))}
+          <Heading title="Keywords" action={tags.length > 0 && props.onManageKeywords ? { label: 'Manage', onPress: props.onManageKeywords, a11y: 'Manage keywords' } : undefined} />
+          {tags.length === 0 ? (
+            <Text style={styles.muted}>Keywords you add to videos show up here.</Text>
+          ) : (
+            <View style={styles.chips}>
+              {tags.map((t) => {
+                const on = sameFilter({ kind: 'tag', tag: t.name }, filter);
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[styles.chip, on && styles.chipOn]}
+                    onPress={() => onPick({ kind: 'tag', tag: t.name })}
+                    onLongPress={() => props.onTagOptions(t)}
+                    delayLongPress={350}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`Keyword ${t.name}, ${tagCounts[t.name] ?? 0}`}>
+                    {t.pinned && <Icon name="pin" size={11} color={on ? '#fff' : p.keyword} />}
+                    <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1}>
+                      {t.name}
+                    </Text>
+                    <Text style={[styles.chipCount, on && styles.chipTextOn]}>{tagCounts[t.name] ?? 0}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {props.tidy && (props.tidy.untagged > 0 || props.tidy.cold > 0) && (
             <>
-              <Text style={styles.section}>Tidy up</Text>
-              {props.tidy.untagged > 0 && <ActionRow label={`Quick tagging · ${props.tidy.untagged} without keywords`} onPress={props.tidy.onQuickTag} />}
-              {props.tidy.cold > 0 && <ActionRow label={`Keep or delete · ${props.tidy.cold} you never watch`} onPress={props.tidy.onKeepOrDelete} />}
+              <Heading title="Tidy up" />
+              {props.tidy.untagged > 0 && (
+                <TouchableOpacity style={styles.row} onPress={props.tidy.onQuickTag} accessibilityRole="button">
+                  <View style={styles.rowLead}>
+                    <Icon name="tag" size={17} color={p.textSecondary} />
+                  </View>
+                  <Text style={[styles.label, styles.rowText]} numberOfLines={1}>
+                    Quick tagging
+                  </Text>
+                  <Text style={styles.count}>{props.tidy.untagged}</Text>
+                </TouchableOpacity>
+              )}
+              {props.tidy.cold > 0 && (
+                <TouchableOpacity style={styles.row} onPress={props.tidy.onKeepOrDelete} accessibilityRole="button">
+                  <View style={styles.rowLead}>
+                    <Icon name="trash" size={17} color={p.textSecondary} />
+                  </View>
+                  <Text style={[styles.label, styles.rowText]} numberOfLines={1}>
+                    Keep or delete
+                  </Text>
+                  <Text style={styles.count}>{props.tidy.cold}</Text>
+                </TouchableOpacity>
+              )}
             </>
           )}
 
-          <Text style={styles.section}>Browse</Text>
-          <ActionRow label="Calendar" onPress={props.onCalendar} />
-          <ActionRow label="Timeline" onPress={props.onTimeline} />
-          <ActionRow label="Places (Map)" onPress={props.onMap} />
-          <ActionRow label="Library Overview" onPress={props.onOverview} />
+          <Heading title="Browse" />
+          <View style={styles.browse}>
+            {browse.map((b) => (
+              <TouchableOpacity key={b.label} style={styles.browseTile} onPress={b.onPress} accessibilityRole="button" accessibilityLabel={b.label}>
+                <Icon name={b.icon} size={20} color={p.text} />
+                <Text style={styles.browseLabel} numberOfLines={1}>
+                  {b.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-          <Text style={styles.section}>Storage</Text>
-          <Text style={styles.stat}>{gbFromBytes(totalBytes)} GB in ReelVault</Text>
-          <Text style={styles.stat}>
-            {freeGb !== null ? `${freeGb} GB free on device` : 'Device space unavailable'}
-          </Text>
-          {freeGb !== null && <Text style={styles.stat}>Safe import batch: up to {safeBatchGb(freeGb)} GB</Text>}
-          <Text style={styles.tip}>Tip: long-press an album, folder, smart filter or keyword for its options.</Text>
+          <Heading title="Storage" />
+          <View style={styles.storage}>
+            {freeGb !== null && usedGb + freeGb > 0 && (
+              <View style={styles.bar} accessibilityLabel={`${usedGb} GB in ReelVault, ${freeGb} GB free`}>
+                <View style={[styles.barUsed, { flex: Math.max(0.02, usedGb) }]} />
+                <View style={{ flex: Math.max(0.02, freeGb) }} />
+              </View>
+            )}
+            <Text style={styles.stat}>
+              <Text style={styles.statStrong}>{usedGb} GB</Text> in ReelVault
+              {freeGb !== null ? (
+                <>
+                  {' · '}
+                  <Text style={styles.statStrong}>{freeGb} GB</Text> free
+                </>
+              ) : null}
+            </Text>
+            {freeGb !== null && <Text style={styles.statSoft}>Import up to {safeBatchGb(freeGb)} GB at a time</Text>}
+          </View>
+          <Text style={styles.tip}>Hold an album, folder, smart filter or keyword for its options.</Text>
         </ScrollView>
 
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.action} onPress={props.onImport}>
-            <Text style={styles.actionText} numberOfLines={1}>
-              + Import
+          <TouchableOpacity style={styles.importBtn} onPress={props.onImport} accessibilityRole="button">
+            <Icon name="plus" size={15} color={p.bg} weight="bold" />
+            <Text style={styles.importText} numberOfLines={1}>
+              Import
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.ghost} onPress={props.onPersonalise} accessibilityLabel="Personalise">
-            <Icon name="paint" size={16} color={p.text} />
+          <TouchableOpacity style={styles.round} onPress={props.onPersonalise} accessibilityLabel="Personalise">
+            <Icon name="paint" size={18} color={p.text} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.ghost} onPress={props.onSettings}>
-            <Text style={styles.ghostText}>Settings</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.ghost} onPress={onClose}>
-            <Text style={styles.ghostText}>Close</Text>
+          <TouchableOpacity style={styles.round} onPress={props.onSettings} accessibilityLabel="Settings">
+            <Icon name="settings" size={18} color={p.text} />
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -357,62 +487,77 @@ export default function Sidebar(props: SidebarProps) {
 
 const makeStyles = (p: Palette) =>
   sheet({
-    tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 8 },
-    tileBtn: { width: '48%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.card, borderRadius: 12, padding: 10 },
-    tileIcon: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-    tileLabel: { color: p.text, fontSize: 14, fontWeight: '700' },
     root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 20 },
-    backdrop: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: p.backdrop,
-    },
+    backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: p.backdrop },
     drawer: {
       position: 'absolute',
       top: 0,
       left: 0,
       bottom: 0,
-      width: 300,
-      backgroundColor: p.panel,
+      backgroundColor: p.bg,
+      borderTopRightRadius: 28,
+      borderBottomRightRadius: 28,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOpacity: 0.35,
+      shadowRadius: 24,
+      shadowOffset: { width: 6, height: 0 },
     },
-    title: { color: p.text, fontSize: 22, fontWeight: '800', paddingHorizontal: 18, paddingBottom: 12 },
-    scroll: { paddingHorizontal: 12, paddingBottom: 24, gap: 2 },
-    sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingRight: 8 },
-    sectionSort: { color: p.link, fontSize: 12, fontWeight: '700' },
-    section: {
-      color: p.textSecondary,
-      fontSize: 12,
-      fontWeight: '700',
-      letterSpacing: 0.5,
-      paddingHorizontal: 8,
-      paddingTop: 14,
-      paddingBottom: 6,
-    },
-    row: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      borderRadius: 10,
-    },
+    top: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 20, paddingBottom: 14 },
+    topText: { flex: 1, gap: 2 },
+    title: { color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },
+    subtitle: { color: p.textSecondary, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    close: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: p.circle, marginTop: 6 },
+    scroll: { paddingHorizontal: 10, paddingBottom: 28 },
+
+    tilesBleed: { marginHorizontal: -10, marginBottom: 14 },
+    tiles: { paddingHorizontal: 20, gap: 8 },
+    tile: { alignItems: 'center', gap: 7 },
+    tileIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    tileWash: { opacity: 0.16 },
+    tileLabel: { color: p.textSoft, fontSize: 12, fontWeight: '600' },
+
+    headingRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 26, paddingBottom: 8 },
+    heading: { color: p.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+    headingAction: { color: p.link, fontSize: 14, fontWeight: '600' },
+
+    row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, minHeight: 46, paddingVertical: 8, borderRadius: 14 },
     rowOn: { backgroundColor: p.accentSoft },
     indent: { paddingLeft: 28 },
-    rowText: { flex: 1, paddingRight: 8 },
-    label: { color: p.textSoft, fontSize: 15 },
+    rowLead: { width: 24, alignItems: 'center' },
+    dot: { width: 9, height: 9, borderRadius: 5 },
+    rowText: { flex: 1 },
+    label: { color: p.textSoft, fontSize: 16, fontWeight: '500' },
     labelOn: { color: p.text, fontWeight: '700' },
-    hint: { color: p.textSecondary, fontSize: 12, marginTop: 2 },
-    count: { color: p.textSecondary, fontSize: 14 },
-    add: { color: p.link, fontSize: 15, fontWeight: '600' },
-    stat: { color: p.textSecondary, fontSize: 13, paddingHorizontal: 12, paddingVertical: 3 },
-    tip: { color: p.textMuted, fontSize: 12, paddingHorizontal: 12, paddingTop: 12 },
-    muted: { color: p.textMuted, fontStyle: 'italic', paddingHorizontal: 12 },
-    footer: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10 },
-    action: { flex: 1.4, backgroundColor: p.accent, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 12, alignItems: 'center' },
-    actionText: { color: '#fff', fontWeight: '700' },
-    ghost: { flex: 1, backgroundColor: p.card, paddingVertical: 12, paddingHorizontal: 6, borderRadius: 12, alignItems: 'center' },
-    ghostText: { color: p.textSoft, fontWeight: '700' },
+    hint: { color: p.textSecondary, fontSize: 12, marginTop: 1 },
+    count: { color: p.textSecondary, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    countZero: { color: p.textMuted },
+    countOn: { color: p.accent },
+    chevron: { width: 16, alignItems: 'center' },
+    add: { color: p.link, fontSize: 15, fontWeight: '600', flex: 1 },
+
+    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 10 },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
+    chipOn: { backgroundColor: p.accent },
+    chipText: { color: p.text, fontSize: 14, fontWeight: '600', flexShrink: 1 },
+    chipCount: { color: p.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    chipTextOn: { color: '#fff' },
+
+    browse: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 10 },
+    browseTile: { width: '48%', flexGrow: 1, gap: 14, backgroundColor: p.card, borderRadius: 18, padding: 14 },
+    browseLabel: { color: p.text, fontSize: 15, fontWeight: '700' },
+
+    storage: { gap: 8, paddingHorizontal: 10 },
+    bar: { flexDirection: 'row', height: 8, borderRadius: 4, backgroundColor: p.card, overflow: 'hidden' },
+    barUsed: { backgroundColor: p.accent, borderRadius: 4 },
+    stat: { color: p.textSecondary, fontSize: 14 },
+    statStrong: { color: p.text, fontWeight: '700' },
+    statSoft: { color: p.textMuted, fontSize: 13 },
+    tip: { color: p.textMuted, fontSize: 12.5, paddingHorizontal: 10, paddingTop: 22 },
+    muted: { color: p.textMuted, fontSize: 14, paddingHorizontal: 10 },
+
+    footer: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 10 },
+    importBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: p.text, height: 48, borderRadius: 24 },
+    importText: { color: p.bg, fontSize: 16, fontWeight: '800' },
+    round: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: p.circle },
   });

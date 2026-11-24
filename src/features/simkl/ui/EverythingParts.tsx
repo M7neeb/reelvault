@@ -63,15 +63,16 @@ function Thumb({ local, kind, id, title, w, h, radius }: { local: LocalSearch; k
 }
 
 /** A shelf of cards: tap to carry on (play / read / next episode). */
-export function JumpShelf({ local, onTitle }: { local: LocalSearch; onTitle: (simklId: number) => void }) {
+export function JumpShelf({ local, onTitle, kinds }: { local: LocalSearch; onTitle: (simklId: number) => void; /** Only these kinds (a search scope). */ kinds?: readonly FindKind[] }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
-  if (!local.jump.length) return null;
+  const jump = kinds ? local.jump.filter((j) => kinds.includes(j.kind)) : local.jump;
+  if (!jump.length) return null;
   return (
     <View>
       <Text style={styles.section}>Jump back in</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
-        {local.jump.map((j) => {
+        {jump.map((j) => {
           const tall = isTitle(j.kind) || j.kind === 'manga' || j.kind === 'book' || j.kind === 'ebook';
           return (
             <PressableScale
@@ -122,17 +123,26 @@ export function LocalResults({
   local,
   query,
   compact,
+  kinds: only_,
+  quiet,
   onTitle,
 }: {
   local: LocalSearch;
   query: string;
   /** Show only the first few (Simkl results follow). */
   compact: boolean;
+  /** Only these kinds (a search scope). */
+  kinds?: readonly FindKind[];
+  /** Say nothing when there is no match (Simkl results follow and speak for themselves). */
+  quiet?: boolean;
   onTitle: (simklId: number) => void;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
-  const found = useMemo(() => local.find(query), [local, query]);
+  const found = useMemo(() => {
+    const all = local.find(query);
+    return only_ ? all.filter((f) => only_.includes(f.kind)) : all;
+  }, [local, query, only_]);
   const counts = useMemo(() => countByKind(found), [found]);
   const kinds = ORDER.filter((k) => counts[k]);
   const [only, setOnly] = useState<FindKind | null>(null);
@@ -140,11 +150,11 @@ export function LocalResults({
   const shown = found.filter((f) => !only || f.kind === only);
   const max = compact && !all && !only ? 6 : 60;
 
-  if (!found.length) return <Text style={styles.none}>Nothing in your library for "{query}".</Text>;
+  if (!found.length) return quiet ? null : <Text style={styles.none}>Nothing in your library for "{query}".</Text>;
   return (
     <View>
       <Text style={styles.section}>
-        In your library <Text style={styles.count}>{found.length >= 60 ? '60+' : found.length}</Text>
+        {only_?.length === 1 ? `Your ${PLURAL[only_[0]].toLowerCase()}` : 'In your library'} <Text style={styles.count}>{found.length >= 60 ? '60+' : found.length}</Text>
       </Text>
       {kinds.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>

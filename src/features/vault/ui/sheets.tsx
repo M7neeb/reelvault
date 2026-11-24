@@ -4,10 +4,11 @@
  * Presentational only (see the rule in types.ts).
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal } from './screen';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { dayKey, matchesRule } from './logic';
 import { tick } from './haptics';
@@ -34,20 +35,48 @@ import {
 
 /* -------------------------------------------------------------------- frame */
 
+/** True inside a whole page (Settings): groups sit on the screen background, not on a sheet. */
+const OnPage = createContext(false);
+
 export function SheetFrame({
   title,
   onClose,
   action,
+  page,
   children,
 }: {
   title: string;
   onClose: () => void;
   /** Optional blue button on the right of the header. */
   action?: { label: string; onPress: () => void; disabled?: boolean };
+  /** A whole page with a big title (Settings), instead of a sheet from the bottom. */
+  page?: boolean;
   children: ReactNode;
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const insets = useSafeAreaInsets();
+  if (page) {
+    // On the iPhone a page sheet: the system draws its top edge and a swipe down closes it.
+    const sheetLike = Platform.OS === 'ios';
+    return (
+      <Modal visible animationType="slide" presentationStyle={sheetLike ? 'pageSheet' : undefined} onRequestClose={onClose}>
+        <View style={[styles.page, { paddingTop: sheetLike ? 14 : insets.top + 10 }]}>
+          <View style={styles.pageHeader}>
+            <Text style={styles.pageTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} accessibilityRole="header">
+              {title}
+            </Text>
+            <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close" hitSlop={6}>
+              <Icon name="close" size={15} color={p.icon} weight="bold" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={[styles.body, styles.pageBody, { paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
+            <OnPage.Provider value>{children}</OnPage.Provider>
+          </ScrollView>
+        </View>
+      </Modal>
+    );
+  }
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.kav} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -100,11 +129,12 @@ export function Section({ label, children, card, footer }: { label: string; chil
  */
 export function Rows({ label, footer, children }: { label?: string; footer?: string; children: ReactNode }) {
   const styles = useStyles(makeStyles);
+  const onPage = useContext(OnPage);
   const list = (Array.isArray(children) ? children.flat(3) : [children]).filter((c) => c !== null && c !== undefined && c !== false && c !== '');
   return (
     <View style={styles.section}>
       {!!label && <Text style={styles.sectionLabel}>{label}</Text>}
-      <View style={styles.rows}>
+      <View style={[styles.rows, onPage && styles.rowsOnPage]}>
         {list.map((c, i) => (
           <View key={i}>
             {i > 0 && <View style={styles.rowLine} />}
@@ -147,8 +177,9 @@ export function Row({
   const body = (
     <View style={styles.row}>
       {icon && (
-        <View style={[styles.rowIcon, { backgroundColor: tint ?? p.accent }]}>
-          <Icon name={icon} size={15} color="#fff" />
+        <View style={styles.rowIcon}>
+          <View style={[StyleSheet.absoluteFill, styles.rowIconWash, { backgroundColor: tint ?? p.accent }]} />
+          <Icon name={icon} size={16} color={tint ?? p.accent} />
         </View>
       )}
       <View style={styles.rowText}>
@@ -1043,18 +1074,25 @@ const makeStyles = (p: Palette) =>
     done: { color: p.link, fontSize: 13, fontWeight: '600' },
     hint: { color: p.textSecondary, fontSize: 12 },
 
-    section: { gap: 8 },
-    cardBox: { backgroundColor: p.card, borderRadius: 16, padding: 14, gap: 12 },
-    footer: { color: p.textSecondary, fontSize: 12.5, lineHeight: 17, paddingHorizontal: 4 },
-    rows: { backgroundColor: p.card, borderRadius: 16, overflow: 'hidden' },
-    rowLine: { height: StyleSheet.hairlineWidth, backgroundColor: p.separator, marginLeft: 56 },
-    row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, minHeight: 50, paddingVertical: 9 },
-    rowIcon: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+    page: { flex: 1, backgroundColor: p.bg },
+    pageHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingBottom: 6 },
+    pageTitle: { flex: 1, color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },
+    pageBody: { paddingTop: 10, gap: 28 },
+
+    section: { gap: 10 },
+    cardBox: { backgroundColor: p.card, borderRadius: 18, padding: 14, gap: 12 },
+    footer: { color: p.textSecondary, fontSize: 13, lineHeight: 18, paddingHorizontal: 6 },
+    rows: { backgroundColor: p.card, borderRadius: 18, overflow: 'hidden' },
+    rowsOnPage: { backgroundColor: p.scheme === 'light' ? p.elevated : p.card },
+    rowLine: { height: StyleSheet.hairlineWidth, backgroundColor: p.separator, marginLeft: 60 },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, minHeight: 54, paddingVertical: 10 },
+    rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    rowIconWash: { opacity: 0.18 },
     rowText: { flex: 1, gap: 2 },
-    rowTitle: { color: p.text, fontSize: 16 },
-    rowSub: { color: p.textSecondary, fontSize: 12.5, lineHeight: 16 },
+    rowTitle: { color: p.text, fontSize: 16, fontWeight: '500' },
+    rowSub: { color: p.textSecondary, fontSize: 13, lineHeight: 17 },
     rowValue: { color: p.textSecondary, fontSize: 15, maxWidth: '45%' },
-    sectionLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
+    sectionLabel: { color: p.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
     wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
     chip: {

@@ -122,6 +122,14 @@ export const ICONS = {
   chapters: { sf: 'list.number', ion: 'list' },
   textSize: { sf: 'textformat.size', ion: 'text' },
   follow: { sf: 'text.line.first.and.arrowtriangle.forward', ion: 'locate-outline' },
+  tray: { sf: 'tray', ion: 'file-tray-outline' },
+  folder: { sf: 'folder', ion: 'folder-outline' },
+  reject: { sf: 'hand.thumbsdown', ion: 'thumbs-down-outline' },
+  untagged: { sf: 'tag.slash', ion: 'pricetag-outline' },
+  timeline: { sf: 'calendar.day.timeline.left', ion: 'git-commit-outline' },
+  overview: { sf: 'square.grid.2x2', ion: 'apps-outline' },
+  settings: { sf: 'gearshape', ion: 'settings-outline' },
+  similar: { sf: 'photo.stack', ion: 'albums-outline' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

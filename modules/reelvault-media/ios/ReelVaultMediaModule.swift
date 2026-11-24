@@ -102,6 +102,44 @@ public class ReelVaultMediaModule: Module {
       }
     }
 
+    /// How each frame would do as a cover, at fractions of the video: brightness, contrast,
+    /// sharpness and colourfulness (0...1 scales, measured on a small grey/colour copy) and the
+    /// faces in it (how many, the biggest one's share of the picture, the best capture quality).
+    AsyncFunction("frameStats") { (input: String, fractions: [Double], promise: Promise) in
+      guard let inURL = Self.url(input) else {
+        promise.resolve([[String: Any]]())
+        return
+      }
+      DispatchQueue.global(qos: .utility).async {
+        let asset = AVURLAsset(url: inURL)
+        let length = asset.duration.seconds
+        guard length.isFinite, length > 0 else {
+          promise.resolve([[String: Any]]())
+          return
+        }
+        let g = Self.frameGenerator(asset, side: 320)
+        var out: [[String: Any]] = []
+        for f in fractions {
+          autoreleasepool {
+            let t = max(0, min(length - 0.1, length * f))
+            var actual = CMTime.zero
+            guard let image = try? g.copyCGImage(at: CMTime(seconds: t, preferredTimescale: 600), actualTime: &actual) else { return }
+            guard var row = Self.pictureStats(image) else { return }
+            let faces = VNDetectFaceCaptureQualityRequest()
+            try? VNImageRequestHandler(cgImage: image, options: [:]).perform([faces])
+            let found = faces.results ?? []
+            row["faces"] = found.count
+            row["faceArea"] = found.map { Double($0.boundingBox.width * $0.boundingBox.height) }.max() ?? 0
+            row["faceQuality"] = found.compactMap { $0.faceCaptureQuality.map(Double.init) }.max() ?? 0
+            let at = actual.seconds.isFinite ? actual.seconds : t
+            row["atMs"] = at * 1000
+            out.append(row)
+          }
+        }
+        promise.resolve(out)
+      }
+    }
+
     /// The volume buttons send "onVolumeKey" ({direction: "up" | "down"}) instead
     /// of changing the volume (no volume pop-up), until stopVolumeKeys.
     Function("startVolumeKeys") {
@@ -541,6 +579,75 @@ public class ReelVaultMediaModule: Module {
     g.requestedTimeToleranceBefore = tolerance
     g.requestedTimeToleranceAfter = tolerance
     return g
+  }
+
+  /// Brightness (mean grey), contrast (grey spread), sharpness (mean edge strength) and
+  /// colourfulness (Hasler and Süsstrunk), each 0...1, from a copy at most 128 px wide.
+  private static func pictureStats(_ image: CGImage) -> [String: Any]? {
+    let w = min(128, max(8, image.width))
+    let h = max(8, Int(Double(w) * Double(image.height) / Double(max(1, image.width))))
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    let drawn: Bool = px.withUnsafeMutableBytes { raw -> Bool in
+      guard let ctx = CGContext(
+        data: raw.baseAddress,
+        width: w,
+        height: h,
+        bitsPerComponent: 8,
+        bytesPerRow: w * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      ) else { return false }
+      ctx.interpolationQuality = .medium
+      ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+      return true
+    }
+    if !drawn { return nil }
+    let n = w * h
+    var grey = [Double](repeating: 0, count: n)
+    var sum = 0.0
+    var rgSum = 0.0, ybSum = 0.0, rgSq = 0.0, ybSq = 0.0
+    for i in 0..<n {
+      let r = Double(px[i * 4]) / 255
+      let gr = Double(px[i * 4 + 1]) / 255
+      let b = Double(px[i * 4 + 2]) / 255
+      let y = 0.299 * r + 0.587 * gr + 0.114 * b
+      grey[i] = y
+      sum += y
+      let rg = r - gr
+      let yb = 0.5 * (r + gr) - b
+      rgSum += rg
+      ybSum += yb
+      rgSq += rg * rg
+      ybSq += yb * yb
+    }
+    let count = Double(n)
+    let mean = sum / count
+    var spread = 0.0
+    for v in grey { spread += (v - mean) * (v - mean) }
+    let contrast = (spread / count).squareRoot()
+    var edges = 0.0
+    var cells = 0.0
+    if w > 2 && h > 2 {
+      for y in 1..<(h - 1) {
+        for x in 1..<(w - 1) {
+          let i = y * w + x
+          let lap = 4 * grey[i] - grey[i - 1] - grey[i + 1] - grey[i - w] - grey[i + w]
+          edges += abs(lap)
+          cells += 1
+        }
+      }
+    }
+    let rgMean = rgSum / count
+    let ybMean = ybSum / count
+    let rgStd = max(0, rgSq / count - rgMean * rgMean).squareRoot()
+    let ybStd = max(0, ybSq / count - ybMean * ybMean).squareRoot()
+    let colour = (rgStd * rgStd + ybStd * ybStd).squareRoot() + 0.3 * (rgMean * rgMean + ybMean * ybMean).squareRoot()
+    return [
+      "brightness": mean,
+      "contrast": min(1, contrast * 2),
+      "sharpness": min(1, cells > 0 ? edges / cells * 8 : 0),
+      "colorfulness": min(1, colour * 2),
+    ]
   }
 
   /// The picture shrunk to 9×8 grey pixels; each bit says whether a pixel is brighter than its right neighbour.

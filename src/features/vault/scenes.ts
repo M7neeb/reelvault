@@ -23,6 +23,9 @@ const MAX_FRAMES = 60;
 
 /** While a video plays, the scan waits (decoding two videos at once can make playback stutter). */
 let busyCount = 0;
+/** True while a video plays (other background jobs that decode video wait too). */
+export const playbackBusy = (): boolean => busyCount > 0;
+
 export function pauseLookingInside(): () => void {
   busyCount++;
   let done = false;

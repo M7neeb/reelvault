@@ -495,6 +495,10 @@ export type VaultActions = {
   emptyRecentlyDeleted: () => Promise<number>;
   getImportQuality: () => Promise<CompressQuality | null>;
   setImportQuality: (quality: CompressQuality | null) => Promise<void>;
+  /** Covers picked by the app: the best looking frame for videos still on their import frame. */
+  getAutoCover: () => Promise<boolean>;
+  setAutoCover: (on: boolean) => Promise<void>;
+  canAutoCover: () => boolean;
   /** Open the place a video was filmed in Apple Maps. */
   onOpenMap: (lat: number, lon: number, label: string) => void;
   /** Library-info backup (ratings, keywords, albums...): export to Files / import back. */

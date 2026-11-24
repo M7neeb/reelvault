@@ -87,6 +87,7 @@ import {
 } from '@/features/vault/security';
 import { canSaveSound, duplicateVideo, extractFrame, saveSoundToAudio, shareFile, videoChapters } from '@/features/vault/share';
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
+import { AUTO_COVER_KEY, canAutoCover, useAutoCovers } from '@/features/vault/autoCover';
 import { canChooseStrength, cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
 import { planForQuality } from '@/features/vault/edit';
 import { fmtMs, parseRatingLabels } from '@/features/vault/stats';
@@ -385,6 +386,13 @@ const wifiDuplicates = async (info: DuplicateInfo): Promise<DupChoice> => (info.
 
 export function useVaultData(): VaultData {
   const [videos, setVideos] = useState<Video[]>([]);
+  // Covers picked by the app (on unless turned off in Settings).
+  const [autoCover, setAutoCover] = useState(false);
+  useEffect(() => {
+    getSetting(AUTO_COVER_KEY)
+      .then((v) => setAutoCover(v !== 'off'))
+      .catch(() => setAutoCover(true));
+  }, []);
   const [deleted, setDeleted] = useState<Video[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [tagMap, setTagMap] = useState<Record<string, string[]>>({});
@@ -1062,6 +1070,12 @@ export function useVaultData(): VaultData {
         return all.length;
       },
       getImportQuality: async () => parseQuality(await getSetting(IMPORT_QUALITY_KEY)),
+      getAutoCover: async () => (await getSetting(AUTO_COVER_KEY)) !== 'off',
+      setAutoCover: async (on) => {
+        await setSetting(AUTO_COVER_KEY, on ? 'on' : 'off');
+        setAutoCover(on);
+      },
+      canAutoCover,
       setImportQuality: async (quality) => {
         await setSetting(IMPORT_QUALITY_KEY, quality ?? 'off');
       },
@@ -1225,6 +1239,8 @@ export function useVaultData(): VaultData {
   );
 
   const inside = useInside(videos, true);
+  const coversChanged = useCallback(() => void reload(['videos']), [reload]);
+  useAutoCovers(videos, autoCover, coversChanged);
   const allTags = useMemo(() => tags.map(asUiTag), [tags]);
   const clearWrappedRequest = useCallback(() => setWrappedRequest(false), []);
   const clearOpenRequest = useCallback(() => setOpenRequest(null), []);

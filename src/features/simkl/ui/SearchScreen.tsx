@@ -19,11 +19,13 @@ import { useTabBarSpace } from '@/features/vault/ui/chrome';
 import Fade from '@/features/vault/ui/Fade';
 import { tick } from '@/features/vault/ui/haptics';
 import Icon from '@/features/vault/ui/Icon';
+import type { IconName } from '@/features/vault/ui/icons';
 import { rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { posterUrl, SIMKL_TYPES } from '../logic';
 import DetailModal from './DetailModal';
 import { JumpShelf, LocalResults, RecentSearches, WeekCard, type LocalSearch } from './EverythingParts';
+import type { FindKind } from '../../home/everything';
 import { IMDB_YELLOW } from './parts';
 import Poster, { hueFor } from './Poster';
 import type { CatalogTitle, SimklActions, SimklItem, SimklList, SimklPrefs, SimklType, Timeframe } from './types';
@@ -34,7 +36,24 @@ const TIMEFRAMES: { key: Timeframe; label: string }[] = [
   { key: 'month', label: 'This Month' },
 ];
 
-type Scope = 'all' | 'mine' | SimklType;
+type Scope = 'all' | 'video' | 'mine' | SimklType;
+
+/** What each scope finds in your own library. */
+const LOCAL_KINDS: Record<Scope, readonly FindKind[] | undefined> = {
+  all: undefined,
+  mine: undefined,
+  video: ['video'],
+  show: ['show'],
+  movie: ['movie'],
+  anime: ['anime'],
+};
+
+/** Simkl is asked by itself once you stop typing for this long (and the words are long enough). */
+const AUTO_SEARCH_MS = 650;
+const AUTO_SEARCH_MIN = 3;
+
+const SCOPE_LABEL: Record<Scope, string> = { all: 'All', video: 'Videos', show: 'Shows', movie: 'Movies', anime: 'Anime', mine: 'My library' };
+const SCOPE_ICON: Record<Scope, IconName> = { all: 'search', video: 'videos', show: 'tv', movie: 'movie', anime: 'anime', mine: 'bookmark' };
 
 const asTitle = (i: SimklItem): CatalogTitle => ({ simklId: i.simklId, type: i.type, title: i.title, year: i.year, poster: i.poster, slug: i.slug, imdbRating: i.imdbRating, simklRating: i.simklRating, rank: i.rank });
 
@@ -46,6 +65,7 @@ export default function SearchScreen({
   actions,
   local,
   initialQuery,
+  initialScope,
 }: {
   connected: boolean;
   items: SimklItem[];
@@ -56,6 +76,8 @@ export default function SearchScreen({
   local?: LocalSearch;
   /** The browser preview starts with words typed. */
   initialQuery?: string;
+  /** The browser preview can start on a scope. */
+  initialScope?: string;
 }) {
   const insets = useSafeAreaInsets();
   const tabSpace = useTabBarSpace();
@@ -65,14 +87,15 @@ export default function SearchScreen({
 
   const [query, setQuery] = useState(initialQuery ?? '');
   const [submitted, setSubmitted] = useState('');
-  const [scope, setScope] = useState<Scope>('all');
+  const [scope, setScope] = useState<Scope>(() => (initialScope && initialScope in LOCAL_KINDS ? (initialScope as Scope) : 'all'));
   const [timeframe, setTimeframe] = useState<Timeframe>('week');
   const [trending, setTrending] = useState<Partial<Record<SimklType, CatalogTitle[]>>>({});
   const [results, setResults] = useState<Partial<Record<SimklType, CatalogTitle[]>> | null>(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState<CatalogTitle | null>(null);
 
-  const types: SimklType[] = scope === 'all' || scope === 'mine' ? ['show', 'movie', 'anime'] : [scope];
+  const onSimkl = scope !== 'mine' && scope !== 'video';
+  const types: SimklType[] = scope === 'all' || scope === 'mine' || scope === 'video' ? ['show', 'movie', 'anime'] : [scope];
   const live = useDeferredValue(query.trim());
   const openTitle = (simklId: number) => {
     const it = items.find((i) => i.simklId === simklId);
@@ -93,8 +116,14 @@ export default function SearchScreen({
   );
   const searchFor = (q: string) => {
     setQuery(q);
-    setSubmitted(scope === 'mine' ? '' : q);
+    setSubmitted(onSimkl ? q : '');
   };
+  // Simkl results while you type: asked once you pause, not on every letter.
+  useEffect(() => {
+    if (!onSimkl || !connected || live.length < AUTO_SEARCH_MIN || live === submitted) return;
+    const t = setTimeout(() => setSubmitted(live), AUTO_SEARCH_MS);
+    return () => clearTimeout(t);
+  }, [live, onSimkl, connected]); // eslint-disable-line react-hooks/exhaustive-deps
   const library = useMemo(() => new Map(items.map((i) => [i.simklId, i])), [items]);
 
   useEffect(() => {
@@ -111,7 +140,7 @@ export default function SearchScreen({
   }, [actions, timeframe]);
 
   useEffect(() => {
-    if (!submitted || scope === 'mine') {
+    if (!submitted || !onSimkl) {
       setResults(null);
       return;
     }
@@ -171,24 +200,35 @@ export default function SearchScreen({
             clearButtonMode="while-editing"
           />
         </View>
-        <View style={styles.scopes}>
-          {((local ? ['all', 'mine', 'show', 'movie', 'anime'] : ['all', 'show', 'movie', 'anime']) as Scope[]).map((s) => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scopes} keyboardShouldPersistTaps="handled">
+          {((local ? ['all', 'video', 'show', 'movie', 'anime', 'mine'] : ['all', 'show', 'movie', 'anime']) as Scope[]).map((s) => (
             <TouchableOpacity
               key={s}
               style={[styles.scope, scope === s && styles.scopeOn]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: scope === s }}
               onPress={() => {
                 tick();
                 setScope(s);
               }}>
-              <Text style={[styles.scopeText, scope === s && styles.scopeTextOn]}>
-                {s === 'all' ? 'All' : s === 'mine' ? 'Mine' : SIMKL_TYPES.find((t) => t.key === s)!.plural}
-              </Text>
+              <Icon name={SCOPE_ICON[s]} size={14} color={scope === s ? p.bg : p.textSecondary} />
+              <Text style={[styles.scopeText, scope === s && styles.scopeTextOn]}>{SCOPE_LABEL[s]}</Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
 
-        {localHere && live && (scope === 'all' || scope === 'mine') && <LocalResults key={live} local={localHere} query={live} compact={scope === 'all'} onTitle={openTitle} />}
-        {live && !results && scope !== 'mine' && (
+        {localHere && live && (
+          <LocalResults
+            key={`${scope}:${live}`}
+            local={localHere}
+            query={live}
+            kinds={LOCAL_KINDS[scope]}
+            compact={onSimkl}
+            quiet={onSimkl && scope !== 'all'}
+            onTitle={openTitle}
+          />
+        )}
+        {live && !results && onSimkl && (
           <TouchableOpacity
             style={styles.simklAsk}
             onPress={() => {
@@ -203,7 +243,7 @@ export default function SearchScreen({
             <Icon name="forward" size={12} color={p.textMuted} />
           </TouchableOpacity>
         )}
-        {live && !results ? null : results && scope !== 'mine' ? (
+        {live && !results ? null : results && onSimkl ? (
           <>
             {local && <Text style={styles.onSimkl}>On Simkl</Text>}
             {!connected && <Text style={styles.note}>Sign in to Simkl on the Movies, Shows or Anime tab to search.</Text>}
@@ -212,7 +252,7 @@ export default function SearchScreen({
             {types.map((t) =>
               results[t]?.length ? (
                 <View key={t}>
-                  <Text style={styles.section}>{SIMKL_TYPES.find((x) => x.key === t)!.plural}</Text>
+                  <Text style={local ? styles.typeLabel : styles.section}>{SIMKL_TYPES.find((x) => x.key === t)!.plural}</Text>
                   <View style={styles.grid}>
                     {results[t]!.slice(0, scope === 'all' ? 6 : 30).map((r) => (
                       <Tile key={r.simklId} t={r} w={w} mine={library.get(r.simklId)} onPress={() => setOpen(r)} />
@@ -222,20 +262,24 @@ export default function SearchScreen({
               ) : null
             )}
           </>
-        ) : scope === 'mine' ? (
+        ) : !onSimkl ? (
           live ? null : localHere ? (
             <>
               <RecentSearches list={localHere.recent} onPick={searchFor} onClear={localHere.clearRecent} />
-              {localHere.jump.length ? <JumpShelf local={localHere} onTitle={openTitle} /> : null}
-              <WeekCard week={localHere.week} />
-              {!localHere.jump.length && !localHere.recent.length && <Text style={styles.note}>Type to find your videos, audio, books, manga and the titles you follow.</Text>}
+              <JumpShelf local={localHere} onTitle={openTitle} kinds={LOCAL_KINDS[scope]} />
+              {scope === 'mine' && <WeekCard week={localHere.week} />}
+              {scope === 'video' ? (
+                <Text style={styles.note}>Type a name, a keyword or words from a caption to find your videos.</Text>
+              ) : (
+                !localHere.jump.length && !localHere.recent.length && <Text style={styles.note}>Type to find your videos, audio, books, manga and the titles you follow.</Text>
+              )}
             </>
           ) : null
         ) : (
           <>
             {localHere && <RecentSearches list={localHere.recent} onPick={searchFor} onClear={localHere.clearRecent} />}
-            {localHere && <JumpShelf local={localHere} onTitle={openTitle} />}
-            {localHere && <WeekCard week={localHere.week} />}
+            {localHere && <JumpShelf local={localHere} onTitle={openTitle} kinds={LOCAL_KINDS[scope]} />}
+            {localHere && scope === 'all' && <WeekCard week={localHere.week} />}
             <View style={styles.timeframes}>
               {TIMEFRAMES.map((t) => (
                 <TouchableOpacity key={t.key} onPress={() => setTimeframe(t.key)} style={[styles.tf, timeframe === t.key && styles.tfOn]}>
@@ -358,15 +402,16 @@ const makeStyles = (p: Palette) =>
     title: { color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8, paddingHorizontal: 16, paddingBottom: 8 },
     searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.elevated, borderRadius: 14, marginHorizontal: 16, paddingHorizontal: 12 },
     searchInput: { flex: 1, color: p.text, fontSize: 17, paddingVertical: 12 },
-    scopes: { flexDirection: 'row', gap: 6, marginHorizontal: 16, marginTop: 12, backgroundColor: p.elevated, borderRadius: 12, padding: 3 },
-    scope: { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 9 },
-    scopeOn: { backgroundColor: p.card },
-    scopeText: { color: p.textSecondary, fontSize: 14, fontWeight: '700' },
-    scopeTextOn: { color: p.text },
+    scopes: { gap: 8, paddingHorizontal: 16, paddingTop: 12 },
+    scope: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, height: 36 },
+    scopeOn: { backgroundColor: p.text },
+    scopeText: { color: p.textSoft, fontSize: 14, fontWeight: '700' },
+    scopeTextOn: { color: p.bg },
     note: { color: p.textSecondary, fontSize: 15, textAlign: 'center', marginTop: 30, paddingHorizontal: 30 },
     simklAsk: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 16, backgroundColor: p.elevated, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13 },
     simklAskText: { flex: 1, color: p.text, fontSize: 15, fontWeight: '600' },
-    onSimkl: { color: p.textMuted, fontSize: 12, fontWeight: '800', letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 22, textTransform: 'uppercase' },
+    onSimkl: { color: p.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3, paddingHorizontal: 16, paddingTop: 26 },
+    typeLabel: { color: p.textSecondary, fontSize: 15, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
 
     timeframes: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginTop: 16 },
     tf: { backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },

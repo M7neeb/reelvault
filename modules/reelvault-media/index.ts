@@ -33,6 +33,22 @@ type NativeMedia = {
   /** Scene words and text on screen, a frame every `everySec` (at most `maxFrames`). Missing before app build 18. */
   scanFrames?(input: string, everySec: number, maxFrames: number): Promise<{ atMs: number; labels: string[]; text: string }[]>;
   stopVolumeKeys?(): void;
+  /** How good each frame would look as a cover, at fractions of the video. Missing before app 1.13. */
+  frameStats?(input: string, fractions: number[]): Promise<FrameStats[]>;
+};
+
+export type FrameStats = {
+  atMs: number;
+  /** Mean grey, 0 (black) to 1 (white). */
+  brightness: number;
+  contrast: number;
+  sharpness: number;
+  colorfulness: number;
+  faces: number;
+  /** The biggest face's share of the picture, 0 to 1. */
+  faceArea: number;
+  /** Vision's face capture quality (eyes open, in focus, facing the camera), 0 to 1. */
+  faceQuality: number;
 };
 
 /** null in Expo Go, on the web, and in app builds made before this module existed (before 1.9.2). */

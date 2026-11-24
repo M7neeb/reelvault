@@ -1,22 +1,25 @@
 /**
- * Search: a bottom sheet with the query box and the keyword cloud. Tapping a
- * keyword adds it to the query. Words that mean filters ("2024", "8+",
- * "long", "#holiday", "unwatched"...) show as chips under the box, with how
- * many videos match. Below the box: what you searched lately, and as you type,
- * videos whose names come close (typos too) and matching keywords.
+ * Search in the video library: a page with the query box at the top. Words that mean filters
+ * ("2024", "8+", "long", "#holiday", "unwatched"...) show as chips under the box, with how many
+ * videos match. As you type: videos whose names come close (typos too) and matching keywords.
+ * Before you type: what you searched lately, examples to try, and your keywords.
  * Presentational only (see the rule in types.ts).
  */
 
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Modal } from './screen';
-
-import { sheet, usePalette, useStyles, type Palette } from './theme';
-import { SEARCH_EXAMPLES, type SearchChip } from './query';
-import type { UiTag, VaultItem } from './types';
 import { Image } from 'expo-image';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { friendlyName } from '../names';
-import Glyph from './Glyph';
+import { fmtDuration } from './format';
+import { tick } from './haptics';
+import Icon from './Icon';
+import type { IconName } from './icons';
+import { SEARCH_EXAMPLES, type SearchChip } from './query';
+import { Modal } from './screen';
+import { sheet, usePalette, useStyles, type Palette } from './theme';
+import type { UiTag, VaultItem } from './types';
 
 export default function SearchSheet({
   value,
@@ -51,207 +54,232 @@ export default function SearchSheet({
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
+  const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState(value);
+  const typed = draft.trim();
+  // On the iPhone a page sheet (the system draws its top edge; swipe down closes it).
+  const sheetLike = Platform.OS === 'ios';
 
   function commit(next: string) {
     setDraft(next);
     onChange(next);
   }
+  /** Adds a word to what is typed, unless it is there already. */
+  const add = (word: string) => {
+    tick();
+    const words = draft.trim().split(/\s+/).filter(Boolean);
+    if (words.some((w) => w.toLowerCase() === word.toLowerCase())) return;
+    commit([...words, word].join(' '));
+  };
 
   return (
-    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.kav} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.backdrop}>
-          <View style={styles.sheet}>
-            <View style={styles.header}>
-              <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close">
-                <Glyph name="close" />
-              </TouchableOpacity>
-              <Text style={styles.title}>Search</Text>
-              <TouchableOpacity style={styles.searchBtn} onPress={onClose}>
-                <Text style={styles.searchBtnText}>Search</Text>
-              </TouchableOpacity>
-            </View>
+    <Modal visible animationType="slide" presentationStyle={sheetLike ? 'pageSheet' : undefined} onRequestClose={onClose}>
+      <KeyboardAvoidingView style={[styles.page, { paddingTop: sheetLike ? 14 : insets.top + 10 }]} behavior={sheetLike ? 'padding' : undefined}>
+        <View style={styles.header}>
+          <Text style={styles.title} accessibilityRole="header">
+            Search
+          </Text>
+          <TouchableOpacity style={styles.circle} onPress={onClose} accessibilityLabel="Close" hitSlop={6}>
+            <Icon name="close" size={15} color={p.icon} weight="bold" />
+          </TouchableOpacity>
+        </View>
 
-            <TextInput
-              style={styles.input}
-              placeholder="name, keyword, 2024, 8+, long, unwatched…"
-              placeholderTextColor={p.textMuted}
-              value={draft}
-              onChangeText={commit}
-              autoCapitalize="none"
-              autoFocus
-              returnKeyType="search"
-              onSubmitEditing={onClose}
-              keyboardAppearance={p.scheme}
-            />
+        <View style={styles.box}>
+          <Icon name="search" size={17} color={p.textMuted} />
+          <TextInput
+            style={styles.input}
+            placeholder="Name, keyword, 2024, 8+, long…"
+            placeholderTextColor={p.textMuted}
+            value={draft}
+            onChangeText={commit}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            returnKeyType="search"
+            onSubmitEditing={onClose}
+            keyboardAppearance={p.scheme}
+            clearButtonMode="while-editing"
+            accessibilityLabel="Search your videos"
+          />
+        </View>
 
-            {chips.length > 0 && (
-              <View style={styles.understood}>
-                <Text style={styles.understoodLabel}>Looking for</Text>
-                <View style={styles.chipRow}>
-                  {chips.map((c) => (
-                    <View key={c.key + c.label} style={[styles.smartChip, c.key === 'text' && styles.textChip]}>
-                      <Text style={[styles.smartChipText, c.key === 'text' && { color: p.text }]}>{c.label}</Text>
-                    </View>
-                  ))}
-                </View>
-                {matches !== null && (
-                  <Text style={styles.matches}>
-                    {matches} {matches === 1 ? 'video' : 'videos'}
-                  </Text>
-                )}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          {chips.length > 0 && (
+            <View style={styles.understood}>
+              <Text style={styles.understoodLabel}>Looking for</Text>
+              <View style={styles.wrap}>
+                {chips.map((c) => (
+                  <View key={c.key + c.label} style={[styles.filterChip, c.key === 'text' && styles.textChip]}>
+                    <Text style={[styles.filterChipText, c.key === 'text' && { color: p.text }]}>{c.label}</Text>
+                  </View>
+                ))}
               </View>
-            )}
-            {!!draft.trim() && (suggestions.videos.length > 0 || suggestions.tags.length > 0) && (
-              <View style={styles.understood}>
-                {suggestions.videos.map((v) => (
-                  <TouchableOpacity key={v.id} style={styles.sugRow} onPress={() => onOpenVideo?.(v)} accessibilityLabel={`Play ${friendlyName(v)}`}>
-                    <Image source={v.thumbSource} style={styles.sugThumb} contentFit="cover" />
-                    <Text style={styles.sugText} numberOfLines={1}>
-                      {friendlyName(v)}
-                    </Text>
-                    {v.rating > 0 && <Text style={styles.sugRate}>★ {v.rating}</Text>}
+            </View>
+          )}
+
+          {!!typed && suggestions.videos.length > 0 && (
+            <View>
+              <Text style={styles.section}>Videos</Text>
+              <View style={styles.list}>
+                {suggestions.videos.map((v, i) => (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={[styles.row, i > 0 && styles.rowLine]}
+                    onPress={() => onOpenVideo?.(v)}
+                    accessibilityLabel={`Play ${friendlyName(v)}`}>
+                    <View style={styles.thumb}>
+                      <Image source={v.thumbSource} style={styles.thumbImg} contentFit="cover" transition={120} />
+                      {!!v.durationMs && <Text style={styles.thumbTime}>{fmtDuration(v.durationMs)}</Text>}
+                    </View>
+                    <View style={styles.rowText}>
+                      <Text style={styles.rowTitle} numberOfLines={2}>
+                        {friendlyName(v)}
+                      </Text>
+                      <Text style={styles.rowSub} numberOfLines={1}>
+                        {new Date(v.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </Text>
+                    </View>
+                    {v.rating > 0 && (
+                      <View style={styles.rate}>
+                        <Icon name="star" size={11} color={p.rating} />
+                        <Text style={styles.rateText}>{v.rating}</Text>
+                      </View>
+                    )}
+                    <Icon name="play" size={13} color={p.textMuted} />
                   </TouchableOpacity>
                 ))}
-                {suggestions.tags.length > 0 && (
-                  <View style={styles.chipRow}>
-                    {suggestions.tags.map((t) => (
-                      <TouchableOpacity key={t} style={styles.cloudChip} onPress={() => commit(`#${t}`)}>
-                        <Text style={styles.cloudChipText}>#{t}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+              </View>
+            </View>
+          )}
+
+          {!!typed && suggestions.tags.length > 0 && (
+            <View>
+              <Text style={styles.section}>Keywords</Text>
+              <View style={styles.wrap}>
+                {suggestions.tags.map((t) => (
+                  <Pill key={t} icon="tag" label={t} tint={p.keyword} onPress={() => commit(`#${t}`)} />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {!typed && recent.length > 0 && (
+            <View>
+              <View style={styles.sectionRow}>
+                <Text style={styles.section}>Recent</Text>
+                {onClearRecent && (
+                  <TouchableOpacity onPress={onClearRecent} hitSlop={10} accessibilityLabel="Clear recent searches">
+                    <Text style={styles.link}>Clear</Text>
+                  </TouchableOpacity>
                 )}
               </View>
-            )}
-            {!draft.trim() && recent.length > 0 && (
-              <View style={styles.understood}>
-                <View style={styles.recentHead}>
-                  <Text style={styles.understoodLabel}>Recent</Text>
-                  {onClearRecent && (
-                    <TouchableOpacity onPress={onClearRecent} hitSlop={8}>
-                      <Text style={styles.clearText}>Clear</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <View style={styles.chipRow}>
-                  {recent.map((r) => (
-                    <TouchableOpacity key={r} style={styles.exChip} onPress={() => commit(r)}>
-                      <Text style={styles.exChipText}>{r}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+              <View style={styles.wrap}>
+                {recent.map((r) => (
+                  <Pill key={r} icon="history" label={r} onPress={() => commit(r)} />
+                ))}
               </View>
-            )}
-            {!draft.trim() && (
-              <View style={styles.understood}>
-                <Text style={styles.understoodLabel}>Try</Text>
-                <View style={styles.chipRow}>
-                  {SEARCH_EXAMPLES.map((ex) => (
-                    <TouchableOpacity key={ex} style={styles.exChip} onPress={() => commit(ex)}>
-                      <Text style={styles.exChipText}>{ex}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.saveSmart} onPress={onFilters}>
-                <Text style={styles.saveSmartText}>Filters…</Text>
-              </TouchableOpacity>
-              {!!draft.trim() && (
-                <TouchableOpacity style={styles.saveSmart} onPress={onSaveSmart}>
-                  <Text style={styles.saveSmartText}>Save as Smart Filter</Text>
-                </TouchableOpacity>
-              )}
             </View>
+          )}
 
-            <Text style={styles.section}>Keywords</Text>
-            <ScrollView contentContainerStyle={styles.cloud} keyboardShouldPersistTaps="handled">
-              {tags.length === 0 && <Text style={styles.muted}>No keywords yet.</Text>}
-              {tags.map((t) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={styles.cloudChip}
-                  onPress={() => commit(draft ? `${draft} ${t.name}` : t.name)}>
-                  <Text style={styles.cloudChipText}>{t.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          {!typed && (
+            <View>
+              <Text style={styles.section}>Try</Text>
+              <View style={styles.wrap}>
+                {SEARCH_EXAMPLES.map((ex) => (
+                  <Pill key={ex} label={ex} onPress={() => commit(ex)} />
+                ))}
+              </View>
+            </View>
+          )}
+
+          <View>
+            <Text style={styles.section}>{typed ? 'Add a keyword' : 'Your keywords'}</Text>
+            {tags.length === 0 ? (
+              <Text style={styles.muted}>Keywords you add to videos show up here.</Text>
+            ) : (
+              <View style={styles.wrap}>
+                {tags.map((t) => (
+                  <Pill key={t.id} icon="tag" label={t.name} tint={t.color ?? p.keyword} onPress={() => add(t.name)} />
+                ))}
+              </View>
+            )}
           </View>
+        </ScrollView>
+
+        <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) + 6 }]}>
+          <TouchableOpacity style={styles.round} onPress={onFilters} accessibilityLabel="Filters">
+            <Icon name="options" size={18} color={p.text} />
+          </TouchableOpacity>
+          {!!typed && (
+            <TouchableOpacity style={styles.round} onPress={onSaveSmart} accessibilityLabel="Save as Smart Filter">
+              <Icon name="wand" size={18} color={p.text} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[styles.show, !typed && styles.showOff]} onPress={onClose} accessibilityRole="button">
+            <Text style={[styles.showText, !typed && styles.showTextOff]} numberOfLines={1}>
+              {!typed ? 'Show all videos' : matches === null ? 'Show results' : matches === 0 ? 'No videos match' : `Show ${matches} ${matches === 1 ? 'video' : 'videos'}`}
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
+function Pill({ label, icon, tint, onPress }: { label: string; icon?: IconName; tint?: string; onPress: () => void }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  return (
+    <TouchableOpacity style={styles.pill} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      {icon && <Icon name={icon} size={12} color={tint ?? p.textMuted} />}
+      <Text style={styles.pillText} numberOfLines={1}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 const makeStyles = (p: Palette) =>
   sheet({
-    kav: { flex: 1 },
-    backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: p.backdrop },
-    sheet: {
-      backgroundColor: p.panel,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      padding: 16,
-      gap: 12,
-      maxHeight: '75%',
-    },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    circle: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: p.circle,
-    },
-    circleIcon: { color: p.icon, fontSize: 15, fontWeight: '700' },
-    title: { color: p.text, fontSize: 17, fontWeight: '700' },
-    searchBtn: { backgroundColor: p.accent, paddingHorizontal: 18, paddingVertical: 9, borderRadius: 999 },
-    searchBtnText: { color: '#fff', fontWeight: '700' },
-    input: {
-      backgroundColor: p.card,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 11,
-      color: p.text,
-    },
-    actions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-    saveSmart: {
-      alignSelf: 'flex-start',
-      backgroundColor: p.card,
-      borderRadius: 999,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-    },
-    saveSmartText: { color: p.link, fontWeight: '700', fontSize: 13 },
-    section: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-    cloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 12 },
-    cloudChip: {
-      borderWidth: 1,
-      borderColor: p.accent,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-    },
-    cloudChipText: { color: p.link, fontSize: 13, fontWeight: '600' },
-    muted: { color: p.textMuted, fontStyle: 'italic' },
-    understood: { gap: 6 },
-    understoodLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
-    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    smartChip: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
-    textChip: { backgroundColor: p.card },
-    smartChipText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-    matches: { color: p.text, fontSize: 13, fontWeight: '800' },
-    exChip: { backgroundColor: p.card, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
-    exChipText: { color: p.textSoft, fontSize: 13, fontWeight: '600' },
-    sugRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
-    sugThumb: { width: 54, height: 34, borderRadius: 7, backgroundColor: p.card },
-    sugText: { color: p.text, fontSize: 15, fontWeight: '600', flex: 1 },
-    sugRate: { color: p.rating, fontSize: 12, fontWeight: '800' },
-    recentHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    clearText: { color: p.link, fontSize: 12, fontWeight: '700' },
+    page: { flex: 1, backgroundColor: p.bg },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 8 },
+    title: { flex: 1, color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },
+    circle: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: p.circle },
+    box: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.elevated, borderRadius: 14, marginHorizontal: 16, paddingHorizontal: 12 },
+    input: { flex: 1, color: p.text, fontSize: 17, paddingVertical: 12 },
+    scroll: { flex: 1 },
+    body: { paddingHorizontal: 16, paddingBottom: 24, gap: 4 },
+
+    understood: { gap: 8, paddingTop: 16 },
+    understoodLabel: { color: p.textSecondary, fontSize: 13, fontWeight: '700' },
+    filterChip: { backgroundColor: p.accent, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+    textChip: { backgroundColor: p.elevated },
+    filterChipText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
+    sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+    section: { color: p.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.3, paddingTop: 22, paddingBottom: 10 },
+    link: { color: p.link, fontSize: 14, fontWeight: '600' },
+    wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    pill: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', backgroundColor: p.elevated, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
+    pillText: { color: p.text, fontSize: 14, fontWeight: '600', flexShrink: 1 },
+    muted: { color: p.textMuted, fontSize: 14 },
+
+    list: { backgroundColor: p.elevated, borderRadius: 16, overflow: 'hidden' },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, paddingRight: 14 },
+    rowLine: { borderTopWidth: 0.5, borderTopColor: p.separator },
+    thumb: { width: 88, height: 54, borderRadius: 8, overflow: 'hidden', backgroundColor: p.tile },
+    thumbImg: { width: 88, height: 54 },
+    thumbTime: { position: 'absolute', right: 4, bottom: 3, color: '#fff', fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'], textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 3 },
+    rowText: { flex: 1, gap: 3 },
+    rowTitle: { color: p.text, fontSize: 15, fontWeight: '600' },
+    rowSub: { color: p.textSecondary, fontSize: 12.5 },
+    rate: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+    rateText: { color: p.textSoft, fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
+
+    bar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 10, backgroundColor: p.bg, borderTopWidth: 0.5, borderTopColor: p.separator },
+    round: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: p.circle },
+    show: { flex: 1, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: p.text, paddingHorizontal: 14 },
+    showOff: { backgroundColor: p.elevated },
+    showText: { color: p.bg, fontSize: 16, fontWeight: '800' },
+    showTextOff: { color: p.text },
   });

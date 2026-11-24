@@ -271,6 +271,7 @@ function VaultScreenBody({
     dev?.smallerOpen && dev.selectedIds?.length ? items.filter((v) => (dev.selectedIds ?? []).includes(v.id)) : null
   );
   const [importQuality, setImportQualityState] = useState<CompressQuality | null>(null);
+  const [autoCover, setAutoCoverState] = useState<boolean | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(dev?.calendarOpen ?? false);
   const [timelineOpen, setTimelineOpen] = useState(dev?.timelineOpen ?? false);
   const [overviewOpen, setOverviewOpen] = useState(dev?.overviewOpen ?? false);
@@ -745,6 +746,7 @@ function VaultScreenBody({
 
   useEffect(() => {
     if (settingsOpen) actions.getImportQuality().then(setImportQualityState).catch(fail('SETTINGS'));
+    if (settingsOpen && actions.canAutoCover()) actions.getAutoCover().then(setAutoCoverState).catch(fail('SETTINGS'));
   }, [settingsOpen, actions]);
 
   /** Face ID / passcode, then `then`. With a ReelVault passcode the passcode screen decides. */
@@ -1857,6 +1859,11 @@ function VaultScreenBody({
           onPersonalise={() => {
             setSettingsOpen(false);
             setPersonalise(true);
+          }}
+          autoCover={autoCover}
+          onAutoCover={(on) => {
+            setAutoCoverState(on);
+            actions.setAutoCover(on).catch(fail('SETTINGS'));
           }}
           onClose={() => setSettingsOpen(false)}
         />
