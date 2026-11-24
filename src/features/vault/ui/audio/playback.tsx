@@ -16,6 +16,7 @@ import { createVideoPlayer, type VideoPlayer } from 'expo-video';
 
 import { chapterIndexAt, chaptersOf, isAtEnd, locate, overallMs, pickNext, smartRewindMs, totalMs, type AudioPrefs } from '../../audio/audioLogic';
 import type { AudioActions, AudioUiItem } from './audioTypes';
+import { setSpeed } from '../logic';
 
 export type Sleep = { endsAt: number | null; chapter: number | null } | null;
 
@@ -190,7 +191,7 @@ export function AudioPlaybackProvider({
             p.currentTime = s.pendingSeek / 1000;
             s.pendingSeek = null;
           }
-          p.playbackRate = live.current.rate;
+          setSpeed(p, live.current.rate);
           if (s.autoplay) {
             s.autoplay = false;
             p.play();
@@ -375,7 +376,7 @@ export function AudioPlaybackProvider({
       setRateState(r);
       live.current.rate = r;
       const p = player();
-      if (p) p.playbackRate = r;
+      if (p) setSpeed(p, r);
       const it = live.current.item;
       if (it) actionsRef.current.update([it.id], { speed: r }).catch(() => undefined);
     },

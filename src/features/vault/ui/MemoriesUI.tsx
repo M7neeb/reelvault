@@ -762,6 +762,8 @@ export function MemoryPlayer({
   const [elapsed, setElapsed] = useState(0);
   const iRef = useRef(i);
   iRef.current = i;
+  const elapsedRef = useRef(elapsed);
+  elapsedRef.current = elapsed;
   const ended = i >= clips.length;
   const durOf = (n: number) => (n < 0 ? TITLE_MS : n < clips.length ? clips[n].ms : Infinity);
 
@@ -770,20 +772,19 @@ export function MemoryPlayer({
     if (n > clips.length) return onClose();
     if (n === clips.length) success();
     else tick();
+    iRef.current = n;
+    elapsedRef.current = 0;
     setElapsed(0);
     setI(n);
   };
   useEffect(() => {
     if (paused || ended) return;
+    // Moves on outside the state update: React may run an updater twice, which would skip a clip.
     const id = setInterval(() => {
-      setElapsed((e) => {
-        const next = e + 50;
-        if (next >= durOf(iRef.current)) {
-          setTimeout(() => go(iRef.current + 1), 0);
-          return 0;
-        }
-        return next;
-      });
+      const next = elapsedRef.current + 50;
+      if (next >= durOf(iRef.current)) return go(iRef.current + 1);
+      elapsedRef.current = next;
+      setElapsed(next);
     }, 50);
     return () => clearInterval(id);
   }, [paused, ended, clips.length]); // eslint-disable-line react-hooks/exhaustive-deps

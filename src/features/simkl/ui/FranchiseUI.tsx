@@ -71,7 +71,9 @@ export default function WatchOrder({
   if (!franchises || franchises.length === 0 || !current) return null;
   const here = rows.findIndex((r) => r.simklId === id);
   const seen = rows.filter((r) => r.simklId && isSeen(library.get(r.simklId))).length;
-  const today = new Date().toISOString().slice(0, 10);
+  // Today on the phone's own calendar (toISOString is UTC: shortly after midnight it says yesterday).
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
   return (
     <View style={styles.box}>

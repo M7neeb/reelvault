@@ -810,3 +810,18 @@ export function heroHeight(width: number, screenHeight: number): number {
 export function showsHero(o: { art: boolean; look: string; filter: string; inPrivate: boolean; selectMode: boolean; width: number; height: number }): boolean {
   return o.art && (o.look === 'standard' || o.look === 'detailed') && o.filter === 'all' && !o.inPrivate && !o.selectMode && o.height >= o.width;
 }
+
+/* ----------------------------------------------------------- playback speed */
+
+type RatePlayer = { playing: boolean; playbackRate: number; pause: () => void };
+
+/**
+ * Changes a player's speed without starting it. On iOS expo-video sets AVPlayer's `rate`,
+ * and any rate above 0 means "play", so a paused or preloading player would start (with sound).
+ */
+export function setSpeed(p: RatePlayer, rate: number): void {
+  if (p.playbackRate === rate) return;
+  const was = p.playing;
+  p.playbackRate = rate;
+  if (!was) p.pause();
+}

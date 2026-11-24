@@ -83,7 +83,7 @@ import IconButton from './IconButton';
 import LinkSheet from './LinkSheet';
 import DateSheet from './DateSheet';
 import { fmtBitrate, fmtDateTime, fmtDuration, fmtFormat, fmtSize } from './format';
-import { fmtLocation, RECENTLY_DELETED_DAYS } from './logic';
+import { fmtLocation, RECENTLY_DELETED_DAYS, setSpeed } from './logic';
 import { PromptSheet } from './prompts';
 import { SmallerSheet } from './smaller';
 import RatingPicker from './RatingPicker';
@@ -196,7 +196,7 @@ function ViewerPage({
   });
   useEffect(() => {
     player.loop = opts.endLoop;
-    player.playbackRate = opts.speed;
+    setSpeed(player, opts.speed);
     player.staysActiveInBackground = opts.background;
     player.showNowPlayingNotification = opts.background;
   }, [player, opts.endLoop, opts.speed, opts.background]);
@@ -426,7 +426,7 @@ function ViewerPage({
   function holdFast(on: boolean) {
     if (!enableVideo || !prefs.holdForSpeed) return;
     if (!on && player.playbackRate === opts.speed) return;
-    player.playbackRate = on ? Math.max(2, opts.speed * 2) : opts.speed;
+    setSpeed(player, on ? Math.max(2, opts.speed * 2) : opts.speed);
     if (on && !player.playing) {
       player.play();
       setPlaying(true);

@@ -21,7 +21,7 @@ import { SCREEN_SEQUENCE, type Layout } from '@/features/vault/manga/pageDirecto
 /** The countdown's looks, one per place (#5 to #2). */
 const RANK_SCREEN: Layout[] = ['kenburns', 'poster', 'orbit', 'cinema'];
 import { StoryDeck, useStoryText, type DeckCard } from '@/features/vault/ui/storyDeck';
-import { Confetti, CountUp, CoverWall, GrowColumn, Rays, Tilt } from '@/features/vault/ui/storyKit';
+import { Confetti, CountUp, CoverWall, GrowColumn, Rays, Tilt, useLater } from '@/features/vault/ui/storyKit';
 import { success, warn } from '@/features/vault/ui/haptics';
 import { sheet, useStyles } from '@/features/vault/ui/theme';
 
@@ -38,6 +38,7 @@ function Quiz({ wrap, onDone }: { wrap: SimklWrap; onDone: () => void }) {
   const styles = useStyles(makeStyles);
   const q = useMemo(() => topQuiz(wrap.top, wrap.range.start), [wrap]);
   const [picked, setPicked] = useState<number | null>(null);
+  const later = useLater();
   if (!q) return null;
   return (
     <View style={styles.quiz}>
@@ -53,7 +54,7 @@ function Quiz({ wrap, onDone }: { wrap: SimklWrap; onDone: () => void }) {
               setPicked(o.simklId);
               if (o.simklId === q.answer) success();
               else warn();
-              setTimeout(onDone, 1400);
+              later(onDone, 1400);
             }}
             accessibilityLabel={o.title}>
             <Image source={poster(o.poster)} style={styles.quizImg} contentFit="cover" />

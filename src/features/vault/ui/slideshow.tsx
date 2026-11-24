@@ -27,6 +27,7 @@ import { CLIP_SECONDS, clipWindow, FIT_MINUTES, pickFor, planShow, showLength, S
 import { useAudioControlsOptional } from './audio/playback';
 import { success, tick } from './haptics';
 import Icon from './Icon';
+import { setSpeed } from './logic';
 import type { IconName } from './icons';
 import { gradient } from './insightParts';
 import { PressableScale } from './motion';
@@ -440,7 +441,7 @@ function Show({
         await players[slot].replaceAsync(v.uri);
         players[slot].muted = !opts.sound;
         players[slot].volume = videoVolume;
-        players[slot].playbackRate = opts.speed;
+        setSpeed(players[slot], opts.speed);
         players[slot].currentTime = w.start / 1000;
       } catch (e) {
         console.log(`[SLIDESHOW] could not load ${v.filename}: ${String(e)}`);
