@@ -188,9 +188,96 @@ public class ReelVaultCompressModule: Module {
       self.run(session, asset: asset, outURL: outURL, jobId: jobId, promise: promise, backup: backup)
     }
 
+    /// Several videos, one after another, as one new video. Each is turned
+    /// upright and fitted into the first one's frame (black bars where the
+    /// shapes differ). The first video's date and place go on the result.
+    AsyncFunction("join") { (inputs: [String], output: String, jobId: String, promise: Promise) in
+      let urls = inputs.compactMap { URL(string: $0) }
+      guard urls.count >= 2, urls.count == inputs.count, let outURL = URL(string: output) else {
+        promise.reject("ERR_URL", "Pick at least two videos to join.")
+        return
+      }
+      let assets = urls.map { AVURLAsset(url: $0) }
+      let joined = AVMutableComposition()
+      guard
+        let firstTrack = assets[0].tracks(withMediaType: .video).first,
+        let videoOut = joined.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+      else {
+        promise.reject("ERR_TRACK", "The first video has no picture.")
+        return
+      }
+      let audioOut = joined.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+      let first = Self.upright(firstTrack).size
+      let renderSize = CGSize(width: Self.even(first.width), height: Self.even(first.height))
+
+      var cursor = CMTime.zero
+      var instructions: [AVMutableVideoCompositionInstruction] = []
+      var fps: Float = 0
+      var hasAudio = false
+      do {
+        for (index, asset) in assets.enumerated() {
+          guard let track = asset.tracks(withMediaType: .video).first else {
+            throw CompressError(message: "Video \(index + 1) has no picture.")
+          }
+          // The picture's own span sets the length, so the joined parts line up with no gaps.
+          let range = CMTimeRangeGetIntersection(CMTimeRange(start: .zero, duration: asset.duration), otherRange: track.timeRange)
+          let length = range.duration
+          guard length.isValid, length.seconds > 0 else {
+            throw CompressError(message: "Video \(index + 1) could not be read.")
+          }
+          try videoOut.insertTimeRange(range, of: track, at: cursor)
+          if let sound = Self.mainAudioTrack(asset), let audioOut = audioOut {
+            let heard = CMTimeRangeGetIntersection(range, otherRange: sound.timeRange)
+            if heard.duration.seconds > 0 {
+              try audioOut.insertTimeRange(heard, of: sound, at: CMTimeAdd(cursor, CMTimeSubtract(heard.start, range.start)))
+              hasAudio = true
+            }
+          }
+
+          let (size, toUpright) = Self.upright(track)
+          let scale = min(renderSize.width / max(1, size.width), renderSize.height / max(1, size.height))
+          let dx = (renderSize.width - size.width * scale) / 2
+          let dy = (renderSize.height - size.height * scale) / 2
+          let transform = toUpright
+            .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+            .concatenating(CGAffineTransform(translationX: dx, y: dy))
+          let instruction = AVMutableVideoCompositionInstruction()
+          instruction.timeRange = CMTimeRange(start: cursor, duration: length)
+          let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoOut)
+          layer.setTransform(transform, at: cursor)
+          instruction.layerInstructions = [layer]
+          instructions.append(instruction)
+
+          fps = max(fps, track.nominalFrameRate)
+          cursor = CMTimeAdd(cursor, length)
+        }
+      } catch {
+        promise.reject("ERR_JOIN", error.localizedDescription)
+        return
+      }
+      if !hasAudio, let audioOut = audioOut {
+        joined.removeTrack(audioOut)
+      }
+
+      let pictures = AVMutableVideoComposition()
+      pictures.renderSize = renderSize
+      let rate = fps > 0 && fps <= 240 ? Double(fps) : 30
+      pictures.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, rate.rounded())))
+      pictures.instructions = instructions
+
+      guard let session = AVAssetExportSession(asset: joined, presetName: AVAssetExportPresetHEVCHighestQuality)
+        ?? AVAssetExportSession(asset: joined, presetName: AVAssetExportPresetHighestQuality)
+      else {
+        promise.reject("ERR_PRESET", "These videos can't be joined on this iPhone.")
+        return
+      }
+      session.videoComposition = pictures
+      self.run(session, asset: assets[0], outURL: outURL, jobId: jobId, promise: promise, backup: nil)
+    }
+
     /// What this build's encoder can do; older builds have no such function.
     Function("features") { () -> [String] in
-      ["bitrateShare", "hdr"]
+      ["bitrateShare", "hdr", "join"]
     }
 
     Function("cancel") { (jobId: String) in

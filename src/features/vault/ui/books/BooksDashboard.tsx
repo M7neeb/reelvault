@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { dayGoal, daysMet, stepDaily, stepRemind, yearGoal, MAX_YEAR_BOOKS, type BookGoals } from '../../books/bookGoals';
@@ -25,6 +25,7 @@ import { YearHeatCard } from '../yearHeatUI';
 import BookWrapped from './BookWrapped';
 import { BookCover } from './BooksScreen';
 import type { BookActions, BookUi } from './bookTypes';
+import { SkeletonDashboard } from '../Skeleton';
 
 const DAY = 86_400_000;
 
@@ -94,7 +95,7 @@ export default function BooksDashboard({ items, actions, goals, onOpen, onClose,
           <Text style={styles.title}>Reading</Text>
         </View>
         {!st || !reads ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={p.textSecondary} />
+          <SkeletonDashboard style={{ marginTop: 20, marginHorizontal: 16 }} />
         ) : (
           <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 30 }]}>
             <Card index={0} title="This week" sub={st.todayMs ? `${fmtTime(st.todayMs)} today` : 'Nothing yet today'}>

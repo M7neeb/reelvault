@@ -21,6 +21,7 @@ import { SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
 import { showFailure } from '../oops';
+import EmptyState from '../EmptyState';
 
 type TitleSort = 'smallest' | 'biggest' | 'reading' | 'queue';
 const SORTS: { key: TitleSort; label: string }[] = [
@@ -213,7 +214,7 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
   return (
     <SheetFrame title="Downloads" onClose={onClose}>
       {!downloads.queue.length && !cur ? (
-        <Text style={styles.empty}>Nothing to download. Open a title and tap Download, or choose Download everything in the Manga menu.</Text>
+        <EmptyState icon="tray" title="Nothing to download" text="Open a title and tap Download, or choose Download everything in the Manga menu." tint={p.textSecondary} />
       ) : (
         <>
           <View style={styles.buttons}>

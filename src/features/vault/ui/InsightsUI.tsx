@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Modal, useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withSpring, ZoomIn } from 'react-native-reanimated';
@@ -55,6 +55,7 @@ import type { MangaRead } from '../manga/mangaLogic';
 import { clubFor, yearBefore } from '../wrappedExtras';
 import { EMPTY_OV_EXTRA, type OvExtra } from '../ovExtra';
 import { playable } from '../overview';
+import { SkeletonDashboard } from './Skeleton';
 
 /** Adds to a list in a map (in place: building lists by copying gets slow with thousands of videos). */
 function push<K, V>(m: Map<K, V[]>, k: K, v: V): void {
@@ -486,7 +487,7 @@ export default function VideoInsightsModal({
           />
         </View>
         {plays === null ? (
-          <ActivityIndicator color={p.textSecondary} style={{ marginTop: 40 }} />
+          <SkeletonDashboard style={{ marginTop: 20, marginHorizontal: 16 }} />
         ) : (
           <LiveProvider value={live.value}>
           <ScrollView key={tab} contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 40 }]} {...live.scrollProps}>

@@ -243,6 +243,8 @@ function SimklPreview({ category, surface, look }: { category: Exclude<Category,
     listOpen: surface === 'lists' || surface === 'addmany' ? 1 : undefined,
     addManyOpen: surface === 'addmany',
     pickOpen: surface === 'pick',
+    seasonOpen: surface === 'season',
+    rankStep: surface === 'rank' ? 'setup' : surface === 'rank-play' ? 'play' : surface === 'rank-results' ? 'results' : undefined,
     importOpen: surface === 'import',
     addToListOpen: surface === 'addlist',
   };
@@ -338,8 +340,13 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
     menuOpen: true,
   },
   settings: { settingsOpen: true },
+  'whats-new': { whatsNewOpen: true },
+  join: { joinOpen: true },
   calendar: { calendarOpen: true },
   timeline: { timelineOpen: true },
+  'rank-setup': { rankStep: 'setup' },
+  'rank-play': { rankStep: 'play' },
+  'rank-results': { rankStep: 'results' },
   overview: { overviewOpen: true },
   map: { mapOpen: true },
   importmenu: { importMenuOpen: true },
@@ -567,8 +574,23 @@ export default function PreviewRoute() {
         };
       },
       onCancelMakeSmaller: () => {},
+      canJoin: () => true,
+      onJoin: async (ids, onProgress) => {
+        for (let i = 1; i <= 10; i++) {
+          await new Promise((r) => setTimeout(r, 120));
+          onProgress(i / 10);
+        }
+        return { kind: 'done', before: 1, after: 1, newId: ids[0] };
+      },
       getImportQuality: async () => null,
       setImportQuality: noop,
+      loadRank: async () => null,
+      reportProblem: async () => {},
+      getWhatsNewSeen: async () => '2026-11-25',
+      getDigest: async () => ({ on: false, hour: 9 }),
+      setDigest: async () => true,
+      setWhatsNewSeen: async () => {},
+      saveRank: async () => {},
       getAutoCover: async () => true,
       setAutoCover: noop,
       canAutoCover: () => true,

@@ -14,6 +14,7 @@ import Icon from '../Icon';
 import { SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { MangaUiSeries } from './mangaTypes';
+import EmptyState from '../EmptyState';
 
 export type FeedTab = 'updates' | 'history';
 
@@ -51,11 +52,15 @@ export default function MangaFeed({
         ))}
       </View>
       {!days.length ? (
-        <Text style={styles.empty}>
-          {tab === 'updates'
-            ? 'New chapters of titles from your sources show here when they come out. ReelVault checks when the app opens (at most every 6 hours), or tap Check for new chapters in the Manga menu.'
-            : 'The chapters you read show here, newest first.'}
-        </Text>
+        <EmptyState
+          icon={tab === 'updates' ? 'bell' : 'history'}
+          title={tab === 'updates' ? 'No new chapters' : 'Nothing read yet'}
+          text={
+            tab === 'updates'
+              ? 'New chapters of titles from your sources show here when they come out. ReelVault checks when the app opens (at most every 6 hours), or tap Check for new chapters in the Manga menu.'
+              : 'The chapters you read show here, newest first.'
+          }
+        />
       ) : (
         days.map((d) => (
           <View key={d.key}>

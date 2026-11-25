@@ -190,3 +190,69 @@ export async function editVideo(
 export function makeSmaller(video: Video, plan: EditPlan, onProgress: (fraction: number) => void): Promise<EditResult> {
   return editVideo(video, plan, { mode: 'replace', onlyIfSmaller: true }, onProgress);
 }
+
+export const canJoin = (): boolean => typeof ReelVaultCompress?.join === 'function';
+
+/**
+ * Join videos, in this order, into one new video. The originals stay; the new
+ * one gets the first video's filming date, rating, keywords and albums.
+ */
+export async function joinVideos(videos: Video[], onProgress: (fraction: number) => void): Promise<EditResult> {
+  const native = ReelVaultCompress;
+  if (!native?.join) return { kind: 'failed', reason: 'Needs the new app build.' };
+  if (videos.length < 2) return { kind: 'failed', reason: 'Pick at least two videos.' };
+  const total = videos.reduce((sum, v) => sum + v.size, 0);
+  if (Paths.availableDiskSpace < spaceNeeded(total)) return { kind: 'skipped', reason: 'not enough free space to join them' };
+
+  const jobId = Crypto.randomUUID();
+  const output = new File(Paths.cache, `join-${jobId}.mp4`);
+  const sub = native.addListener('onProgress', (e) => {
+    if (e.jobId === jobId) onProgress(Math.min(1, Math.max(0, e.progress)));
+  });
+  currentJob = jobId;
+  keepAwake('edit', true);
+  try {
+    const { size } = await native.join(
+      videos.map((v) => v.uri),
+      output.uri,
+      jobId
+    );
+    const first = videos[0];
+    const id = Crypto.randomUUID();
+    const destination = new File(videosDir, `${id}.mp4`);
+    await output.move(destination);
+    const meta = mergeMeta(first.meta, await readVideoMeta(destination.uri));
+    const dot = first.filename.lastIndexOf('.');
+    await insertVideo({
+      ...first,
+      id,
+      uri: destination.uri,
+      filename: `${dot > 0 ? first.filename.slice(0, dot) : first.filename} (joined).mp4`,
+      title: null,
+      size,
+      durationMs: meta?.durationMs ?? videos.reduce((sum, v) => sum + (v.durationMs ?? 0), 0),
+      width: meta?.width ?? first.width,
+      height: meta?.height ?? first.height,
+      importedAt: Date.now(),
+      deletedAt: null,
+      inTray: false,
+      contentKey: await contentKeyOf(destination.uri),
+      meta,
+      coverAt: await freshCover(id, destination.uri),
+      originalSize: null,
+      originalKey: null,
+    });
+    await copyLinks(first.id, id);
+    console.log(`[JOIN] ${videos.length} videos -> ${id} (${size} bytes)`);
+    return { kind: 'done', before: total, after: size, newId: id };
+  } catch (e) {
+    if (output.exists) output.delete();
+    const raw = e instanceof Error ? e.message : String(e);
+    console.log(`[JOIN] failed: ${raw}`);
+    return { kind: 'failed', reason: raw.replace(/\s*\(at ExpoModulesCore[\s\S]*$/, '').trim() || raw };
+  } finally {
+    keepAwake('edit', false);
+    sub.remove();
+    currentJob = null;
+  }
+}

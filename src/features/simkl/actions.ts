@@ -13,6 +13,8 @@ import {
   episodeCode,
   nextUnwatched,
   parseCatalog,
+  seasonChart,
+  type SeasonAnime,
   watchedKey,
   parseEpisodes,
   parsePlayback,
@@ -420,6 +422,13 @@ export function loadTrending(type: SimklType, timeframe: Timeframe): Promise<Cat
       await simklRequest(`https://data.simkl.in/discover/trending/${path}/${timeframe}_100.json`, { absolute: true }),
       type
     )
+  );
+}
+
+/** This season's airing anime, from the same calendar file (no quota). */
+export function loadSeason(): Promise<SeasonAnime[]> {
+  return cached('season:anime', 6 * HOUR, async () =>
+    seasonChart(await simklRequest('https://data.simkl.in/calendar/v2/anime.json', { absolute: true }), Date.now())
   );
 }
 

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Modal } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +24,8 @@ import { watchCounts } from '../insights';
 import { episodeCode, episodeImageUrl, finaleLabel, fmtMinutes, groupBySeason, minutesLeft, nextUnwatched, parseEpisodeCode, upToHere, watchedKey } from '../logic';
 import { fmtDay } from './time';
 import type { CatalogEpisode, Play, Session, SimklActions, SimklItem } from './types';
+import { SkeletonRows } from '@/features/vault/ui/Skeleton';
+import EmptyState from '@/features/vault/ui/EmptyState';
 
 export default function EpisodesModal({
   item,
@@ -197,9 +199,9 @@ export default function EpisodesModal({
 
         <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
           {episodes === null ? (
-            <ActivityIndicator color={p.textSecondary} style={{ marginTop: 30 }} />
+            <SkeletonRows count={8} art="none" style={{ marginTop: 16 }} />
           ) : !season ? (
-            <Text style={styles.empty}>Simkl has no episode list for this title.</Text>
+            <EmptyState icon="list" title="No episode list" text="Simkl has no episodes for this title yet." tint={p.textSecondary} />
           ) : (
             (() => {
               const s = season;

@@ -6,6 +6,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { getDb } from '@/db';
+import { installLog } from '@/features/vault/errorLog';
+
+installLog();
 
 SplashScreen.preventAutoHideAsync();
 

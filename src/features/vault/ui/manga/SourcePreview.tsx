@@ -20,6 +20,7 @@ import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import MangaCover from './MangaCover';
 import MangaReader from './MangaReader';
 import type { BrowseActions, MangaUiSeries } from './mangaTypes';
+import { SkeletonRows } from '../Skeleton';
 
 /** A title from a source as a temporary series, so the reader can show it without adding it. */
 function asSeries(source: MangaSource, d: SourceDetails, chapters: SourceChapter[]): MangaUiSeries {
@@ -185,7 +186,7 @@ export default function SourcePreview({
                 </TouchableOpacity>
               </View>
             ) : !details || !chapters ? (
-              <ActivityIndicator style={{ marginTop: 30 }} color={p.textSecondary} />
+              <SkeletonRows count={6} art="none" style={{ marginTop: 24 }} />
             ) : (
               <>
                 <View style={styles.buttons}>

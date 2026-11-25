@@ -54,6 +54,25 @@ export type BookActions = {
   loadReads: () => Promise<BookRead[]>;
   /** A few paragraphs from where you are in a book (for Wrapped). */
   passage: (id: string) => Promise<string[]>;
+  /** Read aloud with the phone's voices; missing in app builds without it. */
+  speech?: SpeechControl;
+};
+
+export type SpeechVoiceInfo = { id: string; name: string; language: string; quality: 'default' | 'enhanced' | 'premium' };
+export type SpeechUpdate =
+  | { kind: 'paragraph' | 'paused' | 'resumed' | 'end' | 'stopped'; index: number }
+  | { kind: 'word'; index: number; at: number; len: number };
+
+export type SpeechControl = {
+  voices: () => SpeechVoiceInfo[];
+  speak: (paragraphs: string[], from: number, speed: number, voice: string, title: string, artist: string) => void;
+  pause: () => void;
+  resume: () => void;
+  skip: (by: number) => void;
+  setSpeed: (speed: number) => void;
+  stop: () => void;
+  /** Updates while reading; returns the unsubscribe. */
+  listen: (fn: (e: SpeechUpdate) => void) => () => void;
 };
 
 export type BooksData = {

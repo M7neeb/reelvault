@@ -112,6 +112,7 @@ export function fixtureBooksData(empty = false): BooksData {
     deleteMark: async () => undefined,
     loadReads: async () => (empty ? [] : fixtureReads()),
     passage: async () => OPENING,
+    speech: fakeSpeech(),
     setSort: async () => undefined,
     setReader: async (p) => {
       reader = p;
@@ -146,4 +147,66 @@ function fixtureReads(): BookRead[] {
     }
   }
   return out.sort((a, b) => a.startedAt - b.startedAt);
+}
+
+/** The preview's stand-in for the phone's voice: one word every 300 ms. */
+function fakeSpeech(): NonNullable<BookActions['speech']> {
+  let listeners: ((e: import('./bookTypes').SpeechUpdate) => void)[] = [];
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let paused = false;
+  const emit = (e: import('./bookTypes').SpeechUpdate) => listeners.forEach((fn) => fn(e));
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  return {
+    voices: () => [
+      { id: 'ava', name: 'Ava', language: 'en-US', quality: 'premium' },
+      { id: 'daniel', name: 'Daniel', language: 'en-GB', quality: 'enhanced' },
+      { id: 'samantha', name: 'Samantha', language: 'en-US', quality: 'default' },
+    ],
+    speak: (paragraphs, from) => {
+      stop();
+      let index = from;
+      let at = 0;
+      paused = false;
+      emit({ kind: 'paragraph', index });
+      timer = setInterval(() => {
+        if (paused) return;
+        const text = paragraphs[index] ?? '';
+        const next = text.indexOf(' ', at + 1);
+        const end = next < 0 ? text.length : next;
+        emit({ kind: 'word', index, at, len: end - at });
+        at = end + 1;
+        if (at >= text.length) {
+          index++;
+          at = 0;
+          if (index >= paragraphs.length) {
+            stop();
+            emit({ kind: 'end', index });
+          } else emit({ kind: 'paragraph', index });
+        }
+      }, 300);
+    },
+    pause: () => {
+      paused = true;
+      emit({ kind: 'paused', index: 0 });
+    },
+    resume: () => {
+      paused = false;
+      emit({ kind: 'resumed', index: 0 });
+    },
+    skip: () => undefined,
+    setSpeed: () => undefined,
+    stop: () => {
+      stop();
+      emit({ kind: 'stopped', index: 0 });
+    },
+    listen: (fn) => {
+      listeners.push(fn);
+      return () => {
+        listeners = listeners.filter((x) => x !== fn);
+      };
+    },
+  };
 }

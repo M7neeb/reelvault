@@ -23,6 +23,7 @@ import { PressableScale } from './motion';
 import { GrowBar } from './storyKit';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultActions } from './types';
+import { SkeletonRows } from './Skeleton';
 
 const GB = 1024 ** 3;
 
@@ -81,7 +82,7 @@ export function AppSpaceCard({ actions, index = 0 }: { actions: VaultActions; in
   return (
     <Card index={index} title="What ReelVault keeps" sub={space?.measured ? `${fmtSize(total)} in all · ${fmtSize(extras)} besides your videos` : 'Your videos, and what the app adds to them'}>
       {!space ? (
-        <ActivityIndicator color={p.textSecondary} />
+        <SkeletonRows count={3} art="none" card={false} />
       ) : (
         <>
           <View style={styles.stack}>

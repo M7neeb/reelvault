@@ -14,7 +14,30 @@ export type PickOptions = {
   maxMinutes: number | null;
   /** Titles already offered this time, so "another" never repeats. */
   exclude?: Set<number>;
+  /** What you feel like, matched on genres (from `genres`); 'any' or unset = everything. */
+  mood?: Mood;
+  genres?: Map<number, string[]>;
+  /** Only titles rated 7.5 or more on IMDb (else Simkl). */
+  wellRated?: boolean;
 };
+
+export type Mood = 'any' | 'light' | 'thrill' | 'dark' | 'moving';
+
+export const MOODS: { key: Mood; label: string; genres: string[] }[] = [
+  { key: 'any', label: 'Anything', genres: [] },
+  { key: 'light', label: 'Something light', genres: ['comedy', 'animation', 'family', 'slice of life', 'romance', 'musical', 'kids'] },
+  { key: 'thrill', label: 'Edge of my seat', genres: ['action', 'adventure', 'thriller', 'science fiction', 'sci-fi', 'crime', 'war', 'mecha', 'sports', 'martial arts'] },
+  { key: 'dark', label: 'Dark or scary', genres: ['horror', 'mystery', 'psychological', 'suspense', 'supernatural'] },
+  { key: 'moving', label: 'Something moving', genres: ['drama', 'romance', 'history', 'biography', 'documentary'] },
+];
+
+function fitsMood(i: SimklItem, o: PickOptions): boolean {
+  const mood = MOODS.find((m) => m.key === o.mood);
+  if (!mood || mood.key === 'any') return true;
+  const g = o.genres?.get(i.simklId);
+  if (!g || !g.length) return false;
+  return g.some((x) => mood.genres.includes(x.toLowerCase()));
+}
 
 export const TIME_CHOICES: { label: string; minutes: number | null }[] = [
   { label: 'Any length', minutes: null },
@@ -30,7 +53,8 @@ export function candidates(items: SimklItem[], o: PickOptions): SimklItem[] {
     if (!okList) return false;
     if (i.type !== 'movie' && i.status === 'watching' && !i.nextToWatch) return false;
     if (o.maxMinutes !== null && i.runtime && i.runtime > o.maxMinutes) return false;
-    return true;
+    if (o.wellRated && (i.imdbRating ?? i.simklRating ?? 0) < 7.5) return false;
+    return fitsMood(i, o);
   });
 }
 

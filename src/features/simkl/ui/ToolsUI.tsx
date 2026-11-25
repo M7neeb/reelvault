@@ -5,8 +5,8 @@
  * Presentational only (see simkl/ui/types.ts).
  */
 
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Modal, useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +21,7 @@ import { rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/va
 import { describeImport, SOURCE_LABELS } from '../imports';
 import { fmtDuration, fmtRating } from '../insights';
 import { fanartUrl, posterUrl, SIMKL_TYPES } from '../logic';
-import { candidates, pickOne, TIME_CHOICES, type PickOptions } from '../pick';
+import { candidates, MOODS, pickOne, TIME_CHOICES, type Mood, type PickOptions } from '../pick';
 import Poster from './Poster';
 import type { ImportResult, SimklActions, SimklItem, SimklType } from './types';
 
@@ -30,11 +30,13 @@ import type { ImportResult, SimklActions, SimklItem, SimklType } from './types';
 export function PickModal({
   type,
   items,
+  loadGenres,
   onOpen,
   onClose,
 }: {
   type: SimklType;
   items: SimklItem[];
+  loadGenres?: () => Promise<Map<number, string[]>>;
   onOpen: (item: SimklItem) => void;
   onClose: () => void;
 }) {
@@ -46,8 +48,20 @@ export function PickModal({
   const [maxMinutes, setMaxMinutes] = useState<number | null>(null);
   const [offered, setOffered] = useState<Set<number>>(new Set());
   const [seed, setSeed] = useState(0);
+  const [mood, setMood] = useState<Mood>('any');
+  const [wellRated, setWellRated] = useState(false);
+  const [genres, setGenres] = useState<Map<number, string[]> | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    loadGenres?.()
+      .then((g) => live && setGenres(g))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [loadGenres]);
 
-  const pool = useMemo(() => candidates(items, { type, from, maxMinutes }), [items, type, from, maxMinutes]);
+  const pool = useMemo(() => candidates(items, { type, from, maxMinutes, mood, genres, wellRated }), [items, type, from, maxMinutes, mood, genres, wellRated]);
   const pick = useMemo(() => {
     const fresh = pool.filter((i) => !offered.has(i.simklId));
     return pickOne(fresh.length ? fresh : pool);
@@ -97,7 +111,9 @@ export function PickModal({
             <View style={styles.pickEmpty}>
               <Icon name="dice" size={42} color={p.textMuted} />
               <Text style={styles.pickEmptyText}>
-                Nothing fits. Try a longer time, or add {plural} to Plan to Watch.
+                {mood !== 'any' || wellRated
+                  ? 'Nothing fits. Try another mood or a longer time. Titles show their genres once their page has been opened or Stats has filled them in.'
+                  : `Nothing fits. Try a longer time, or add ${plural} to Plan to Watch.`}
               </Text>
             </View>
           )}
@@ -129,6 +145,29 @@ export function PickModal({
               />
             ))}
           </Wrap>
+          {genres !== undefined && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.moodRow}>
+              {MOODS.map((m) => (
+                <Chip
+                  key={m.key}
+                  label={m.label}
+                  on={mood === m.key}
+                  onPress={() => {
+                    setMood(m.key);
+                    setOffered(new Set());
+                  }}
+                />
+              ))}
+              <Chip
+                label="Well rated"
+                on={wellRated}
+                onPress={() => {
+                  setWellRated(!wellRated);
+                  setOffered(new Set());
+                }}
+              />
+            </ScrollView>
+          )}
           <View style={styles.pickButtons}>
             <TouchableOpacity style={[styles.pickBtn, styles.pickBtnGhost]} onPress={another} disabled={pool.length < 2} accessibilityLabel="Another one">
               <Icon name="shuffle" size={18} color={p.text} />
@@ -247,6 +286,7 @@ const makeStyles = (p: Palette) =>
     pickEmptyText: { color: p.textSecondary, fontSize: 15, textAlign: 'center' },
     pickControls: { paddingHorizontal: 16, gap: 12 },
     pickButtons: { flexDirection: 'row', gap: 10 },
+    moodRow: { gap: 8, paddingRight: 8 },
     pickBtn: {
       flex: 1,
       flexDirection: 'row',

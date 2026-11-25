@@ -421,12 +421,27 @@ export function ratingLabel(rating: number, labels: RatingLabels): string | null
 
 /** Only videos at least this long offer "Continue another time". */
 export const RESUME_MIN_MS = 5 * 60_000;
-/** Start this much before where you stopped, to get back into it. */
+/** Start this much before where you stopped when we don't know how long you were away. */
 export const RESUME_REWIND_MS = 2.5 * 60_000;
 
-/** Where to start a saved video: 2.5 min before the saved point (never below 0, never in the last 30 s). */
-export function resumeFrom(savedMs: number, durationMs: number | null): number {
-  const at = Math.max(0, savedMs - RESUME_REWIND_MS);
+/**
+ * How far back to start, by how long you were away: nothing after a minute,
+ * a few seconds after a short break, up to 2.5 minutes after a week or more.
+ */
+export function resumeRewindMs(awayMs: number): number {
+  const min = 60_000;
+  if (awayMs < min) return 0;
+  if (awayMs < 10 * min) return 5_000;
+  if (awayMs < 60 * min) return 15_000;
+  if (awayMs < 24 * 60 * min) return 30_000;
+  if (awayMs < 7 * 24 * 60 * min) return 60_000;
+  return RESUME_REWIND_MS;
+}
+
+/** Where to start a saved video (never below 0, never in the last 30 s). */
+export function resumeFrom(savedMs: number, durationMs: number | null, awayMs?: number): number {
+  const back = awayMs === undefined || !Number.isFinite(awayMs) || awayMs < 0 ? RESUME_REWIND_MS : resumeRewindMs(awayMs);
+  const at = Math.max(0, savedMs - back);
   return durationMs ? Math.min(at, Math.max(0, durationMs - 30_000)) : at;
 }
 

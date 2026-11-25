@@ -478,6 +478,9 @@ export type VaultActions = {
     onProgress: (f: number) => void
   ) => Promise<UiSmallerResult>;
   onCancelMakeSmaller: () => void;
+  /** Join videos, in this order, into one new video (the originals stay). canJoin: this app build can. */
+  canJoin: () => boolean;
+  onJoin: (ids: string[], onProgress: (f: number) => void) => Promise<UiSmallerResult>;
   /** Make every imported video smaller right away (null = off). */
   /** The automatic weekly backups of your info, newest first. */
   listAutoBackups: () => Promise<import('../backup').AutoBackup[]>;
@@ -496,6 +499,17 @@ export type VaultActions = {
   getImportQuality: () => Promise<CompressQuality | null>;
   setImportQuality: (quality: CompressQuality | null) => Promise<void>;
   /** Covers picked by the app: the best looking frame for videos still on their import frame. */
+  /** Rank your favourites: the saved order (JSON), by kind ('video', 'movie', ...). */
+  loadRank: (kind: string) => Promise<string | null>;
+  /** Report a problem: a text file with your note and the recent log, through the share sheet. */
+  reportProblem: (note: string) => Promise<void>;
+  /** What's new: the last release id you've seen, and marking one seen. */
+  getWhatsNewSeen: () => Promise<string | null>;
+  /** One notification a day instead of one per episode / memory. setDigest resolves false when iOS refused notifications. */
+  getDigest: () => Promise<import('../digestPlan').DigestSettings>;
+  setDigest: (s: import('../digestPlan').DigestSettings) => Promise<boolean>;
+  setWhatsNewSeen: (id: string) => Promise<void>;
+  saveRank: (kind: string, json: string) => Promise<void>;
   getAutoCover: () => Promise<boolean>;
   setAutoCover: (on: boolean) => Promise<void>;
   canAutoCover: () => boolean;
@@ -820,6 +834,11 @@ export type VaultScreenProps = {
     smallerOpen?: boolean;
     calendarOpen?: boolean;
     timelineOpen?: boolean;
+    /** Rank your videos, opened on this step. */
+    rankStep?: 'setup' | 'play' | 'results';
+    whatsNewOpen?: boolean;
+    /** Join videos with the first three videos picked. */
+    joinOpen?: boolean;
     overviewOpen?: boolean;
     mapOpen?: boolean;
     /** With viewerId: open the editor on this tab. */

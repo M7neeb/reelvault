@@ -12,6 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal } from './screen';
 
 import { QUALITIES } from '../smaller';
+import { DIGEST_HOURS, type DigestSettings } from '../digestPlan';
+import { matchesSetting, SETTINGS_TERMS, type SettingsSection } from '../settingsSearch';
 import { Row, Rows, SheetFrame } from './sheets';
 import { OptionsSheet } from './prompts';
 import Icon from './Icon';
@@ -238,8 +240,17 @@ export function SettingsSheet({
   loadPasscodeLog,
   onClearPasscodeLog,
   backups,
+  digest,
+  onDigest,
+  onWhatsNew,
+  onReport,
   onClose,
 }: {
+  /** One notification a day; undefined hides the section. */
+  digest?: DigestSettings | null;
+  onDigest?: (next: DigestSettings) => void;
+  onWhatsNew?: () => void;
+  onReport?: () => void;
   /** The automatic weekly backups (list, make one now, restore one). */
   backups?: {
     list: () => Promise<{ name: string; uri: string; at: number; size: number }[]>;
@@ -282,7 +293,36 @@ export function SettingsSheet({
       .catch(() => setLog([]));
   }, [loadPasscodeLog]);
 
-  const [pick, setPick] = useState<null | 'passcode' | 'quality'>(null);
+  const [pick, setPick] = useState<null | 'passcode' | 'quality' | 'digestHour'>(null);
+  const p = usePalette();
+  const [query, setQuery] = useState('');
+  const TITLES: Record<SettingsSection, string> = {
+    personalise: 'Personalise',
+    covers: 'Covers',
+    private: 'Private album',
+    log: 'Who tried to get in',
+    import: 'Import',
+    backup: 'Backup',
+    data: 'Your data',
+    autobackups: 'Automatic backups',
+    daily: 'Notifications',
+    help: 'Help',
+  };
+  const show = (k: SettingsSection) => matchesSetting(query, `${TITLES[k]} ${SETTINGS_TERMS[k]}`);
+  const available: SettingsSection[] = [
+    ...(onPersonalise ? (['personalise'] as const) : []),
+    ...(autoCover !== undefined && autoCover !== null && onAutoCover ? (['covers'] as const) : []),
+    'private',
+    ...(log !== null ? (['log'] as const) : []),
+    'import',
+    'backup',
+    ...(onExportAllData ? (['data'] as const) : []),
+    ...(backups ? (['autobackups'] as const) : []),
+    ...(digest && onDigest ? (['daily'] as const) : []),
+    ...(onWhatsNew || onReport ? (['help'] as const) : []),
+  ];
+  const nothing = query.trim() !== '' && !available.some(show);
+  const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const qualityLabel = importQuality === null ? 'Off' : (QUALITIES.find((q) => q.key === importQuality)?.label ?? 'Off');
   const wrong = log?.filter((x) => x.kind === 'wrong').length ?? 0;
   const fake = log?.filter((x) => x.kind === 'fake').length ?? 0;
@@ -290,13 +330,33 @@ export function SettingsSheet({
 
   return (
     <SheetFrame title="Settings" onClose={onClose} page>
-      {onPersonalise && (
+      <View style={[styles.search, { backgroundColor: raised(p) }]}>
+        <Icon name="search" size={15} color={p.textSecondary} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search settings"
+          placeholderTextColor={p.textMuted}
+          style={styles.searchInput}
+          returnKeyType="search"
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          accessibilityLabel="Search settings"
+        />
+      </View>
+      {nothing && (
+        <View style={styles.noMatch}>
+          <Text style={styles.noMatchTitle}>No setting for "{query.trim()}"</Text>
+          <Text style={styles.noMatchText}>Try a word like passcode, covers, backup or notifications.</Text>
+        </View>
+      )}
+      {onPersonalise && show('personalise') && (
         <Rows>
           <Row icon="paint" tint="#FF9F0A" title="Personalise" sub="Layout, accent colour, app icon, rating words" onPress={onPersonalise} />
         </Rows>
       )}
 
-      {autoCover !== undefined && autoCover !== null && onAutoCover && (
+      {autoCover !== undefined && autoCover !== null && onAutoCover && show('covers') && (
         <Rows
           label="Covers"
           footer={
@@ -308,34 +368,36 @@ export function SettingsSheet({
         </Rows>
       )}
 
-      <Rows
-        label="Private album"
-        footer={
-          on
-            ? 'A fake passcode opens an empty Private album - for when someone makes you unlock it.'
-            : "Private opens with Face ID or the iPhone's passcode. A ReelVault passcode gives it its own lock, and a fake one."
-        }>
-        <Row
-          icon="lock"
-          tint="#30D158"
-          title="ReelVault passcode"
-          value={on ? PASSCODE_KINDS.find((k) => k.key === security?.passcodeKind)?.label : undefined}
-          toggle={{ value: on, onChange: (v) => (v ? setPick('passcode') : onTurnOffPasscode()) }}
-        />
-        {on && <Row icon="shield" tint="#0A84FF" title="Unlock with Face ID" toggle={{ value: !!security?.faceId, onChange: onFaceId }} />}
-        {on && <Row icon="edit" tint="#8E8E93" title="Change passcode" onPress={onChangePasscode} />}
-        {on && (
+      {show('private') && (
+        <Rows
+          label="Private album"
+          footer={
+            on
+              ? 'A fake passcode opens an empty Private album - for when someone makes you unlock it.'
+              : "Private opens with Face ID or the iPhone's passcode. A ReelVault passcode gives it its own lock, and a fake one."
+          }>
           <Row
-            icon="eyeOff"
-            tint="#BF5AF2"
-            title="Fake passcode"
-            value={security?.hasFakePasscode ? 'On - tap to remove' : 'Off'}
-            onPress={security?.hasFakePasscode ? onRemoveFake : onSetFake}
+            icon="lock"
+            tint="#30D158"
+            title="ReelVault passcode"
+            value={on ? PASSCODE_KINDS.find((k) => k.key === security?.passcodeKind)?.label : undefined}
+            toggle={{ value: on, onChange: (v) => (v ? setPick('passcode') : onTurnOffPasscode()) }}
           />
-        )}
-      </Rows>
+          {on && <Row icon="shield" tint="#0A84FF" title="Unlock with Face ID" toggle={{ value: !!security?.faceId, onChange: onFaceId }} />}
+          {on && <Row icon="edit" tint="#8E8E93" title="Change passcode" onPress={onChangePasscode} />}
+          {on && (
+            <Row
+              icon="eyeOff"
+              tint="#BF5AF2"
+              title="Fake passcode"
+              value={security?.hasFakePasscode ? 'On - tap to remove' : 'Off'}
+              onPress={security?.hasFakePasscode ? onRemoveFake : onSetFake}
+            />
+          )}
+        </Rows>
+      )}
 
-      {log !== null && (
+      {log !== null && show('log') && (
         <Rows label="Who tried to get in" footer={log.length ? undefined : 'Every wrong or fake passcode typed at Private shows up here, with the time.'}>
           <Row
             icon="eye"
@@ -354,37 +416,68 @@ export function SettingsSheet({
         </Rows>
       )}
 
-      <Rows
-        label="Import"
-        footer={
-          canMakeSmaller
-            ? 'Make Smaller re-encodes each video right after it comes in, so the space is freed as the import goes. Videos that would not get at least 10% smaller stay as they are.'
-            : 'Making imports smaller needs the app version with the video encoder (1.1 or later).'
-        }>
-        <Row icon="import" tint="#0A84FF" title="Import a whole folder" sub="Every video in it and its sub-folders" onPress={onImportFolder} />
-        <Row icon="storage" tint="#64D2FF" title="Make imported videos smaller" value={qualityLabel} onPress={() => setPick('quality')} />
-      </Rows>
+      {show('import') && (
+        <Rows
+          label="Import"
+          footer={
+            canMakeSmaller
+              ? 'Make Smaller re-encodes each video right after it comes in, so the space is freed as the import goes. Videos that would not get at least 10% smaller stay as they are.'
+              : 'Making imports smaller needs the app version with the video encoder (1.1 or later).'
+          }>
+          <Row icon="import" tint="#0A84FF" title="Import a whole folder" sub="Every video in it and its sub-folders" onPress={onImportFolder} />
+          <Row icon="storage" tint="#64D2FF" title="Make imported videos smaller" value={qualityLabel} onPress={() => setPick('quality')} />
+        </Rows>
+      )}
 
-      <Rows
-        label="Backup"
-        footer="Your info as one small file for Files or your PC: ratings, titles, keywords, albums, history, bookmarks, Simkl links and settings - not the videos, and no private ones. Restoring adds to what is here and never deletes anything.">
-        <Row icon="share" tint="#30D158" title="Export all my info" onPress={onExportBackup} />
-        <Row icon="history" tint="#FF9F0A" title="Restore from a file" onPress={onImportBackup} />
-        {onExportSpreadsheet && <Row icon="list" tint="#5E5CE6" title="Export a spreadsheet (CSV)" onPress={onExportSpreadsheet} />}
-      </Rows>
-      {onExportAllData && (
+      {show('backup') && (
+        <Rows
+          label="Backup"
+          footer="Your info as one small file for Files or your PC: ratings, titles, keywords, albums, history, bookmarks, Simkl links and settings - not the videos, and no private ones. Restoring adds to what is here and never deletes anything.">
+          <Row icon="share" tint="#30D158" title="Export all my info" onPress={onExportBackup} />
+          <Row icon="history" tint="#FF9F0A" title="Restore from a file" onPress={onImportBackup} />
+          {onExportSpreadsheet && <Row icon="list" tint="#5E5CE6" title="Export a spreadsheet (CSV)" onPress={onExportSpreadsheet} />}
+        </Rows>
+      )}
+      {onExportAllData && show('data') && (
         <Rows
           label="Your data"
           footer="Everything in one ZIP for your own stats: videos, movies, shows, anime, audio, manga and every watch, listen and reading session, as spreadsheets (CSV) plus one JSON file. Private items are left out.">
           <Row icon="stats" tint="#FF9F0A" title="Export all data" sub="For spreadsheets or your own Wrapped" onPress={onExportAllData} />
         </Rows>
       )}
-      {backups && <AutoBackups backups={backups} />}
+      {backups && show('autobackups') && <AutoBackups backups={backups} />}
+
+      {digest && onDigest && show('daily') && (
+        <Rows
+          label="Notifications"
+          footer={
+            digest.on
+              ? 'New episodes and On this day come together in one note a day at this time, instead of one each. Wrapped, new manga chapters and reading reminders still come on their own.'
+              : 'Each new episode and each On this day memory comes as its own notification.'
+          }>
+          <Row icon="bell" tint="#FF453A" title="One notification a day" toggle={{ value: digest.on, onChange: (on) => onDigest({ ...digest, on }) }} />
+          {digest.on && <Row icon="clock" tint="#FF9F0A" title="Time" value={hourLabel(digest.hour)} onPress={() => setPick('digestHour')} />}
+        </Rows>
+      )}
+
+      {(onWhatsNew || onReport) && show('help') && (
+        <Rows label="Help" footer={onReport ? 'Report a problem makes a small text file with what you write and what the app did lately, to send by message or mail. Nothing is sent by itself.' : undefined}>
+          {onWhatsNew && <Row icon="sparkle" tint="#5E5CE6" title="What's new" onPress={onWhatsNew} />}
+          {onReport && <Row icon="flag" tint="#FF453A" title="Report a problem" onPress={onReport} />}
+        </Rows>
+      )}
 
       {pick === 'passcode' && (
         <OptionsSheet
           title="What kind of passcode?"
           options={PASSCODE_KINDS.map((k) => ({ label: k.label, onPress: () => onTurnOnPasscode(k.key) }))}
+          onClose={() => setPick(null)}
+        />
+      )}
+      {pick === 'digestHour' && digest && onDigest && (
+        <OptionsSheet
+          title="When should it come?"
+          options={DIGEST_HOURS.map((h) => ({ label: hourLabel(h), hint: digest.hour === h ? '✓' : undefined, onPress: () => onDigest({ ...digest, hour: h }) }))}
           onClose={() => setPick(null)}
         />
       )}
@@ -411,6 +504,11 @@ const makeStyles = (p: Palette) =>
     backupBtn: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: p.circle },
     backupBtnText: { color: p.link, fontSize: 13, fontWeight: '800' },
     hint: { color: p.textSecondary, fontSize: 12 },
+    search: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, height: 40, marginBottom: 8 },
+    searchInput: { flex: 1, color: p.text, fontSize: 16, paddingVertical: 0 },
+    noMatch: { alignItems: 'center', gap: 6, paddingVertical: 30 },
+    noMatchTitle: { color: p.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
+    noMatchText: { color: p.textSecondary, fontSize: 15, textAlign: 'center' },
     logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 14 },
     logDot: { width: 8, height: 8, borderRadius: 4 },
     logText: { color: p.text, fontSize: 14, flex: 1 },

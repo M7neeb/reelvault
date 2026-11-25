@@ -49,6 +49,8 @@ export type SimklPrefs = {
   hideSpoilers: boolean;
   /** The last sort and status picked in each tab (Movies, Shows, Anime), kept across launches. */
   view?: SimklView;
+  /** "Carry on" on a stalled show: simklId -> don't ask again before (ms). */
+  snoozed?: Record<string, number>;
 };
 
 export type SimklView = Partial<Record<SimklType, { sort?: SimklSort; status?: SimklStatus | 'all' }>>;
@@ -127,6 +129,10 @@ export type SimklActions = {
   search: (type: SimklType, q: string) => Promise<CatalogTitle[]>;
   trending: (type: SimklType, timeframe: Timeframe) => Promise<CatalogTitle[]>;
   calendar: (type: SimklType) => Promise<CatalogTitle[]>;
+  /** This season's airing anime, best score first. */
+  /** Genres per title (filled in as detail pages load), for moods in Pick for me. */
+  loadGenres: () => Promise<Map<number, string[]>>;
+  loadSeason: () => Promise<import('../logic').SeasonAnime[]>;
   /** Every recorded watch time, for the Stats heatmap. */
   watchTimes: () => Promise<(string | null)[]>;
   /** Every watch with its runtime, plus genres / networks, for Stats and the review. */
@@ -170,6 +176,9 @@ export type SimklActions = {
   importFile: (onProgress: (done: number, total: number) => void) => Promise<ImportResult | null | 'unknown'>;
   /** Upcoming episodes as an .ics file through the share sheet; resolves how many. */
   exportCalendar: () => Promise<number>;
+  /** Rank your favourites: the saved order (JSON) for this type. */
+  loadRank: (type: SimklType) => Promise<string | null>;
+  saveRank: (type: SimklType, json: string) => Promise<void>;
   setPrefs: (p: SimklPrefs) => Promise<void>;
   openUrl: (url: string) => void;
 };
@@ -212,6 +221,9 @@ export type SimklScreenProps = {
     /** The open list starts on "Add many". */
     addManyOpen?: boolean;
     pickOpen?: boolean;
+    seasonOpen?: boolean;
+    /** Rank your favourites, opened on this step. */
+    rankStep?: 'setup' | 'play' | 'results';
     importOpen?: boolean;
     addToListOpen?: boolean;
   };

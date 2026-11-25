@@ -9,7 +9,7 @@
  */
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
@@ -29,6 +29,7 @@ import type { FindKind } from '../../home/everything';
 import { IMDB_YELLOW } from './parts';
 import Poster, { hueFor } from './Poster';
 import type { CatalogTitle, SimklActions, SimklItem, SimklList, SimklPrefs, SimklType, Timeframe } from './types';
+import { SkeletonRows } from '@/features/vault/ui/Skeleton';
 
 const TIMEFRAMES: { key: Timeframe; label: string }[] = [
   { key: 'today', label: 'Today' },
@@ -247,7 +248,7 @@ export default function SearchScreen({
           <>
             {local && <Text style={styles.onSimkl}>On Simkl</Text>}
             {!connected && <Text style={styles.note}>Sign in to Simkl on the Movies, Shows or Anime tab to search.</Text>}
-            {loading && <ActivityIndicator color={p.textSecondary} style={{ marginTop: 24 }} />}
+            {loading && <SkeletonRows count={4} art="poster" style={{ marginTop: 16 }} />}
             {!loading && found === 0 && <Text style={styles.note}>{error || `Nothing on Simkl for "${submitted}".`}</Text>}
             {types.map((t) =>
               results[t]?.length ? (
@@ -323,7 +324,7 @@ export default function SearchScreen({
                     Trending {SIMKL_TYPES.find((x) => x.key === t)!.plural} on Simkl {label === 'today' ? 'today' : label}
                   </Text>
                   {!rows ? (
-                    <ActivityIndicator color={p.textSecondary} style={{ marginVertical: 30 }} />
+                    <SkeletonRows count={3} art="poster" style={{ marginVertical: 16 }} />
                   ) : (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
                       {rows.slice(0, 20).map((r, i) => (

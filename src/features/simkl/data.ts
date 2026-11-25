@@ -10,6 +10,7 @@ import { File, Paths } from 'expo-file-system';
 import {
   addToLibrary,
   loadCalendar,
+  loadSeason,
   loadDetail,
   loadEpisodeRatings,
   loadEpisodes,
@@ -54,6 +55,7 @@ import type { SimklActions, SimklBridge, SimklPrefs } from './ui/types';
 
 const SPOILER_KEY = 'simkl.hideSpoilers';
 const VIEW_KEY = 'simkl.view';
+const SNOOZE_KEY = 'simkl.snoozed';
 
 /** The saved sort/status per tab; anything unreadable is simply forgotten. */
 function parseView(raw: string | null): SimklPrefs['view'] {
@@ -87,8 +89,8 @@ export function useSimklData() {
   }, []);
 
   useEffect(() => {
-    Promise.all([getSetting(SPOILER_KEY), getSetting(VIEW_KEY)])
-      .then(([spoilers, view]) => setPrefs({ hideSpoilers: spoilers === '1', view: parseView(view) }))
+    Promise.all([getSetting(SPOILER_KEY), getSetting(VIEW_KEY), getSetting(SNOOZE_KEY)])
+      .then(([spoilers, view, snoozed]) => setPrefs({ hideSpoilers: spoilers === '1', view: parseView(view), snoozed: parseView(snoozed) as Record<string, number> }))
       .catch(() => undefined);
   }, []);
 
@@ -203,6 +205,8 @@ export function useSimklData() {
       search: searchSimkl,
       trending: loadTrending,
       calendar: loadCalendar,
+      loadSeason,
+      loadGenres: async () => new Map([...(await metaMap())].map(([id, m]) => [id, m.genres])),
       watchTimes: allWatchTimes,
       loadInsights: async () => {
         const [list, history, plays, meta] = await Promise.all([listSimklItems(), allHistory(), allPlays(), metaMap()]);
@@ -260,6 +264,8 @@ export function useSimklData() {
         }
         return result ?? 'unknown';
       },
+      loadRank: (type) => getSetting(`rank.${type}`),
+      saveRank: (type, json) => setSetting(`rank.${type}`, json),
       exportCalendar: async () => {
         const list = await listSimklItems();
         const rows = (await Promise.all((['show', 'anime', 'movie'] as const).map((t) => loadCalendar(t).catch(() => [])))).flat();
@@ -276,6 +282,7 @@ export function useSimklData() {
         setPrefs(next);
         await setSetting(SPOILER_KEY, next.hideSpoilers ? '1' : '0');
         await setSetting(VIEW_KEY, JSON.stringify(next.view ?? {}));
+        await setSetting(SNOOZE_KEY, JSON.stringify(next.snoozed ?? {}));
       },
       openUrl: (url) => {
         Linking.openURL(url).catch((e) => console.log(`[SIMKL] could not open ${url}: ${String(e)}`));

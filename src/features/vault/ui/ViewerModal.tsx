@@ -33,7 +33,7 @@
  *
  * Also: hold the left or right edge for 2× speed, bookmarks (ticks on the
  * scrubber, chips to jump), "Continue another time" on long videos (it picks
- * up 2.5 min before where you stopped), and every play is recorded for the
+ * up a little before where you stopped), and every play is recorded for the
  * dashboard and Wrapped.
  *
  * Like the rest of `ui/`, this imports no native module except expo-video, which
@@ -145,6 +145,7 @@ function ViewerPage({
   link = null,
   onLinkChanged,
   resumeAt = null,
+  resumeSavedAt = 0,
   startAt = null,
   prefs = DEFAULT_VAULT_PREFS,
   onPrefs,
@@ -380,13 +381,13 @@ function ViewerPage({
     return () => sub.remove();
   }, [player, startAt, enableVideo]);
 
-  // Pick a saved video up again, 2.5 minutes before where you stopped.
+  // Pick a saved video up again a little before where you stopped (more after a long break).
   useEffect(() => {
     if (!enableVideo || !prefs.resumeEnabled || resumeAt === null || resumeDone.current) return;
     const go = () => {
       if (resumeDone.current) return;
       resumeDone.current = true;
-      const from = resumeFrom(resumeAt, item.durationMs ?? (player.duration ? player.duration * 1000 : null));
+      const from = resumeFrom(resumeAt, item.durationMs ?? (player.duration ? player.duration * 1000 : null), resumeSavedAt ? Date.now() - resumeSavedAt : undefined);
       player.currentTime = from / 1000;
       setResumedFrom(from);
     };
@@ -395,7 +396,7 @@ function ViewerPage({
       if (status === 'readyToPlay') go();
     });
     return () => sub.remove();
-  }, [player, resumeAt, enableVideo, prefs.resumeEnabled, item.durationMs]);
+  }, [player, resumeAt, resumeSavedAt, enableVideo, prefs.resumeEnabled, item.durationMs]);
 
   // Skip intro: an album can skip the start of its videos (not when picking up where you stopped).
   const skipSec = Math.max(0, ...albumIdsAtOpen.current.map((id) => prefs.skipIntro?.[String(id)] ?? 0));
@@ -1960,6 +1961,8 @@ type ViewerProps = {
   onLinkChanged?: () => void;
   /** A saved "continue another time" point (ms), if there is one. */
   resumeAt?: number | null;
+  /** When that point was saved (ms), so a short break rewinds less than a long one. */
+  resumeSavedAt?: number;
   /** Start at this moment (ms), e.g. one found by search inside videos. */
   startAt?: number | null;
   prefs?: VaultPrefs;

@@ -44,7 +44,7 @@ const day = (n: number) => new Date(Date.UTC(2026, 9, 17 - n, 20)).toISOString()
 
 const RAW: SimklItem[] = [
   { ...base, simklId: 101, type: 'show', title: 'Harbour Lights', year: 2024, runtime: 50, status: 'watching', rating: 9, addedAt: day(90), lastWatchedAt: day(1), watchedEpisodes: 11, totalEpisodes: 18, nextToWatch: 'S02E04', notAiredEpisodes: 2 },
-  { ...base, simklId: 102, type: 'show', title: 'The Long Field', year: 2021, runtime: 42, status: 'watching', rating: null, addedAt: day(60), lastWatchedAt: day(3), watchedEpisodes: 3, totalEpisodes: 10, nextToWatch: 'S01E04' },
+  { ...base, simklId: 102, type: 'show', title: 'The Long Field', year: 2021, runtime: 42, status: 'watching', rating: null, addedAt: day(60), lastWatchedAt: day(75), watchedEpisodes: 3, totalEpisodes: 10, nextToWatch: 'S01E04' },
   { ...base, simklId: 103, type: 'show', title: 'Copper Street', year: 2019, runtime: 30, status: 'completed', rating: 7, addedAt: day(300), lastWatchedAt: day(40), watchedEpisodes: 24, totalEpisodes: 24, nextToWatch: null },
   { ...base, simklId: 104, type: 'show', title: 'Night Ferry', year: 2025, runtime: 55, status: 'plantowatch', rating: null, addedAt: day(5), lastWatchedAt: null, watchedEpisodes: 0, totalEpisodes: 8, nextToWatch: 'S01E01' },
   { ...base, simklId: 105, type: 'show', title: 'Quiet Valley', year: 2018, runtime: 45, status: 'hold', rating: 6, addedAt: day(200), lastWatchedAt: day(100), watchedEpisodes: 14, totalEpisodes: 30, nextToWatch: 'S02E05' },
@@ -281,6 +281,22 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
     search: async (type) => catalog(type),
     trending: async (type) => catalog(type),
     calendar: async (type) => calendar(type),
+    loadGenres: async () => new Map([...fixtureMeta()].map(([id, m]) => [id, m.genres])),
+    loadSeason: async () =>
+      catalog('anime').map((t, i) => ({
+        simklId: t.simklId,
+        title: t.title,
+        poster: t.poster,
+        slug: t.slug,
+        year: t.year,
+        score: Math.round((8.9 - i * 0.23) * 100) / 100,
+        genres: [['Action', 'Fantasy'], ['Comedy', 'Slice of Life'], ['Romance', 'Drama'], ['Sci-Fi', 'Mecha']][i % 4],
+        animeType: 'tv',
+        totalEpisodes: i % 3 ? 12 : 24,
+        isNew: i % 3 !== 1,
+        nextDate: new Date(Date.now() + (i % 6) * 86_400_000).toISOString(),
+        nextEpisode: 3 + (i % 9),
+      })),
     watchTimes: async () =>
       Array.from({ length: 70 }, (_, i) => new Date(Date.now() - ((i * 37) % 110) * 86_400_000).toISOString()),
     exportCsv: async () => {},
@@ -321,6 +337,8 @@ export function fixtureSimklActions(onChange: (items: SimklItem[]) => void, item
       return { source: 'letterboxd-diary', watched: 412, rated: 380, planned: 0, skipped: 0, notFound: ['Untitled Short (2011)', 'Home Movie (1998)'] };
     },
     exportCalendar: async () => 6,
+    loadRank: async () => null,
+    saveRank: async () => {},
     loadFranchises: async () => [
       {
         qid: 'Q1',

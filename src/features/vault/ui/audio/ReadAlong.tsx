@@ -19,6 +19,7 @@ import { OptionsSheet } from '../prompts';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { AudioActions, AudioUiItem, OpenBook } from './audioTypes';
 import { useAudioPlayback } from './playback';
+import { SkeletonText } from '../Skeleton';
 
 /** Text size steps (kept for the session). */
 const SIZES = [15, 17, 19, 22, 26];
@@ -188,7 +189,9 @@ export default function ReadAlong({ item, actions }: { item: AudioUiItem; action
         </TouchableOpacity>
       </View>
       {!text ? (
-        <ActivityIndicator style={{ marginTop: 30 }} color={p.textSecondary} />
+        <View style={{ marginTop: 24 }}>
+          <SkeletonText />
+        </View>
       ) : (
         <FlatList
           ref={list}

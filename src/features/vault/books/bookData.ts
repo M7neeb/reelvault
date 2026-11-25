@@ -17,7 +17,7 @@ import { onIncomingBook } from '../incoming';
 import { onBooksChanged } from './bookEvents';
 import { importBookFile } from './bookImport';
 import { getSetting, setSetting } from '../library';
-import type { BookActions, BookUi, BooksData } from '../ui/books/bookTypes';
+import type { BookActions, BookUi, BooksData, SpeechControl } from '../ui/books/bookTypes';
 import { chapterBlocks } from '../audio/epub';
 import { parseAudioLinks, withAudioLink, type AudioLinks } from './bookAudio';
 import { NO_GOALS, parseGoals, type BookGoals } from './bookGoals';
@@ -118,6 +118,24 @@ async function addBook(uri: string, name: string, onStep: (t: string) => void): 
     throw e;
   }
 }
+
+/** Read aloud, when this app build has the phone's voices (app 1.13 and later). */
+const speechControl: SpeechControl | undefined =
+  ReelVaultMedia?.speak && ReelVaultMedia.addListener
+    ? {
+        voices: () => ReelVaultMedia?.speechVoices?.() ?? [],
+        speak: (paragraphs, from, speed, voice, title, artist) => ReelVaultMedia?.speak?.(paragraphs, from, speed, voice, title, artist),
+        pause: () => ReelVaultMedia?.speakPause?.(),
+        resume: () => ReelVaultMedia?.speakResume?.(),
+        skip: (by) => ReelVaultMedia?.speakSkip?.(by),
+        setSpeed: (speed) => ReelVaultMedia?.speakSpeed?.(speed),
+        stop: () => ReelVaultMedia?.speakStop?.(),
+        listen: (fn) => {
+          const sub = ReelVaultMedia?.addListener?.('onSpeech', fn);
+          return () => sub?.remove();
+        },
+      }
+    : undefined;
 
 export function useBooksData(): BooksData {
   const [items, setItems] = useState<BookItem[]>([]);
@@ -423,6 +441,7 @@ export function useBooksData(): BooksData {
         }
         return [];
       },
+      speech: speechControl,
       setSort: async (s) => {
         setSortState(s);
         await setSetting(SORT_KEY, s);

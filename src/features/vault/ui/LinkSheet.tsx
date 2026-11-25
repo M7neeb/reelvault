@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import Poster from '@/features/simkl/ui/Poster';
 import type { CatalogEpisode, CatalogTitle, SimklBridge, SimklType, VideoLink } from '@/features/simkl/ui/types';
@@ -18,6 +18,7 @@ import Icon from './Icon';
 import { Segment, SheetFrame } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
+import { SkeletonRows } from './Skeleton';
 
 export default function LinkSheet({
   item,
@@ -145,7 +146,7 @@ export default function LinkSheet({
             />
           </View>
           {results === null && !!query.trim() ? (
-            <ActivityIndicator color={p.textSecondary} />
+            <SkeletonRows count={4} art="poster" />
           ) : (
             <View style={styles.group}>
               {(results ?? []).slice(0, 12).map((r, i) => (
@@ -178,7 +179,7 @@ export default function LinkSheet({
             <Text style={styles.backText}>{title.title}</Text>
           </TouchableOpacity>
           {episodes === null ? (
-            <ActivityIndicator color={p.textSecondary} />
+            <SkeletonRows count={6} art="none" />
           ) : seasons.length === 0 ? (
             <Text style={styles.body}>Simkl has no episode list for this title.</Text>
           ) : (

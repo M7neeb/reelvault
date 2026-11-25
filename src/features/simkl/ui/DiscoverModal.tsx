@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal, useWindowDimensions } from '@/features/vault/ui/screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +17,8 @@ import { SIMKL_TYPES } from '../logic';
 import Poster from './Poster';
 import { IMDB_YELLOW } from './parts';
 import type { CatalogTitle, SimklActions, SimklType, Timeframe } from './types';
+import { SkeletonRows } from '@/features/vault/ui/Skeleton';
+import EmptyState from '@/features/vault/ui/EmptyState';
 
 const TIMEFRAMES: { key: Timeframe; label: string }[] = [
   { key: 'today', label: 'Today' },
@@ -106,7 +108,7 @@ export default function DiscoverModal({
         )}
         <Text style={styles.heading}>{heading}</Text>
         {rows === null ? (
-          <ActivityIndicator style={styles.spinner} color={p.textSecondary} />
+          <SkeletonRows count={6} art="poster" style={{ marginHorizontal: 16 }} />
         ) : (
           <FlatList
             data={rows}
@@ -114,7 +116,7 @@ export default function DiscoverModal({
             keyExtractor={(r) => String(r.simklId)}
             columnWrapperStyle={styles.row}
             contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
-            ListEmptyComponent={<Text style={styles.empty}>{error || 'Nothing found.'}</Text>}
+            ListEmptyComponent={<EmptyState icon={error ? 'info' : 'search'} title={error ? "Couldn't load this" : 'Nothing found'} text={error || 'Try another word or a shorter title.'} tint={p.textSecondary} />}
             renderItem={({ item }) => (
               <TouchableOpacity style={{ width: w }} onPress={() => onOpen(item)}>
                 <Poster path={item.poster} title={item.title} width={w} height={h} radius={10} size="_ca">

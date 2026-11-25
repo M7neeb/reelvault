@@ -22,6 +22,7 @@ import { OptionsSheet } from '../prompts';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import SourceScreen from './SourceScreen';
 import type { BrowseData, SourceGroup } from './mangaTypes';
+import { SkeletonRows } from '../Skeleton';
 
 type Tab = 'sources' | 'extensions';
 
@@ -105,7 +106,7 @@ export default function BrowseScreen({
 
   const sourcesTab = (
     <>
-      {loadingGroups && !groups && <ActivityIndicator style={{ marginTop: 20 }} color={p.textSecondary} />}
+      {loadingGroups && !groups && <SkeletonRows count={5} style={{ marginTop: 16 }} />}
       {(groups ?? []).map((g) => (
         <View key={g.title + (g.serverId ?? '')} style={styles.group}>
           <View style={styles.groupHead}>

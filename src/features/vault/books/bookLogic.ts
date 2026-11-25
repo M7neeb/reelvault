@@ -241,6 +241,32 @@ export function highlightRuns<R extends RunLike>(runs: R[], highlights: string[]
   return out;
 }
 
+/** Read aloud: the runs with the word being spoken (characters at..at+len) split out and marked `sp`. */
+export function spokenRuns<R extends RunLike>(runs: R[], at: number, len: number): (R & { sp?: 1 })[] {
+  const total = runs.reduce((n, r) => n + r.t.length, 0);
+  if (len <= 0 || at >= total || at < 0) return runs;
+  const end = at + len;
+  const out: (R & { sp?: 1 })[] = [];
+  let pos = 0;
+  for (const r of runs) {
+    const a = Math.max(at, pos) - pos;
+    const b = Math.min(end, pos + r.t.length) - pos;
+    if (b <= a) out.push(r);
+    else {
+      if (a > 0) out.push({ ...r, t: r.t.slice(0, a) });
+      out.push({ ...r, t: r.t.slice(a, b), sp: 1 as const });
+      if (b < r.t.length) out.push({ ...r, t: r.t.slice(b) });
+    }
+    pos += r.t.length;
+  }
+  return out;
+}
+
+/** What Read aloud says for a block: its text; nothing for pictures and rules. */
+export function blockSpeech(b: { k: string; runs?: RunLike[] }): string {
+  return b.runs ? b.runs.map((r) => r.t).join('') : '';
+}
+
 /** A paragraph split into sentences (to pick which ones to highlight). */
 export function sentencesOf(text: string): string[] {
   // A sentence ends at . ! ? or … only when the next word starts one ("Hm … yes" stays whole).
@@ -324,10 +350,14 @@ export function fmtLeft(min: number): string {
 
 export type ReaderTheme = 'paper' | 'sepia' | 'night';
 export type ReaderFont = 'serif' | 'sans';
-export type ReaderPrefs = { theme: ReaderTheme; font: ReaderFont; size: number; spacing: 'tight' | 'normal' | 'loose' };
+/** How pages move: free scrolling, or a screen at a time by tapping the edges (sliding or fading). */
+export type PageTurn = 'scroll' | 'slide' | 'fade';
+/** voice: a voice id for Read aloud ('' = the phone's best for its language); speech: its speed (1 = normal). */
+export type ReaderPrefs = { theme: ReaderTheme; font: ReaderFont; size: number; spacing: 'tight' | 'normal' | 'loose'; turn: PageTurn; voice: string; speech: number };
+export const SPEECH_SPEEDS = [0.8, 1, 1.2, 1.5, 2];
 
 export const READER_SIZES = [15, 17, 19, 21, 24, 28];
-export const DEFAULT_READER: ReaderPrefs = { theme: 'night', font: 'serif', size: 19, spacing: 'normal' };
+export const DEFAULT_READER: ReaderPrefs = { theme: 'night', font: 'serif', size: 19, spacing: 'normal', turn: 'scroll', voice: '', speech: 1 };
 
 export function parseReaderPrefs(json: string | null): ReaderPrefs {
   try {
@@ -337,6 +367,9 @@ export function parseReaderPrefs(json: string | null): ReaderPrefs {
       font: r?.font === 'sans' ? 'sans' : 'serif',
       size: READER_SIZES.includes(r?.size) ? r.size : DEFAULT_READER.size,
       spacing: r?.spacing === 'tight' || r?.spacing === 'loose' ? r.spacing : 'normal',
+      turn: r?.turn === 'slide' || r?.turn === 'fade' ? r.turn : 'scroll',
+      voice: typeof r?.voice === 'string' ? r.voice : '',
+      speech: SPEECH_SPEEDS.includes(r?.speech) ? r.speech : 1,
     };
   } catch {
     return DEFAULT_READER;
@@ -405,4 +438,16 @@ export function coverTitleSize(width: number, title: string): number {
   const inner = width - 2 * Math.max(6, width * 0.1);
   const longest = Math.max(1, ...title.split(/\s+/).map((w) => w.length));
   return Math.max(9, Math.min(width * 0.13, inner / (longest * 0.64)));
+}
+
+/**
+ * The scroll position one page on (dir 1) or back (-1). A page is the screen
+ * less one line, so the last line read stays in view. At either end of the
+ * chapter: 'next' or 'previous' instead.
+ */
+export function pageTurn(offset: number, viewH: number, contentH: number, lineH: number, dir: 1 | -1): number | 'next' | 'previous' {
+  const maxOff = Math.max(0, contentH - viewH);
+  const step = Math.max(1, viewH - lineH);
+  if (dir === 1) return offset >= maxOff - 1 ? 'next' : Math.min(offset + step, maxOff);
+  return offset <= 1 ? 'previous' : Math.max(0, offset - step);
 }

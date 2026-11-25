@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,6 +26,7 @@ import { fmtMinutesLong, monthWrapRange, simklDash, simklWrap, wrapChoices, year
 import SimklWrapped from './SimklWrapped';
 import { PosterRow, WrappedPoster } from '@/features/vault/ui/wrappedPoster';
 import type { Meta, SimklActions, SimklItem, WatchEvent } from './types';
+import { SkeletonDashboard } from '@/features/vault/ui/Skeleton';
 
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const poster = (path: string | null) => ({ uri: posterUrl(path, '_m') });
@@ -116,7 +117,7 @@ export default function SimklDashboard({
         </View>
 
         {!dash || !choices || !data ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={p.textSecondary} />
+          <SkeletonDashboard style={{ marginTop: 20, marginHorizontal: 16 }} />
         ) : (
           <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 30 }]}>
             <Card index={0} title="This week" sub={weekChange === null ? undefined : weekChange >= 0 ? `${weekChange}% more than last week` : `${-weekChange}% less than last week`}>

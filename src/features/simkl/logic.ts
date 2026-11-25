@@ -627,10 +627,25 @@ export type CatalogTitle = {
   imdbRating?: number | null;
 };
 
+/**
+ * The calendar files (data.simkl.in/calendar/v2) send `{ calendar: rows, metadata: { id: title } }`:
+ * join each row with its title so it has the same shape as a search row.
+ */
+function calendarRows(json: any): any[] {
+  if (!json || !Array.isArray(json.calendar) || !json.metadata || typeof json.metadata !== 'object') return [];
+  const out: any[] = [];
+  for (const row of json.calendar) {
+    const meta = json.metadata[String(row?.simkl_id)];
+    if (!meta) continue;
+    out.push({ ...meta, ids: { ...meta.ids, simkl_id: row.simkl_id }, date: row.date, episode: row.episode });
+  }
+  return out;
+}
+
 /** `/search/{type}`, trending and calendar rows all share this rough shape. */
 export function parseCatalog(json: any, type: SimklType): CatalogTitle[] {
   const out: CatalogTitle[] = [];
-  for (const r of Array.isArray(json) ? json : []) {
+  for (const r of Array.isArray(json) ? json : calendarRows(json)) {
     const id = num(r?.ids?.simkl_id ?? r?.ids?.simkl);
     if (id === null) continue;
     const ep = r?.episode;
@@ -722,4 +737,88 @@ export function newThisWeek(items: SimklItem[], rows: CatalogTitle[], following:
     if (following.has(r.simklId) && !out.has(r.simklId) && inWeek(r.date))
       out.set(r.simklId, { simklId: r.simklId, type: r.type, title: r.title, poster: r.poster, label: r.episodeLabel ?? null, date: r.date! });
   return [...out.values()].sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+}
+
+/** Days without watching after which a show you are watching counts as stalled. */
+export const STALL_DAYS = 60;
+
+/**
+ * Shows (or anime) you are watching, with an episode waiting, that you haven't
+ * touched for STALL_DAYS: oldest first. `snoozed` holds simklId -> until (ms)
+ * for the ones you said you'd carry on with.
+ */
+export function stalledShows(items: SimklItem[], type: SimklType, now: number, snoozed: Record<string, number>): SimklItem[] {
+  const limit = now - STALL_DAYS * 86_400_000;
+  const since = (i: SimklItem) => Date.parse(i.lastWatchedAt ?? i.addedAt ?? '');
+  return items
+    .filter((i) => {
+      if (i.type !== type || i.status !== 'watching' || !i.nextToWatch) return false;
+      if ((snoozed[String(i.simklId)] ?? 0) > now) return false;
+      const t = since(i);
+      return Number.isFinite(t) && t < limit;
+    })
+    .sort((a, b) => since(a) - since(b));
+}
+
+/** The anime season a date falls in: Winter (Jan-Mar), Spring, Summer, Fall. */
+export function seasonOf(ms: number): { label: string; start: number } {
+  const d = new Date(ms);
+  const q = Math.floor(d.getUTCMonth() / 3);
+  return { label: `${['Winter', 'Spring', 'Summer', 'Fall'][q]} ${d.getUTCFullYear()}`, start: Date.UTC(d.getUTCFullYear(), q * 3, 1) };
+}
+
+export type SeasonAnime = {
+  simklId: number;
+  title: string;
+  poster: string | null;
+  slug: string | null;
+  year: number | null;
+  /** MAL score, else Simkl's; null when nobody has rated it yet. */
+  score: number | null;
+  genres: string[];
+  animeType: string | null;
+  totalEpisodes: number | null;
+  /** Started this season (or just before), rather than a long runner. */
+  isNew: boolean;
+  nextDate: string | null;
+  nextEpisode: number | null;
+};
+
+/** What's airing now, from the anime calendar file: one row per title, best score first. */
+export function seasonChart(json: any, now: number): SeasonAnime[] {
+  if (!json || !Array.isArray(json.calendar) || !json.metadata || typeof json.metadata !== 'object') return [];
+  const newFrom = seasonOf(now).start - 21 * 86_400_000;
+  const byId = new Map<number, SeasonAnime>();
+  for (const row of json.calendar) {
+    const id = num(row?.simkl_id);
+    const m = id === null ? null : json.metadata[String(id)];
+    if (id === null || !m) continue;
+    const type = str(m.anime_type);
+    if (type && /music/i.test(type)) continue;
+    const date = str(row.date);
+    const known = byId.get(id);
+    if (known) {
+      if (date && (!known.nextDate || date < known.nextDate)) {
+        known.nextDate = date;
+        known.nextEpisode = num(row?.episode?.episode);
+      }
+      continue;
+    }
+    const released = Date.parse(str(m.release_date) ?? '');
+    byId.set(id, {
+      simklId: id,
+      title: str(m.title) ?? 'Untitled',
+      poster: str(m.poster),
+      slug: str(m.ids?.slug),
+      year: Number.isFinite(released) ? new Date(released).getUTCFullYear() : null,
+      score: num(m.ratings?.mal?.rating) ?? num(m.ratings?.simkl?.rating),
+      genres: Array.isArray(m.genres) ? m.genres.filter((g: unknown) => typeof g === 'string') : [],
+      animeType: type,
+      totalEpisodes: num(m.total_episodes),
+      isNew: Number.isFinite(released) && released >= newFrom,
+      nextDate: date,
+      nextEpisode: num(row?.episode?.episode),
+    });
+  }
+  return [...byId.values()].sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title));
 }

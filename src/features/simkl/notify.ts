@@ -7,6 +7,7 @@
 
 import * as Notifications from 'expo-notifications';
 
+import { digestOn, digestPart, onDigestChange } from '@/features/vault/digest';
 import { getSetting, setSetting } from '@/features/vault/library';
 
 import { loadCalendar } from './actions';
@@ -49,7 +50,10 @@ export async function rescheduleReminders(): Promise<number> {
   for (const n of pending) {
     if (n.content.data?.tag === TAG) await Notifications.cancelScheduledNotificationAsync(n.identifier);
   }
-  if (!settings.enabled) return 0;
+  if (!settings.enabled) {
+    if (await digestOn()) await digestPart('episodes', []);
+    return 0;
+  }
 
   const items = await listSimklItems();
   const types = (['show', 'anime', 'movie'] as SimklType[]).filter((t) => settings.types[t] && items.some((i) => i.type === t));
@@ -62,6 +66,13 @@ export async function rescheduleReminders(): Promise<number> {
     }
   }
   const plan = planReminders(calendar, items, settings, Date.now());
+  if (await digestOn()) {
+    await digestPart(
+      'episodes',
+      plan.map((r) => ({ at: r.at, title: r.title, body: r.type === 'movie' ? 'is out' : r.body.replace(/ is out( now)?\.$/, ''), kind: 'episode' as const }))
+    );
+    return 0;
+  }
   for (const r of plan) {
     await Notifications.scheduleNotificationAsync({
       content: { title: r.title, body: r.body, data: { tag: TAG, simklId: r.simklId, type: r.type } },
@@ -71,6 +82,9 @@ export async function rescheduleReminders(): Promise<number> {
   console.log(`[NOTIFY] ${plan.length} reminders scheduled`);
   return plan.length;
 }
+
+// Switching the daily note on or off moves the episode reminders in or out of it.
+onDigestChange(() => rescheduleReminders());
 
 /** Tapping a reminder opens that title. */
 export function onReminderTap(open: (t: { simklId: number; type: SimklType }) => void): () => void {

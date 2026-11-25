@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GatedModal as Modal } from './screen';
@@ -16,6 +16,7 @@ import IconButton from './IconButton';
 import { OptionsSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { CloudBridge, CloudEntryUi, CloudKindUi } from './types';
+import { SkeletonRows } from './Skeleton';
 
 export default function CloudSheet({ cloud, onClose }: { cloud: CloudBridge; onClose: () => void }) {
   const insets = useSafeAreaInsets();
@@ -111,7 +112,7 @@ export default function CloudSheet({ cloud, onClose }: { cloud: CloudBridge; onC
             ))}
           </ScrollView>
         ) : entries === null ? (
-          <ActivityIndicator color={p.textSecondary} style={{ marginTop: 40 }} />
+          <SkeletonRows count={6} style={{ marginTop: 16 }} />
         ) : (
           <ScrollView contentContainerStyle={styles.body}>
             {entries.length === 0 && !error && <Text style={styles.hint}>No folders or videos here.</Text>}

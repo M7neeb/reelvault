@@ -11,6 +11,169 @@ struct MediaError: LocalizedError {
   var errorDescription: String? { message }
 }
 
+/// Read aloud: speaks a chapter paragraph by paragraph with Apple's voices,
+/// reports each paragraph and word (for the highlight), keeps going with the
+/// screen locked, and answers the lock screen's play, pause and skip buttons.
+/// Only touched on the main queue.
+final class SpeechReader: NSObject, AVSpeechSynthesizerDelegate {
+  private let synth = AVSpeechSynthesizer()
+  private var paragraphs: [String] = []
+  private var index = 0
+  private var current: AVSpeechUtterance?
+  private var rate: Float = AVSpeechUtteranceDefaultSpeechRate
+  private var voice: AVSpeechSynthesisVoice?
+  private var title = ""
+  private var artist = ""
+  private var commandTokens: [(MPRemoteCommand, Any)] = []
+  var send: (([String: Any]) -> Void)?
+
+  override init() {
+    super.init()
+    synth.delegate = self
+  }
+
+  func start(_ list: [String], from: Int, speed: Double, voiceId: String, title: String, artist: String) {
+    stop(report: false)
+    paragraphs = list
+    index = max(0, min(from, list.count))
+    rate = Self.rate(for: speed)
+    voice = Self.voice(voiceId)
+    self.title = title
+    self.artist = artist
+    let session = AVAudioSession.sharedInstance()
+    try? session.setCategory(.playback, mode: .spokenAudio, options: [])
+    try? session.setActive(true)
+    addCommands()
+    speakCurrent()
+  }
+
+  func pause() {
+    if synth.isSpeaking { synth.pauseSpeaking(at: .word) }
+  }
+
+  func resume() {
+    if synth.isPaused { synth.continueSpeaking() } else if current == nil, index < paragraphs.count { speakCurrent() }
+  }
+
+  /// Moves `by` paragraphs on or back and carries on speaking.
+  func skip(_ by: Int) {
+    guard !paragraphs.isEmpty else { return }
+    index = max(0, min(paragraphs.count - 1, index + by))
+    current = nil
+    synth.stopSpeaking(at: .immediate)
+    speakCurrent()
+  }
+
+  func setSpeed(_ speed: Double) {
+    rate = Self.rate(for: speed)
+    // The new speed starts with the paragraph being read, from its start.
+    if current != nil { skip(0) }
+  }
+
+  func stop(report: Bool = true) {
+    let wasReading = current != nil || synth.isSpeaking
+    current = nil
+    synth.stopSpeaking(at: .immediate)
+    removeCommands()
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    if report && wasReading { send?(["kind": "stopped", "index": index]) }
+  }
+
+  private func speakCurrent() {
+    // Skip empty paragraphs (pictures, rules).
+    while index < paragraphs.count && paragraphs[index].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      index += 1
+    }
+    guard index < paragraphs.count else {
+      current = nil
+      removeCommands()
+      MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+      send?(["kind": "end", "index": index])
+      return
+    }
+    let utterance = AVSpeechUtterance(string: paragraphs[index])
+    utterance.rate = rate
+    utterance.voice = voice
+    utterance.postUtteranceDelay = 0.2
+    current = utterance
+    synth.speak(utterance)
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+      MPMediaItemPropertyTitle: title,
+      MPMediaItemPropertyArtist: artist,
+      MPNowPlayingInfoPropertyPlaybackRate: 1.0,
+    ]
+    send?(["kind": "paragraph", "index": index])
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
+    guard utterance === current else { return }
+    send?(["kind": "word", "index": index, "at": characterRange.location, "len": characterRange.length])
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+    guard utterance === current else { return }
+    index += 1
+    speakCurrent()
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
+    guard utterance === current else { return }
+    send?(["kind": "paused", "index": index])
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
+    guard utterance === current else { return }
+    send?(["kind": "resumed", "index": index])
+  }
+
+  private func addCommands() {
+    removeCommands()
+    let center = MPRemoteCommandCenter.shared()
+    let pairs: [(MPRemoteCommand, () -> Void)] = [
+      (center.playCommand, { [weak self] in self?.resume() }),
+      (center.pauseCommand, { [weak self] in self?.pause() }),
+      (center.togglePlayPauseCommand, { [weak self] in
+        guard let self = self else { return }
+        if self.synth.isPaused { self.resume() } else { self.pause() }
+      }),
+      (center.nextTrackCommand, { [weak self] in self?.skip(1) }),
+      (center.previousTrackCommand, { [weak self] in self?.skip(-1) }),
+    ]
+    for (command, action) in pairs {
+      command.isEnabled = true
+      let token = command.addTarget { _ in
+        DispatchQueue.main.async { action() }
+        return .success
+      }
+      commandTokens.append((command, token))
+    }
+  }
+
+  private func removeCommands() {
+    for (command, token) in commandTokens { command.removeTarget(token) }
+    commandTokens = []
+  }
+
+  private static func rate(for speed: Double) -> Float {
+    let r = AVSpeechUtteranceDefaultSpeechRate * Float(max(0.5, min(2.0, speed)))
+    return max(AVSpeechUtteranceMinimumSpeechRate, min(AVSpeechUtteranceMaximumSpeechRate, r))
+  }
+
+  /// The voice asked for, or the best one installed for the phone's language.
+  private static func voice(_ id: String) -> AVSpeechSynthesisVoice? {
+    if !id.isEmpty, let chosen = AVSpeechSynthesisVoice(identifier: id) { return chosen }
+    let language = AVSpeechSynthesisVoice.currentLanguageCode()
+    let mine = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == language }
+    return mine.max(by: { $0.quality.rawValue < $1.quality.rawValue }) ?? AVSpeechSynthesisVoice(language: language)
+  }
+
+  static func voices() -> [[String: Any]] {
+    AVSpeechSynthesisVoice.speechVoices().map { v in
+      ["id": v.identifier, "name": v.name, "language": v.language, "quality": v.quality.rawValue >= 3 ? "premium" : v.quality.rawValue == 2 ? "enhanced" : "default"]
+    }
+  }
+}
+
 /// Storage housekeeping for ReelVault: video frames written straight to a
 /// small JPEG (instead of a full-resolution still plus a copy in the cache),
 /// shrinking existing pictures, measuring folders, and clearing old temporary
@@ -23,11 +186,16 @@ public class ReelVaultMediaModule: Module {
   private var restoreVolume: Float = 0.5
   private var centerVolume: Float = 0.5
   private var savedAudio: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
+  private lazy var reader: SpeechReader = {
+    let r = SpeechReader()
+    r.send = { [weak self] body in self?.sendEvent("onSpeech", body) }
+    return r
+  }()
 
   public func definition() -> ModuleDefinition {
     Name("ReelVaultMedia")
 
-    Events("onBoostProgress", "onVolumeKey")
+    Events("onBoostProgress", "onVolumeKey", "onSpeech")
 
     /// Picture fingerprints of a video (a 64-bit "difference hash" as 16 hex
     /// characters) at the given fractions of its length; "" where a frame
@@ -151,7 +319,41 @@ public class ReelVaultMediaModule: Module {
     }
 
     OnDestroy {
-      DispatchQueue.main.async { self.stopVolumeKeys() }
+      DispatchQueue.main.async {
+        self.stopVolumeKeys()
+        self.reader.stop(report: false)
+      }
+    }
+
+    /// Read aloud: speaks `paragraphs` from `from` on. Sends "onSpeech" with
+    /// kind paragraph / word (index, at, len) / paused / resumed / end / stopped.
+    Function("speak") { (paragraphs: [String], from: Int, speed: Double, voice: String, title: String, artist: String) in
+      DispatchQueue.main.async { self.reader.start(paragraphs, from: from, speed: speed, voiceId: voice, title: title, artist: artist) }
+    }
+
+    Function("speakPause") {
+      DispatchQueue.main.async { self.reader.pause() }
+    }
+
+    Function("speakResume") {
+      DispatchQueue.main.async { self.reader.resume() }
+    }
+
+    Function("speakSkip") { (by: Int) in
+      DispatchQueue.main.async { self.reader.skip(by) }
+    }
+
+    Function("speakSpeed") { (speed: Double) in
+      DispatchQueue.main.async { self.reader.setSpeed(speed) }
+    }
+
+    Function("speakStop") {
+      DispatchQueue.main.async { self.reader.stop() }
+    }
+
+    /// The voices installed on this phone (Settings > Accessibility > Spoken Content adds better ones).
+    Function("speechVoices") { () -> [[String: Any]] in
+      SpeechReader.voices()
     }
 
     /// Voice Boost: a copy of an audio file with clearer, evener, louder speech

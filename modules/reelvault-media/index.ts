@@ -33,9 +33,23 @@ type NativeMedia = {
   /** Scene words and text on screen, a frame every `everySec` (at most `maxFrames`). Missing before app build 18. */
   scanFrames?(input: string, everySec: number, maxFrames: number): Promise<{ atMs: number; labels: string[]; text: string }[]>;
   stopVolumeKeys?(): void;
+  /** Read aloud with the phone's voices, from paragraph `from` on. Missing before app 1.13. */
+  speak?(paragraphs: string[], from: number, speed: number, voice: string, title: string, artist: string): void;
+  speakPause?(): void;
+  speakResume?(): void;
+  speakSkip?(by: number): void;
+  speakSpeed?(speed: number): void;
+  speakStop?(): void;
+  speechVoices?(): SpeechVoice[];
+  addListener?(event: 'onSpeech', fn: (e: SpeechEvent) => void): { remove(): void };
   /** How good each frame would look as a cover, at fractions of the video. Missing before app 1.13. */
   frameStats?(input: string, fractions: number[]): Promise<FrameStats[]>;
 };
+
+export type SpeechVoice = { id: string; name: string; language: string; quality: 'default' | 'enhanced' | 'premium' };
+export type SpeechEvent =
+  | { kind: 'paragraph' | 'paused' | 'resumed' | 'end' | 'stopped'; index: number }
+  | { kind: 'word'; index: number; at: number; len: number };
 
 export type FrameStats = {
   atMs: number;

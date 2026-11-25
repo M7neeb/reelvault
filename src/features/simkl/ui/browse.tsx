@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { tick } from '@/features/vault/ui/haptics';
 import Icon from '@/features/vault/ui/Icon';
 import { Section, Segment, SheetFrame } from '@/features/vault/ui/sheets';
@@ -16,6 +16,7 @@ import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/
 import { countdown, myCalendar, SIMKL_TYPES } from '../logic';
 import Poster from './Poster';
 import type { CatalogTitle, ReminderSettings, SimklActions, SimklItem, SimklType } from './types';
+import { SkeletonRows } from '@/features/vault/ui/Skeleton';
 
 /** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
 function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
@@ -185,7 +186,7 @@ export function CalendarModal({
       )}
 
       {rows === null ? (
-        <ActivityIndicator color={p.textSecondary} />
+        <SkeletonRows count={4} art="poster" />
       ) : days.length === 0 ? (
         <Text style={styles.body}>{error || (day !== null ? 'Nothing that day.' : 'Nothing you follow comes out in the next weeks.')}</Text>
       ) : (

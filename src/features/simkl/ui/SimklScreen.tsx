@@ -23,7 +23,7 @@ import { success, tick } from '@/features/vault/ui/haptics';
 import Icon from '@/features/vault/ui/Icon';
 import IconButton from '@/features/vault/ui/IconButton';
 import { OptionsSheet } from '@/features/vault/ui/prompts';
-import { sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
+import { raised, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { fmtRating } from '../insights';
 import {
@@ -42,6 +42,9 @@ import {
   STATUS_LABELS,
   statusesFor,
   upNext,
+  stalledShows,
+  seasonOf,
+  STALL_DAYS,
   type SimklSort,
 } from '../logic';
 import { AccountSheet } from './AccountSheet';
@@ -54,9 +57,13 @@ import SimklDashboard from './SimklDashboard';
 import { ListEditor, ListModal, ListShelf } from './ListsUI';
 import { RatingsLine } from './parts';
 import Poster, { hueFor } from './Poster';
+import SimklRank from './SimklRank';
+import Stalled from './Stalled';
+import { asCatalog, SeasonModal, SeasonShelf, useSeason } from './SeasonChart';
 import { fmtAgo, fmtDay } from './time';
 import { ImportSheet, PickModal } from './ToolsUI';
 import type { CatalogTitle, PausedItem, SimklItem, SimklList, SimklScreenProps, SimklStatus, SimklType } from './types';
+import EmptyState from '@/features/vault/ui/EmptyState';
 
 const SIDE = 16;
 const GAP = 10;
@@ -115,6 +122,9 @@ export default function SimklScreen(props: SimklScreenProps) {
   const [dashboard, setDashboard] = useState(!!(dev?.dashboardOpen || dev?.wrappedOpen));
   const [account, setAccount] = useState(dev?.accountOpen ?? false);
   const [pick, setPick] = useState(dev?.pickOpen ?? false);
+  const [rank, setRank] = useState(!!dev?.rankStep);
+  const [seasonOpen, setSeasonOpen] = useState(dev?.seasonOpen ?? false);
+  const season = useSeason(actions, category === 'anime' && connected);
   const [importing, setImporting] = useState(dev?.importOpen ?? false);
   const [openList, setOpenList] = useState<SimklList | null>(() => lists.find((l) => l.id === dev?.listOpen) ?? null);
   const [newList, setNewList] = useState(false);
@@ -189,6 +199,7 @@ export default function SimklScreen(props: SimklScreenProps) {
     sortBy[category] ?? (savedSort && sortsFor(category).some((x) => x.key === savedSort) ? savedSort : category === 'movie' ? 'seen' : 'aired');
   const typeInfo = SIMKL_TYPES.find((t) => t.key === category)!;
   const ofType = useMemo(() => items.filter((i) => i.type === category), [items, category]);
+  const rankable = useMemo(() => ofType.filter((i) => i.status !== 'plantowatch').length, [ofType]);
   const shown = useMemo(() => sortItems(filterItems(items, { type: category, status: filter, query }), sort), [items, category, filter, query, sort]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: ofType.length };
@@ -202,6 +213,7 @@ export default function SimklScreen(props: SimklScreenProps) {
         : upNext(ofType).sort((a, b) => (b.nextDate ?? b.lastWatchedAt ?? '').localeCompare(a.nextDate ?? a.lastWatchedAt ?? '')),
     [ofType, category]
   );
+  const stalled = useMemo(() => (category === 'movie' ? [] : stalledShows(items, category, Date.now(), props.prefs?.snoozed ?? {})), [items, category, props.prefs?.snoozed]);
   const plannedHero = look !== 'compact' && look !== 'desktop';
   const planned = useMemo(
     () =>
@@ -380,6 +392,21 @@ export default function SimklScreen(props: SimklScreenProps) {
             </>
           )}
 
+          {stalled.length > 0 && (
+            <>
+              <SectionHead title="Haven't watched in a while" detail={`${stalled.length}`} />
+              <Stalled
+                items={stalled}
+                onOpen={(i) => setOpen(asTitle(i))}
+                onCarryOn={(i) => {
+                  const prefs = props.prefs ?? { hideSpoilers: false };
+                  void actions.setPrefs({ ...prefs, snoozed: { ...(prefs.snoozed ?? {}), [String(i.simklId)]: Date.now() + STALL_DAYS * 86_400_000 } });
+                }}
+                onStatus={(i, st) => actions.setStatus(i, st)}
+              />
+            </>
+          )}
+
           {planned.length > 0 && (
             <>
               <SectionHead title="Plan to Watch" detail={`${planned.length}`} action="Pick one" onAction={() => setPick(true)} />
@@ -460,6 +487,13 @@ export default function SimklScreen(props: SimklScreenProps) {
             </>
           )}
 
+          {category === 'anime' && season && season.some((a) => a.isNew) && (
+            <>
+              <SectionHead title="Airing this season" detail={seasonOf(Date.now()).label} action="Chart" onAction={() => setSeasonOpen(true)} />
+              <SeasonShelf list={season} library={items} onOpen={(a) => setOpen(asCatalog(a))} onChart={() => setSeasonOpen(true)} />
+            </>
+          )}
+
           {look !== 'simple' && fresh.length > 0 && (
             <>
               <SectionHead title="New this week" detail={`${fresh.length}`} />
@@ -485,6 +519,23 @@ export default function SimklScreen(props: SimklScreenProps) {
                 ))}
               </ScrollView>
             </>
+          )}
+
+          {rankable >= 4 && (
+            <TouchableOpacity style={styles.rankCard} onPress={() => setRank(true)} accessibilityRole="button">
+              <View style={styles.rankIcon}>
+                <Icon name="trophy" size={18} color="#FF9F0A" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.rankTitle} numberOfLines={1}>
+                  Rank your {typeInfo.plural.toLowerCase()}
+                </Text>
+                <Text style={styles.rankSub} numberOfLines={2}>
+                  Two at a time, which did you like more? Your ratings follow if you want them to.
+                </Text>
+              </View>
+              <Icon name="forward" size={13} color={p.textMuted} weight="bold" />
+            </TouchableOpacity>
           )}
 
           {/* Every look shows your lists (they were hidden in Simple and Compact). */}
@@ -562,28 +613,14 @@ export default function SimklScreen(props: SimklScreenProps) {
             </View>
           )}
           {shown.length === 0 && (
-            <View style={styles.emptyBox}>
-              <Icon name={category === 'movie' ? 'movie' : category === 'anime' ? 'anime' : 'tv'} size={34} color={p.textMuted} />
-              <Text style={styles.empty}>
-                {ofType.length === 0
-                  ? `No ${typeInfo.plural.toLowerCase()} on your Simkl yet.`
-                  : query
-                    ? 'Nothing matches.'
-                    : `Nothing in ${statusLabel}.`}
-              </Text>
-              {ofType.length === 0 && (
-                <View style={styles.emptyActions}>
-                  <TouchableOpacity style={styles.emptyBtn} onPress={() => setDiscover(true)}>
-                    <Icon name="trending" size={15} color="#fff" />
-                    <Text style={styles.emptyBtnText}>See what's trending</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.emptyBtn, styles.emptyBtnGhost]} onPress={() => setImporting(true)}>
-                    <Icon name="import" size={15} color={p.text} />
-                    <Text style={[styles.emptyBtnText, { color: p.text }]}>Import</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
+            <EmptyState
+              icon={ofType.length === 0 ? (category === 'movie' ? 'movie' : category === 'anime' ? 'anime' : 'tv') : 'search'}
+              title={ofType.length === 0 ? `No ${typeInfo.plural.toLowerCase()} yet` : query ? 'No matches' : `Nothing in ${statusLabel}`}
+              text={ofType.length === 0 ? `Nothing on your Simkl for ${typeInfo.plural.toLowerCase()} so far. Find some, or bring your history from IMDb or Letterboxd.` : query ? 'Try fewer words.' : 'Titles you give this status show up here.'}
+              tint={ofType.length === 0 ? undefined : p.textSecondary}
+              action={ofType.length === 0 ? { label: "See what's trending", onPress: () => setDiscover(true) } : undefined}
+              secondary={ofType.length === 0 ? { label: 'Import your history', onPress: () => setImporting(true) } : undefined}
+            />
           )}
         </>
       )}
@@ -747,10 +784,24 @@ export default function SimklScreen(props: SimklScreenProps) {
         />
       )}
       {stats && <InsightsModal items={items} actions={actions} initialTab={stats} onClose={() => setStats(null)} />}
+      {seasonOpen && (
+        <SeasonModal list={season} library={items} actions={actions} onOpen={(a) => setOpen(asCatalog(a))} onClose={() => setSeasonOpen(false)} />
+      )}
+      {rank && (
+        <SimklRank
+          type={category}
+          items={items}
+          actions={actions}
+          dev={dev?.rankStep ? { step: dev.rankStep } : undefined}
+          onOpen={(i) => setOpen(asTitle(i))}
+          onClose={() => setRank(false)}
+        />
+      )}
       {pick && (
         <PickModal
           type={category}
           items={items}
+          loadGenres={actions.loadGenres}
           onOpen={(i) => {
             setPick(false);
             setOpen(asTitle(i));
@@ -1208,6 +1259,10 @@ const StyleFill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bo
 
 const makeStyles = (p: Palette) =>
   sheet({
+    rankCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: SIDE, marginTop: 24, padding: 14, borderRadius: 18, backgroundColor: raised(p) },
+    rankIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,159,10,0.18)' },
+    rankTitle: { color: p.text, fontSize: 17, fontWeight: '700' },
+    rankSub: { color: p.textSecondary, fontSize: 13, lineHeight: 18 },
     screen: { flex: 1, backgroundColor: p.bg },
     titleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SIDE, paddingBottom: 4 },
     title: { flex: 1, color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8 },

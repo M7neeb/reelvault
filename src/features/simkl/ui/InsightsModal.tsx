@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Modal } from '@/features/vault/ui/screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -22,6 +22,7 @@ import { BarChart, RankedBars } from './charts';
 import type { Meta, SimklActions, SimklItem, WatchEvent } from './types';
 import Heatmap from '@/features/vault/ui/Heatmap';
 import Glyph from '@/features/vault/ui/Glyph';
+import { SkeletonDashboard } from '@/features/vault/ui/Skeleton';
 
 type Tab = 'overview' | 'review';
 const TABS: { key: Tab; label: string }[] = [
@@ -140,7 +141,7 @@ export default function InsightsModal({
         </View>
 
         {!data || !stats || !rev ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={p.textSecondary} />
+          <SkeletonDashboard style={{ marginTop: 20, marginHorizontal: 16 }} />
         ) : tab === 'overview' ? (
           <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 30 }]}>
             <View style={styles.tiles}>

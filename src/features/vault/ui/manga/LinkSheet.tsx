@@ -15,6 +15,7 @@ import { SheetFrame } from '../sheets';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import MangaCover from './MangaCover';
 import type { BrowseActions, MangaActions, MangaUiSeries } from './mangaTypes';
+import { SkeletonRows } from '../Skeleton';
 
 export default function LinkSheet({ series, browse, actions, hint, onClose }: { series: MangaUiSeries; browse: BrowseActions; actions: MangaActions; hint?: string | null; onClose: () => void }) {
   const styles = useStyles(makeStyles);
@@ -76,7 +77,7 @@ export default function LinkSheet({ series, browse, actions, hint, onClose }: { 
     <SheetFrame title="Find on a source" onClose={onClose}>
       <Text style={styles.hint}>Pick where to find "{series.title}". Your read marks stay: chapters are matched by number.</Text>
       {!sources ? (
-        <ActivityIndicator color={p.textSecondary} />
+        <SkeletonRows count={4} art="none" />
       ) : !sources.length ? (
         <Text style={styles.hint}>No sources yet. Add MangaDex languages, your server or an extension in Browse.</Text>
       ) : (

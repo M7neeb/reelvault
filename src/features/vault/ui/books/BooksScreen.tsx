@@ -48,6 +48,7 @@ import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
 import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { BookActions, BookUi } from './bookTypes';
+import EmptyState from '../EmptyState';
 
 const SIDE = 16;
 const failed = (e: unknown) => Alert.alert('That did not work', String(e).replace(/^Error:\s*/, ''));
@@ -481,23 +482,16 @@ export default function BooksScreen({
   );
 
   const empty = !loaded ? null : inDeleted ? (
-    <View style={styles.empty}>
-      <Text style={styles.emptyText}>Nothing in Recently Deleted.</Text>
-    </View>
+    <EmptyState icon="trash" title="Recently Deleted is empty" text="Books you delete wait here for 30 days." tint={p.textSecondary} />
   ) : visible.length && (filter || query.trim()) ? (
-    <View style={styles.empty}>
-      <Text style={styles.emptyText}>No book matches that.</Text>
-    </View>
+    <EmptyState icon="search" title="No book matches that" text="Try fewer words or another filter." tint={p.textSecondary} />
   ) : current || toRead.length ? null : (
-    <View style={styles.empty}>
-      <Text style={styles.emptyTitle}>No books yet</Text>
-      <Text style={styles.emptyText}>
-        Add a book from Files: EPUB, Kindle (AZW3, MOBI), PDF, FB2, Word, RTF, HTML or plain text. Books stay on this phone, so they read without a connection.
-      </Text>
-      <TouchableOpacity style={styles.emptyBtn} onPress={add} disabled={busy}>
-        <Text style={styles.emptyBtnText}>Add a book</Text>
-      </TouchableOpacity>
-    </View>
+    <EmptyState
+      icon="book"
+      title="No books yet"
+      text="Add a book from Files: EPUB, Kindle (AZW3, MOBI), PDF, FB2, Word, RTF, HTML or plain text. Books stay on this phone, so they read without a connection."
+      action={busy ? undefined : { label: 'Add a book', onPress: add }}
+    />
   );
 
   const held = menuFor;

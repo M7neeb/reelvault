@@ -25,6 +25,8 @@ import { googleUrl, parseTitleLines, pickMatch } from '../bulkAdd';
 import { SIMKL_TYPES, STATUS_LABELS, statusesFor, type SimklItem, type SimklStatus } from '../logic';
 import Poster from './Poster';
 import type { CatalogTitle, ListEntry, SimklActions, SimklList, SimklType } from './types';
+import { SkeletonRows } from '@/features/vault/ui/Skeleton';
+import EmptyState from '@/features/vault/ui/EmptyState';
 
 export const LIST_ICONS = ['🍿', '❤️', '⭐', '🔥', '😂', '😱', '🎬', '📺', '🌙', '🧠', '👀', '🎉', '🧸', '🏆'];
 
@@ -682,17 +684,11 @@ export function ListModal({
           }
           ListEmptyComponent={
             entries === null ? (
-              <ActivityIndicator color={p.textSecondary} style={{ marginTop: 30 }} />
+              <SkeletonRows count={5} art="poster" style={{ marginTop: 16, marginHorizontal: 16 }} />
             ) : entries.length ? (
-              <Text style={styles.empty}>{searched === 'todo' ? 'You have searched every one of these.' : 'Nothing here.'}</Text>
+              <EmptyState icon={searched === 'todo' ? 'checkCircle' : 'search'} title={searched === 'todo' ? 'All looked up' : 'Nothing here'} text={searched === 'todo' ? 'You have searched every one of these.' : undefined} tint={p.textSecondary} />
             ) : (
-              <View style={{ alignItems: 'center', gap: 14 }}>
-                <Text style={styles.empty}>Nothing here yet. Tap Add many to tick titles from your library, or open any title and tap My lists.</Text>
-                <TouchableOpacity style={styles.addMany} onPress={() => setAdding(true)}>
-                  <Icon name="plus" size={16} color="#fff" weight="bold" />
-                  <Text style={styles.addManyText}>Add many</Text>
-                </TouchableOpacity>
-              </View>
+              <EmptyState icon="lists" title="This list is empty" text="Tick titles from your library with Add many, or open any title and tap My lists." action={{ label: 'Add many', onPress: () => setAdding(true) }} />
             )
           }
           renderItem={({ item }) => (

@@ -24,6 +24,8 @@ type NativeCompress = {
   supportedQualities(input: string): Promise<CompressQuality[]>;
   compress(input: string, output: string, quality: CompressQuality, jobId: string): Promise<{ size: number }>;
   edit(input: string, output: string, options: EditOptions, jobId: string): Promise<{ size: number }>;
+  /** Several videos one after another as one new file. Missing before app 1.13. */
+  join?(inputs: string[], output: string, jobId: string): Promise<{ size: number }>;
   cancel(jobId: string): void;
   /** Missing in app builds before 18. */
   features?: () => string[];

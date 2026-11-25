@@ -5,6 +5,7 @@
 
 import * as Notifications from 'expo-notifications';
 
+import { digestOn, digestPart } from './digest';
 import { getSetting, setSetting } from './library';
 
 const KEY = 'vault.wrappedReminder';
@@ -86,7 +87,13 @@ export async function yearWrappedReminderOn(): Promise<boolean> {
  */
 export async function scheduleOnThisDay(plan: { at: number; title: string; body: string }[]): Promise<void> {
   await cancelTagged(OTD_TAG);
-  if (!(await onThisDayReminderOn())) return;
+  const on = await onThisDayReminderOn();
+  if (await digestOn()) {
+    // "On this day · 3 years ago" + "2 videos: ..." becomes "3 years ago: 2 videos: ..." in the daily note.
+    await digestPart('memories', on ? plan.map((n) => ({ at: n.at, title: n.title, body: `${n.title.replace(/^On this day · /, '')}: ${n.body}`, kind: 'memory' as const })) : []);
+    return;
+  }
+  if (!on) return;
   for (const [i, n] of plan.entries()) {
     await Notifications.scheduleNotificationAsync({
       identifier: `${OTD_TAG}-${i}`,

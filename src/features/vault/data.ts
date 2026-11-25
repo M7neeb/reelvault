@@ -85,10 +85,13 @@ import {
   setFakePasscode,
   setPasscode,
 } from '@/features/vault/security';
+import { reportProblem } from '@/features/vault/report';
+import { digestSettings, onDigestChange, setDigest } from '@/features/vault/digest';
+import { WHATS_NEW_KEY } from '@/features/vault/whatsNew';
 import { canSaveSound, duplicateVideo, extractFrame, saveSoundToAudio, shareFile, videoChapters } from '@/features/vault/share';
 import { resetCover, setCoverFromFrame, setCoverFromPhoto } from '@/features/vault/covers';
 import { AUTO_COVER_KEY, canAutoCover, useAutoCovers } from '@/features/vault/autoCover';
-import { canChooseStrength, cancelMakeSmaller, canMakeSmaller, editVideo, makeSmaller } from '@/features/vault/compress';
+import { canChooseStrength, canJoin, cancelMakeSmaller, canMakeSmaller, editVideo, joinVideos, makeSmaller } from '@/features/vault/compress';
 import { planForQuality } from '@/features/vault/edit';
 import { fmtMs, parseRatingLabels } from '@/features/vault/stats';
 import {
@@ -386,6 +389,9 @@ const wifiDuplicates = async (info: DuplicateInfo): Promise<DupChoice> => (info.
 
 export function useVaultData(): VaultData {
   const [videos, setVideos] = useState<Video[]>([]);
+  // For actions that are built once (the report), not on every change.
+  const videoCount = useRef(0);
+  videoCount.current = videos.length;
   // Covers picked by the app (on unless turned off in Settings).
   const [autoCover, setAutoCover] = useState(false);
   useEffect(() => {
@@ -531,6 +537,12 @@ export function useVaultData(): VaultData {
     scheduleMonthWrapped().catch((e) => console.log(`[MONTH] ${String(e)}`));
     planWeekly().catch((e) => console.log(`[WEEK] ${String(e)}`));
   }, [videos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Switching the daily note on or off moves On this day in or out of it.
+  useEffect(
+    () => onDigestChange(() => scheduleOnThisDay(onThisDayPlan(videosRef.current.filter((v) => !v.isPrivate).map(asRVideo), Date.now()))),
+    []
+  );
 
   // The Sunday summary's words are worked out again whenever you leave the app, so they include what you just watched.
   useEffect(() => {
@@ -1040,6 +1052,13 @@ export function useVaultData(): VaultData {
         return result;
       },
       onCancelMakeSmaller: cancelMakeSmaller,
+      canJoin,
+      onJoin: async (ids, onProgress) => {
+        const list = ids.map((id) => byId(id)).filter((v): v is Video => !!v);
+        const result = await joinVideos(list, onProgress);
+        if (result.kind === 'done') await refresh();
+        return result;
+      },
       listAutoBackups: async () => listAutoBackups(),
       backupNow: () => autoBackup(true),
       restoreAutoBackup: async (uri) => {
@@ -1070,6 +1089,16 @@ export function useVaultData(): VaultData {
         return all.length;
       },
       getImportQuality: async () => parseQuality(await getSetting(IMPORT_QUALITY_KEY)),
+      loadRank: (kind) => getSetting(`rank.${kind}`),
+      reportProblem: (note) => {
+        const free = readFreeGb();
+        return reportProblem(note, { Videos: String(videoCount.current), 'Free space': free === null ? '?' : `${free} GB` });
+      },
+      getDigest: digestSettings,
+      setDigest,
+      getWhatsNewSeen: () => getSetting(WHATS_NEW_KEY),
+      setWhatsNewSeen: (id) => setSetting(WHATS_NEW_KEY, id),
+      saveRank: (kind, json) => setSetting(`rank.${kind}`, json),
       getAutoCover: async () => (await getSetting(AUTO_COVER_KEY)) !== 'off',
       setAutoCover: async (on) => {
         await setSetting(AUTO_COVER_KEY, on ? 'on' : 'off');

@@ -394,8 +394,11 @@ export function BulkEditSheet({
   onDate,
   onPrivate,
   onMakeSmaller,
+  onJoin,
   onClose,
 }: {
+  /** Join the picked videos into one (this app build can, and two or more are picked). */
+  onJoin?: () => void;
   count: number;
   tags: UiTag[];
   /** Albums the selection can go into (public ones, or private ones inside Private). */
@@ -600,8 +603,11 @@ export function BulkEditSheet({
       </Section>
 
       <Section label="Storage">
-        <Chip label="Make Smaller…" onPress={onMakeSmaller} />
-        <Text style={styles.hint}>Re-encode the videos so they take less space.</Text>
+        <Wrap>
+          <Chip label="Make Smaller…" onPress={onMakeSmaller} />
+          {onJoin && count >= 2 && <Chip label="Join into one video…" onPress={onJoin} />}
+        </Wrap>
+        <Text style={styles.hint}>{onJoin && count >= 2 ? 'Re-encode them to take less space, or join them one after another into a new video.' : 'Re-encode the videos so they take less space.'}</Text>
       </Section>
 
       <Section label="Private">

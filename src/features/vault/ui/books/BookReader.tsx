@@ -9,7 +9,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, type ViewToken } from 'react-native';
+import { ActivityIndicator, Animated as RNAnimated, AppState, FlatList, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, type ViewToken } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +29,10 @@ import {
   fmtProgress,
   fracOfBlock,
   lineHeightFor,
+  pageTurn,
+  blockSpeech,
+  spokenRuns,
+  SPEECH_SPEEDS,
   minutesLeft,
   progressAt,
   READER_SIZES,
@@ -43,10 +47,12 @@ import { chapterIndexAt, chaptersOf } from '../../audio/audioLogic';
 import { AudioPlayerScreen } from '../audio/AudioPlayer';
 import type { AudioData, AudioUiItem } from '../audio/audioTypes';
 import { useAudioPlaybackOptional } from '../audio/playback';
-import { ListenBar } from './BookAudio';
+import { ListenBar, SpeakBar } from './BookAudio';
+import { OptionsSheet } from '../prompts';
 import { pushJump } from '../../jump';
 import { afterModals, GatedModal as Modal, useWindowDimensions } from '../screen';
-import type { BookActions, BookUi, OpenedBook } from './bookTypes';
+import { SkeletonText } from '../Skeleton';
+import type { BookActions, BookUi, OpenedBook, SpeechUpdate } from './bookTypes';
 
 export type Ink = { bg: string; text: string; soft: string; faint: string; rule: string; accent: string; bar: string; mark: string; dark: boolean };
 
@@ -63,9 +69,9 @@ const MAX_MEASURE = 620;
 
 type Shown = { index: number; blocks: Block[]; ids: Record<string, number> };
 
-type BlockProps = { block: Block; ink: Ink; prefs: ReaderPrefs; uriOf: (p: string) => string; first: boolean; highlights?: string[]; marked?: boolean; onHold?: () => void };
+type BlockProps = { block: Block; ink: Ink; prefs: ReaderPrefs; uriOf: (p: string) => string; first: boolean; highlights?: string[]; marked?: boolean; onHold?: () => void; spoken?: [number, number] };
 
-const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first, highlights, marked, onHold }: BlockProps) {
+const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first, highlights, marked, onHold, spoken }: BlockProps) {
   const [ratio, setRatio] = useState(1.5);
   const family = prefs.font === 'serif' ? SERIF : undefined;
   if (b.k === 'hr') return <View style={[styles.hr, { backgroundColor: ink.faint }]} />;
@@ -89,7 +95,9 @@ const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first, 
   const scale = b.k === 'h1' ? 1.45 : b.k === 'h2' ? 1.28 : head ? 1.1 : b.k === 'cap' ? 0.84 : 1;
   const fs = Math.round(size * scale);
   const lh = head ? Math.round(fs * 1.25) : lineHeightFor(fs, prefs.spacing);
-  const runs = highlights?.length ? highlightRuns(b.runs, highlights) : b.runs;
+  const lit = highlights?.length ? highlightRuns(b.runs, highlights) : b.runs;
+  // Read aloud: the word being said.
+  const runs = spoken ? spokenRuns(lit, spoken[0], spoken[1]) : lit;
   const text = (
     <Text
       onLongPress={onHold}
@@ -110,12 +118,21 @@ const BlockView = memo(function BlockView({ block: b, ink, prefs, uriOf, first, 
       ]}>
       {b.k === 'li' ? '•  ' : ''}
       {runs.map((r, n) => (
-        <Text key={n} style={[r.b && styles.bold, r.i && styles.italic, 'hl' in r && r.hl ? { backgroundColor: ink.mark } : null]}>
+        <Text key={n} style={[r.b && styles.bold, r.i && styles.italic, 'hl' in r && r.hl ? { backgroundColor: ink.mark } : null, 'sp' in r && r.sp ? { color: ink.accent, textDecorationLine: 'underline' } : null]}>
           {r.t}
         </Text>
       ))}
     </Text>
   );
+  if (spoken) {
+    // The paragraph being read: a thin line beside it.
+    return (
+      <View>
+        <View style={[styles.reading, { backgroundColor: ink.accent }]} />
+        {text}
+      </View>
+    );
+  }
   if (!marked) return text;
   // A bookmarked paragraph: a ribbon in the margin beside it.
   return (
@@ -200,6 +217,12 @@ export default function BookReader({
   // around the list took the finger before the list could scroll on the iPhone.
   const touch = useRef<{ x: number; y: number; at: number; still: boolean } | null>(null);
   const scrolledAt = useRef(0);
+  // Page turns: where the text is scrolled to and how big the page and the chapter are.
+  const offset = useRef(0);
+  const viewH = useRef(0);
+  const contentH = useRef(0);
+  const veil = useRef(new RNAnimated.Value(0)).current;
+  const turning = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -463,7 +486,38 @@ export default function BookReader({
 
   const close = () => {
     save();
+    speech?.stop();
     onClose();
+  };
+
+  /** One page on or back, in the Slide or Fade style; at the ends, the next or previous chapter. */
+  const turnPage = (dir: 1 | -1) => {
+    if (turning.current || !shown) return;
+    const to = pageTurn(offset.current, viewH.current, contentH.current, lineHeightFor(prefs.size, prefs.spacing), dir);
+    if (to === 'next') {
+      if (chapter < (opened?.chapters.length ?? 0) - 1) goChapter(chapter + 1);
+      return;
+    }
+    if (to === 'previous') {
+      // Back from the top of a chapter: the end of the one before (its last paragraph).
+      const before = cache.current.get(chapter - 1)?.blocks.length;
+      if (chapter > 0) goChapter(chapter - 1, { block: before ? before - 1 : 0 });
+      return;
+    }
+    tick();
+    if (prefs.turn === 'fade') {
+      turning.current = true;
+      RNAnimated.timing(veil, { toValue: 1, duration: 110, useNativeDriver: true }).start(() => {
+        list.current?.scrollToOffset({ offset: to, animated: false });
+        offset.current = to;
+        RNAnimated.timing(veil, { toValue: 0, duration: 170, useNativeDriver: true }).start(() => {
+          turning.current = false;
+        });
+      });
+    } else {
+      list.current?.scrollToOffset({ offset: to, animated: true });
+      offset.current = to;
+    }
   };
 
   const tocTitle = useMemo(() => (opened ? chapterLabel(opened.toc, chapter, book.title, opened.chapters[chapter]?.title ?? '') : ''), [opened, chapter, book.title]);
@@ -496,6 +550,73 @@ export default function BookReader({
     const at = listenAlongFrom(audiobook, audioChapters, { titles, chapter: shown?.index ?? chapter, chapterFrac: fracOfBlock(topBlock, blocks.length), frac: progress });
     pb.open(audiobook, at ? { track: at.track, ms: at.ms, autoplay: true } : { autoplay: true });
   };
+  // Read aloud: the phone's voice reads from the paragraph on screen, chapter after chapter.
+  const speech = actions.speech;
+  const [speaking, setSpeaking] = useState<{ index: number; at: number; len: number; paused: boolean } | null>(null);
+  const [voicePick, setVoicePick] = useState(false);
+  const speakNext = useRef(false);
+  const draggedAt = useRef(0);
+  const speakFrom = (from: number) => {
+    if (!speech || !shown) return;
+    tick();
+    if (pb?.playing) pb.toggle();
+    setChrome(false);
+    setSpeaking({ index: from, at: -1, len: 0, paused: false });
+    speech.speak(shown.blocks.map(blockSpeech), from, prefs.speech, prefs.voice, displayTitle(book), book.author ?? '');
+  };
+  const stopSpeaking = () => {
+    speakNext.current = false;
+    speech?.stop();
+    setSpeaking(null);
+  };
+  const onSpeech = useRef<(e: SpeechUpdate) => void>(() => undefined);
+  onSpeech.current = (e) => {
+    if (e.kind === 'paragraph') {
+      setSpeaking({ index: e.index, at: -1, len: 0, paused: false });
+      moved(e.index);
+      // Keep the paragraph in view, unless you are scrolling about yourself.
+      if (Date.now() - draggedAt.current > 4000 && shown && e.index < shown.blocks.length) {
+        try {
+          list.current?.scrollToIndex({ index: e.index, viewPosition: 0.2, animated: true });
+        } catch {
+          // not laid out yet; the next paragraph tries again
+        }
+      }
+    } else if (e.kind === 'word') setSpeaking((x) => (x ? { ...x, index: e.index, at: e.at, len: e.len } : x));
+    else if (e.kind === 'paused' || e.kind === 'resumed') setSpeaking((x) => (x ? { ...x, paused: e.kind === 'paused' } : x));
+    else if (e.kind === 'stopped') setSpeaking(null);
+    else if (e.kind === 'end') {
+      const here = shown?.index ?? chapter;
+      if (opened && here < opened.chapters.length - 1) {
+        speakNext.current = true;
+        goChapter(here + 1);
+      } else setSpeaking(null);
+    }
+  };
+  useEffect(() => (speech ? speech.listen((e) => onSpeech.current(e)) : undefined), [speech]);
+  // The next chapter is in: carry on reading it from the top.
+  useEffect(() => {
+    if (!speakNext.current || !shown) return;
+    speakNext.current = false;
+    speakFrom(0);
+  }, [shown?.index]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The audiobook starting takes over from the phone's voice; closing the book stops it.
+  useEffect(() => {
+    if (pb?.playing && speaking) stopSpeaking();
+  }, [pb?.playing]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => speech?.stop(), [speech]);
+  const voices = useMemo(() => {
+    if (!voicePick || !speech) return [];
+    const lang = (Intl.DateTimeFormat().resolvedOptions().locale || 'en').slice(0, 2);
+    const rank = { premium: 0, enhanced: 1, default: 2 } as const;
+    return speech
+      .voices()
+      .filter((v) => v.language.startsWith(lang) || v.id === prefs.voice)
+      .sort((a, b) => rank[a.quality] - rank[b.quality] || a.name.localeCompare(b.name))
+      .slice(0, 24);
+  }, [voicePick, speech, prefs.voice]);
+  const voiceName = (id: string) => (id ? (speech?.voices().find((v) => v.id === id)?.name ?? 'Chosen voice') : "The phone's best voice");
+
   const isLast = !!opened && chapter >= opened.chapters.length - 1;
   const nextTitle = opened && !isLast ? chapterLabel(opened.toc, chapter + 1, book.title, opened.chapters[chapter + 1]?.title ?? '') : null;
 
@@ -539,8 +660,8 @@ export default function BookReader({
             </TouchableOpacity>
           </View>
         ) : !shown ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={ink.soft} />
+          <View style={{ paddingHorizontal: side, paddingTop: topBand + 28 }}>
+            <SkeletonText lines={14} color={ink.rule} lineHeight={lineHeightFor(prefs.size, prefs.spacing)} />
           </View>
         ) : (
           <View style={[styles.fill, { marginTop: topBand, marginBottom: bottomBand }]}>
@@ -559,9 +680,10 @@ export default function BookReader({
                   highlights={hlBy.get(index)}
                   marked={bookmarked.has(index)}
                   onHold={'runs' in item ? () => hold(index, item.runs.map((r) => r.t).join('')) : undefined}
+                  spoken={speaking && index === speaking.index ? [speaking.at, speaking.len] : undefined}
                 />
               )}
-              extraData={marksKey}
+              extraData={`${marksKey}|${speaking ? `${speaking.index}:${speaking.at}` : ''}`}
               // prefs are read by every paragraph
               style={{ opacity: placed ? 1 : 0 }}
               contentContainerStyle={{ paddingHorizontal: side, paddingTop: 18, paddingBottom: listening ? 110 : 40 }}
@@ -582,12 +704,20 @@ export default function BookReader({
                 }, 80);
               }}
               onScrollBeginDrag={() => {
+                draggedAt.current = Date.now();
                 if (chrome) setChrome(false);
                 if (panel) setPanel(null);
               }}
               indicatorStyle={ink.dark ? 'white' : 'black'}
-              onScroll={() => {
+              onScroll={(e) => {
                 scrolledAt.current = Date.now();
+                offset.current = e.nativeEvent.contentOffset.y;
+              }}
+              onLayout={(e) => {
+                viewH.current = e.nativeEvent.layout.height;
+              }}
+              onContentSizeChange={(_, h) => {
+                contentH.current = h;
               }}
               scrollEventThrottle={100}
               onTouchStart={(e) => {
@@ -601,9 +731,16 @@ export default function BookReader({
                 const { pageX, pageY } = e.nativeEvent;
                 if (Math.abs(pageX - t.x) > 8 || Math.abs(pageY - t.y) > 8 || Date.now() - t.at > 350) return;
                 if (panel) setPanel(null);
-                else setChrome((c) => !c);
+                else if (prefs.turn !== 'scroll' && pageX > width * 0.7) {
+                  if (chrome) setChrome(false);
+                  turnPage(1);
+                } else if (prefs.turn !== 'scroll' && pageX < width * 0.3) {
+                  if (chrome) setChrome(false);
+                  turnPage(-1);
+                } else setChrome((c) => !c);
               }}
             />
+            <RNAnimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: ink.bg, opacity: veil }]} />
           </View>
         )}
 
@@ -639,6 +776,15 @@ export default function BookReader({
                 </Text>
               )}
             </View>
+            {!audiobook && speech && (
+              <TouchableOpacity
+                onPress={() => (speaking ? stopSpeaking() : speakFrom(topBlock))}
+                style={styles.topBtn}
+                accessibilityLabel={speaking ? 'Stop reading aloud' : 'Read aloud from here'}
+                hitSlop={8}>
+                <Icon name="sound" size={19} color={speaking ? ink.accent : ink.text} />
+              </TouchableOpacity>
+            )}
             {audiobook && pb && (
               <TouchableOpacity onPress={listen} style={styles.topBtn} accessibilityLabel={listening && pb.playing ? 'Pause the audiobook' : 'Listen from here'} hitSlop={8}>
                 <Icon name="headphones" size={19} color={listening ? ink.accent : ink.text} />
@@ -679,7 +825,24 @@ export default function BookReader({
           </Animated.View>
         )}
 
-        {listening && pb && !panel && (
+        {speaking && speech && !panel && (
+          <SpeakBar
+            ink={ink}
+            bottom={chrome && shown ? insets.bottom + 64 : bottomBand + 8}
+            paused={speaking.paused}
+            speed={prefs.speech}
+            sub={tocTitle || displayTitle(book)}
+            onToggle={() => (speaking.paused ? speech.resume() : speech.pause())}
+            onSkip={(by) => speech.skip(by)}
+            onSpeed={() => {
+              const next = SPEECH_SPEEDS[(SPEECH_SPEEDS.indexOf(prefs.speech) + 1) % SPEECH_SPEEDS.length];
+              onPrefs({ ...prefs, speech: next });
+              speech.setSpeed(next);
+            }}
+            onStop={stopSpeaking}
+          />
+        )}
+        {listening && pb && !panel && !speaking && (
           <ListenBar pb={pb} ink={ink} bottom={chrome && shown ? insets.bottom + 64 : bottomBand + 8} onOpen={() => setAudioFull(true)} onRate={pb.setRate} />
         )}
         {audioFull && listening && audio && (
@@ -921,7 +1084,51 @@ export default function BookReader({
                 </TouchableOpacity>
               ))}
             </View>
+            <View style={styles.lookRow}>
+              {(
+                [
+                  ['scroll', 'Scroll'],
+                  ['slide', 'Slide'],
+                  ['fade', 'Fade'],
+                ] as const
+              ).map(([k, label]) => (
+                <TouchableOpacity
+                  key={k}
+                  onPress={() => onPrefs({ ...prefs, turn: k })}
+                  style={[styles.choice, { borderColor: prefs.turn === k ? ink.accent : ink.rule, borderWidth: prefs.turn === k ? 2 : 1 }]}
+                  accessibilityLabel={k === 'scroll' ? 'Scroll through the text' : `${label}: tap the right or left edge to turn the page`}
+                  accessibilityState={{ selected: prefs.turn === k }}>
+                  <Text style={{ color: ink.text, fontSize: 14 }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {prefs.turn !== 'scroll' && <Text style={[styles.turnHint, { color: ink.soft }]}>Tap the right edge for the next page, the left edge to go back.</Text>}
+            {speech && !audiobook && (
+              <TouchableOpacity onPress={() => setVoicePick(true)} style={[styles.voiceRow, { borderColor: ink.rule }]} accessibilityRole="button">
+                <Icon name="sound" size={16} color={ink.text} />
+                <Text style={[styles.voiceText, { color: ink.text }]} numberOfLines={1}>
+                  Read aloud voice
+                </Text>
+                <Text style={[styles.voiceValue, { color: ink.soft }]} numberOfLines={1}>
+                  {voiceName(prefs.voice)}
+                </Text>
+              </TouchableOpacity>
+            )}
           </Animated.View>
+        )}
+        {voicePick && (
+          <OptionsSheet
+            title="Read aloud voice"
+            options={[
+              { label: "The phone's best voice", hint: prefs.voice === '' ? '✓ Picked for its language' : 'Picked for its language', onPress: () => onPrefs({ ...prefs, voice: '' }) },
+              ...voices.map((v) => ({
+                label: v.name,
+                hint: `${prefs.voice === v.id ? '✓ ' : ''}${v.quality === 'premium' ? 'Premium' : v.quality === 'enhanced' ? 'Enhanced' : 'Standard'} · ${v.language}`,
+                onPress: () => onPrefs({ ...prefs, voice: v.id }),
+              })),
+            ]}
+            onClose={() => setVoicePick(false)}
+          />
         )}
       </View>
     </Modal>
@@ -940,6 +1147,10 @@ const styles = StyleSheet.create({
   img: { width: '100%', maxHeight: 460 },
   footer: { marginTop: 36, paddingTop: 28, borderTopWidth: StyleSheet.hairlineWidth },
   nextBtn: { borderWidth: 1, borderRadius: 12, paddingVertical: 16, paddingHorizontal: 18, gap: 4 },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, height: 46, marginTop: 4 },
+  voiceText: { fontSize: 15, fontWeight: '600' },
+  voiceValue: { flex: 1, fontSize: 14, textAlign: 'right' },
+  turnHint: { fontSize: 13, textAlign: 'center', marginTop: 2 },
   nextLabel: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
   nextTitle: { fontSize: 19, lineHeight: 25 },
   endWrap: { alignItems: 'center', gap: 18, paddingVertical: 12 },
@@ -960,6 +1171,7 @@ const styles = StyleSheet.create({
   bottomText: { flex: 1, textAlign: 'center', fontSize: 13, fontVariant: ['tabular-nums'] },
   panel: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
   panelTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
+  reading: { position: 'absolute', left: -14, top: 4, bottom: 14, width: 2.5, borderRadius: 2 },
   ribbon: { position: 'absolute', left: -14, top: 4, bottom: 8, width: 3, borderRadius: 2 },
   tabs: { flexDirection: 'row', gap: 22, paddingHorizontal: 20, paddingTop: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   tab: { paddingBottom: 10, borderBottomWidth: 2, borderBottomColor: 'transparent' },

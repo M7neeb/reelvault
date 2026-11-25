@@ -21,6 +21,12 @@ import type { VideoLink } from '@/features/simkl/ui/types';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import VideoRank from './rank/VideoRank';
+import EmptyState from './EmptyState';
+import JoinSheet from './joinClips';
+import WhatsNewSheet from './WhatsNewSheet';
+import { RELEASES, toShow, type Release } from '../whatsNew';
+import type { DigestSettings } from '../digestPlan';
 import { CalendarSheet, OverviewSheet, TimelineSheet } from './browse';
 import { useTabBarSpace } from './chrome';
 import Fade from './Fade';
@@ -274,8 +280,13 @@ function VaultScreenBody({
   );
   const [importQuality, setImportQualityState] = useState<CompressQuality | null>(null);
   const [autoCover, setAutoCoverState] = useState<boolean | null>(null);
+  const [digest, setDigestState] = useState<DigestSettings | null>(null);
+  const [whatsNew, setWhatsNew] = useState<Release[] | null>(dev?.whatsNewOpen ? RELEASES.slice(0, 1) : null);
+  const [reporting, setReporting] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(dev?.calendarOpen ?? false);
   const [timelineOpen, setTimelineOpen] = useState(dev?.timelineOpen ?? false);
+  const [rankOpen, setRankOpen] = useState(!!dev?.rankStep);
+  const [joinFor, setJoinFor] = useState<VaultItem[] | null>(dev?.joinOpen ? items.filter((v) => !v.isPrivate && !v.deletedAt).slice(0, 3) : null);
   const [overviewOpen, setOverviewOpen] = useState(dev?.overviewOpen ?? false);
   const [mapOpen, setMapOpen] = useState(dev?.mapOpen ?? false);
   const [privateUnlocked, setPrivateUnlocked] = useState(dev?.privateUnlocked ?? false);
@@ -749,7 +760,32 @@ function VaultScreenBody({
   useEffect(() => {
     if (settingsOpen) actions.getImportQuality().then(setImportQualityState).catch(fail('SETTINGS'));
     if (settingsOpen && actions.canAutoCover()) actions.getAutoCover().then(setAutoCoverState).catch(fail('SETTINGS'));
+    if (settingsOpen) actions.getDigest().then(setDigestState).catch(fail('SETTINGS'));
   }, [settingsOpen, actions]);
+
+  // After an update: what changed, once. Only while nothing else is open, so it never covers a video you just started.
+  const quiet = useRef(false);
+  quiet.current = !playing && !settingsOpen && !sidebarOpen && !slideshow && !insights && !rankOpen;
+  useEffect(() => {
+    if (dev) return;
+    let t: ReturnType<typeof setTimeout>;
+    const check = () => {
+      if (!quiet.current) {
+        t = setTimeout(check, 5000);
+        return;
+      }
+      actions
+        .getWhatsNewSeen()
+        .then((seen) => {
+          const list = toShow(RELEASES, seen);
+          if (list.length && quiet.current) setWhatsNew(list);
+          else if (list.length) t = setTimeout(check, 5000);
+        })
+        .catch(fail('WHATSNEW'));
+    };
+    t = setTimeout(check, 2500);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Face ID / passcode, then `then`. With a ReelVault passcode the passcode screen decides. */
   async function requestUnlock(then: () => void) {
@@ -1438,23 +1474,24 @@ function VaultScreenBody({
     </View>
   );
 
-  const empty = (
-    <Text style={styles.empty}>
-      {filter.kind === 'deleted'
-        ? 'Recently Deleted is empty.'
-        : filter.kind === 'duplicates' || filter.kind === 'similar'
-          ? ''
-          : filter.kind === 'private'
-            ? 'No private videos yet. Select videos, tap Edit, then Move to Private.'
-            : filter.kind === 'album'
-              ? 'This album is empty. Add videos from the album bar in the viewer, or select videos and tap Edit.'
-              : filter.kind === 'tray'
-                ? 'The Tray is empty.'
-                : results || filter.kind === 'rule'
-                  ? 'No matches.'
-                  : 'Nothing here yet.'}
-    </Text>
-  );
+  const empty =
+    filter.kind === 'duplicates' || filter.kind === 'similar' ? (
+      <View />
+    ) : filter.kind === 'deleted' ? (
+      <EmptyState icon="trash" title="Recently Deleted is empty" text="Videos you delete wait here for 30 days, then go for good." tint={p.textSecondary} />
+    ) : filter.kind === 'private' ? (
+      <EmptyState icon="lock" title="No private videos yet" text="Select videos, tap Edit, then Move to Private. They disappear from everywhere else." />
+    ) : filter.kind === 'album' ? (
+      <EmptyState icon="folder" title="This album is empty" text="Add videos from the album bar in the player, or select videos and tap Edit." />
+    ) : filter.kind === 'tray' ? (
+      <EmptyState icon="tray" title="The Tray is empty" text="Put videos here to deal with later: select them and tap Edit, then Tray." />
+    ) : results || filter.kind === 'rule' ? (
+      <EmptyState icon="search" title="No matches" text="Nothing fits this search or filter. Try fewer words or another filter." tint={p.textSecondary} />
+    ) : publicItems.length === 0 ? (
+      <EmptyState icon="videos" title="Your videos go here" text="Bring them in from Photos, Files or a whole folder. They stay on this phone, nowhere else." action={{ label: 'Import videos', onPress: startImport }} />
+    ) : (
+      <EmptyState icon="videos" title="Nothing here yet" text="Nothing in this view so far." tint={p.textSecondary} />
+    );
 
   return (
     <LiveProvider value={live.value}>
@@ -1679,6 +1716,10 @@ function VaultScreenBody({
             setSidebarOpen(false);
             setMapOpen(true);
           }}
+          onRank={() => {
+            setSidebarOpen(false);
+            setRankOpen(true);
+          }}
           onSettings={() => {
             setSidebarOpen(false);
             refreshSecurity();
@@ -1736,6 +1777,14 @@ function VaultScreenBody({
             setBulkOpen(false);
             setSmallerFor(selectedItems);
           }}
+          onJoin={
+            actions.canJoin()
+              ? () => {
+                  setBulkOpen(false);
+                  setJoinFor(selectedItems);
+                }
+              : undefined
+          }
           onClose={() => setBulkOpen(false)}
         />
       )}
@@ -1747,6 +1796,20 @@ function VaultScreenBody({
           onEdit={actions.onEditVideo}
           onCancel={actions.onCancelMakeSmaller}
           onClose={() => setTrimFor(null)}
+        />
+      )}
+
+      {joinFor && (
+        <JoinSheet
+          items={joinFor}
+          onJoin={actions.onJoin}
+          onCancel={actions.onCancelMakeSmaller}
+          onOpen={(id) => {
+            const v = items.find((x) => x.id === id);
+            exitSelect();
+            if (v) setPlaying(v);
+          }}
+          onClose={() => setJoinFor(null)}
         />
       )}
 
@@ -1798,6 +1861,20 @@ function VaultScreenBody({
         />
       )}
 
+      {rankOpen && (
+        <VideoRank
+          items={publicItems}
+          albums={publicAlbums}
+          actions={actions}
+          enableVideo={enableVideo}
+          dev={dev?.rankStep ? { step: dev.rankStep } : undefined}
+          onOpen={(id) => {
+            const v = items.find((x) => x.id === id);
+            if (v) setPlaying(v);
+          }}
+          onClose={() => setRankOpen(false)}
+        />
+      )}
       {timelineOpen && <TimelineSheet items={publicItems} onJump={jumpToPeriod} onClose={() => setTimelineOpen(false)} />}
 
       {mapOpen && (
@@ -1867,7 +1944,43 @@ function VaultScreenBody({
             setAutoCoverState(on);
             actions.setAutoCover(on).catch(fail('SETTINGS'));
           }}
+          digest={digest}
+          onDigest={(next) => {
+            const before = digest;
+            setDigestState(next);
+            actions
+              .setDigest(next)
+              .then((ok) => {
+                if (!ok) {
+                  setDigestState(before);
+                  notify('Notifications are off for ReelVault', 'Turn them on in the iPhone Settings app, under ReelVault, Notifications.');
+                }
+              })
+              .catch(fail('SETTINGS'));
+          }}
+          onWhatsNew={() => setWhatsNew(RELEASES)}
+          onReport={() => setReporting(true)}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {whatsNew && (
+        <WhatsNewSheet
+          releases={whatsNew}
+          onClose={() => {
+            if (RELEASES[0]) void actions.setWhatsNewSeen(RELEASES[0].id);
+            setWhatsNew(null);
+          }}
+        />
+      )}
+      {reporting && (
+        <PromptSheet
+          title="What went wrong?"
+          message="A few words on what you did and what happened. The share sheet then opens with a small text file to send."
+          placeholder="Covers turned black after I…"
+          confirmLabel="Make the report"
+          onSubmit={(note) => actions.reportProblem(note).catch(fail('REPORT'))}
+          onClose={() => setReporting(false)}
         />
       )}
 
@@ -2026,6 +2139,7 @@ function VaultScreenBody({
           link={links.get(playing.id) ?? null}
           onLinkChanged={reloadLinks}
           resumeAt={resume.get(playing.id) ?? null}
+          resumeSavedAt={resumeSavedAt(playing.id)}
           startAt={startAt}
           prefs={prefs}
           onPrefs={(np) => actions.setPrefs(np).catch(fail('PREFS'))}

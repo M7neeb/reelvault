@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { audioStats, displayTitle, fmtLength, fmtRating, type AudioPlay } from '../../audio/audioLogic';
@@ -23,6 +23,7 @@ import { AudioWrapped } from './AudioStory';
 import { listeningYears } from '../../audio/audioYears';
 import { PosterRow, WrappedPoster } from '../wrappedPoster';
 import type { AudioActions, AudioUiItem } from './audioTypes';
+import { SkeletonDashboard } from '../Skeleton';
 
 
 export default function AudioDashboard({ items, actions, onOpen, onClose }: { items: AudioUiItem[]; actions: AudioActions; onOpen: (item: AudioUiItem) => void; onClose: () => void }) {
@@ -67,7 +68,7 @@ export default function AudioDashboard({ items, actions, onOpen, onClose }: { it
           <Text style={styles.title}>Listening</Text>
         </View>
         {!st || !plays ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={p.textSecondary} />
+          <SkeletonDashboard style={{ marginTop: 20, marginHorizontal: 16 }} />
         ) : (
           <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 30 }]}>
             <Card index={0} title="This week" sub={st.todayMs ? `${fmtLength(st.todayMs)} today` : 'Nothing yet today'}>

@@ -130,3 +130,21 @@ test('free crop: drag corners and edges, move it, stays inside and not too small
   assert.equal(freeCropOrNull(full), null);
   assert.deepEqual(freeCropOrNull(d), d);
 });
+
+test('picking a video up again rewinds more the longer you were away', async () => {
+  const { resumeFrom, resumeRewindMs } = await import('../src/features/vault/stats.ts');
+  const min = 60_000;
+  assert.equal(resumeRewindMs(30_000), 0);
+  assert.equal(resumeRewindMs(5 * min), 5_000);
+  assert.equal(resumeRewindMs(30 * min), 15_000);
+  assert.equal(resumeRewindMs(5 * 60 * min), 30_000);
+  assert.equal(resumeRewindMs(3 * 24 * 60 * min), 60_000);
+  assert.equal(resumeRewindMs(30 * 24 * 60 * min), 150_000);
+  // Away for 5 minutes: 5 s back, not the old 2.5 minutes.
+  assert.equal(resumeFrom(14 * min, 30 * min, 5 * min), 14 * min - 5_000);
+  // Never below 0, never into the last 30 s.
+  assert.equal(resumeFrom(2_000, 30 * min, 5 * min), 0);
+  assert.equal(resumeFrom(29.9 * min, 30 * min, 1_000), 29.5 * min);
+  // An unknown time away keeps the old 2.5 minutes.
+  assert.equal(resumeFrom(14 * min, 30 * min), 11.5 * min);
+});

@@ -157,6 +157,57 @@ export function ListenBar({ pb, ink, bottom, onOpen, onRate }: { pb: Playback; i
   );
 }
 
+/** Read aloud (the phone's voice): back a paragraph, pause, on a paragraph, speed and stop, over the text. */
+export function SpeakBar({
+  ink,
+  bottom,
+  paused,
+  speed,
+  sub,
+  onToggle,
+  onSkip,
+  onSpeed,
+  onStop,
+}: {
+  ink: Ink;
+  bottom: number;
+  paused: boolean;
+  speed: number;
+  sub: string;
+  onToggle: () => void;
+  onSkip: (by: -1 | 1) => void;
+  onSpeed: () => void;
+  onStop: () => void;
+}) {
+  return (
+    <Animated.View entering={FadeInDown.duration(220)} exiting={FadeOut.duration(150)} style={[bar.wrap, { bottom, backgroundColor: ink.bar, borderColor: ink.rule }]}>
+      <TouchableOpacity hitSlop={8} onPress={() => onSkip(-1)} accessibilityLabel="Back a paragraph" style={bar.btn}>
+        <Icon name="prevVideo" size={18} color={ink.text} />
+      </TouchableOpacity>
+      <TouchableOpacity hitSlop={8} onPress={onToggle} accessibilityLabel={paused ? 'Carry on reading aloud' : 'Pause reading aloud'} style={[bar.play, { backgroundColor: ink.text }]}>
+        <Icon name={paused ? 'play' : 'pause'} size={16} color={ink.bg} weight="bold" />
+      </TouchableOpacity>
+      <TouchableOpacity hitSlop={8} onPress={() => onSkip(1)} accessibilityLabel="On a paragraph" style={bar.btn}>
+        <Icon name="nextVideo" size={18} color={ink.text} />
+      </TouchableOpacity>
+      <View style={bar.mid}>
+        <Text style={[bar.title, { color: ink.text }]} numberOfLines={1}>
+          {paused ? 'Paused' : 'Reading aloud'}
+        </Text>
+        <Text style={[bar.sub, { color: ink.soft }]} numberOfLines={1}>
+          {sub}
+        </Text>
+      </View>
+      <TouchableOpacity hitSlop={8} onPress={onSpeed} accessibilityLabel={`Speed ${speed} times. Tap for faster.`} style={[bar.speed, { borderColor: ink.rule }]}>
+        <Text style={[bar.speedText, { color: ink.text }]}>{`${speed}×`}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity hitSlop={8} onPress={onStop} accessibilityLabel="Stop reading aloud" style={bar.btn}>
+        <Icon name="close" size={14} color={ink.soft} weight="bold" />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 const bar = StyleSheet.create({
   wrap: {
     position: 'absolute',

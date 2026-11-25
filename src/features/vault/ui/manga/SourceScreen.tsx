@@ -17,6 +17,7 @@ import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import MangaCover from './MangaCover';
 import SourcePreview from './SourcePreview';
 import type { BrowseActions } from './mangaTypes';
+import EmptyState from '../EmptyState';
 
 const SIDE = 16;
 const GAP = 12;
@@ -187,7 +188,11 @@ export default function SourceScreen({
             if (!loading && hasMore && !error && items.length) load(page + 1);
           }}
           ListFooterComponent={loading ? <ActivityIndicator style={{ marginVertical: 24 }} color={p.textSecondary} /> : null}
-          ListEmptyComponent={!loading && !error ? <Text style={styles.empty}>{mode === 'search' ? 'Nothing found.' : 'Nothing here.'}</Text> : null}
+          ListEmptyComponent={
+            !loading && !error ? (
+              <EmptyState icon="search" title={mode === 'search' ? 'Nothing found' : 'Nothing here'} text={mode === 'search' ? 'This source has nothing by that name. Try a shorter title.' : 'This source shows nothing here right now.'} tint={p.textSecondary} />
+            ) : null
+          }
           renderItem={({ item }) => {
             const inLib = !item.folder && libraryIdOf(source.id, item.key);
             return (

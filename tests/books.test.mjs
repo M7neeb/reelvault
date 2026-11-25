@@ -88,8 +88,10 @@ test('time left only once there is enough reading', () => {
 });
 
 test('reader settings survive bad input', () => {
-  assert.deepEqual(parseReaderPrefs('nope'), { theme: 'night', font: 'serif', size: 19, spacing: 'normal' });
-  assert.deepEqual(parseReaderPrefs('{"theme":"sepia","size":24,"font":"sans","spacing":"loose"}'), { theme: 'sepia', font: 'sans', size: 24, spacing: 'loose' });
+  assert.deepEqual(parseReaderPrefs('nope'), { theme: 'night', font: 'serif', size: 19, spacing: 'normal', turn: 'scroll', voice: '', speech: 1 });
+  assert.deepEqual(parseReaderPrefs('{"theme":"sepia","size":24,"font":"sans","spacing":"loose","turn":"fade","voice":"com.apple.voice.x","speech":1.5}'), { theme: 'sepia', font: 'sans', size: 24, spacing: 'loose', turn: 'fade', voice: 'com.apple.voice.x', speech: 1.5 });
+  assert.equal(parseReaderPrefs('{"speech":7}').speech, 1);
+  assert.equal(parseReaderPrefs('{"turn":"curl"}').turn, 'scroll');
   assert.equal(parseReaderPrefs('{"size":99}').size, 19);
 });
 
@@ -285,4 +287,33 @@ test('a plain cover sets its title small enough that the longest word stays whol
   assert.ok(11 * 0.64 * size <= 104 - 2 * 10.4 + 0.001);
   // Never below 9, even for an absurd word.
   assert.equal(coverTitleSize(104, 'Supercalifragilisticexpialidocious'), 9);
+});
+
+test('page turns move a screen at a time, keep a line, and hand over at the ends', async () => {
+  const { pageTurn } = await import('../src/features/vault/books/bookLogic.ts');
+  // 800 pt screen, 30 pt lines, 5000 pt chapter.
+  assert.equal(pageTurn(0, 800, 5000, 30, 1), 770);
+  assert.equal(pageTurn(770, 800, 5000, 30, -1), 0);
+  // The last page lands exactly on the end instead of past it.
+  assert.equal(pageTurn(4000, 800, 5000, 30, 1), 4200);
+  // Already at the end / start: the next or previous chapter.
+  assert.equal(pageTurn(4200, 800, 5000, 30, 1), 'next');
+  assert.equal(pageTurn(0, 800, 5000, 30, -1), 'previous');
+  // A chapter shorter than the screen.
+  assert.equal(pageTurn(0, 800, 500, 30, 1), 'next');
+});
+
+test('the word being read is split out of its run, keeping bold and italic', async () => {
+  const { spokenRuns, blockSpeech } = await import('../src/features/vault/books/bookLogic.ts');
+  const runs = [{ t: 'The ' }, { t: 'quick brown', b: true }, { t: ' fox.' }];
+  const out = spokenRuns(runs, 10, 5);
+  assert.deepEqual(out, [{ t: 'The ' }, { t: 'quick ', b: true }, { t: 'brown', b: true, sp: 1 }, { t: ' fox.' }]);
+  // A word across two runs, and nothing marked when out of range.
+  assert.deepEqual(spokenRuns(runs, 14, 3).filter((r) => r.sp).map((r) => r.t), ['n', ' f']);
+  assert.deepEqual(spokenRuns(runs, 99, 3), runs);
+  assert.deepEqual(spokenRuns(runs, 0, 0), runs);
+  // What is spoken for each kind of block.
+  assert.equal(blockSpeech({ k: 'p', runs }), 'The quick brown fox.');
+  assert.equal(blockSpeech({ k: 'img', src: 'a.png', alt: '' }), '');
+  assert.equal(blockSpeech({ k: 'hr' }), '');
 });

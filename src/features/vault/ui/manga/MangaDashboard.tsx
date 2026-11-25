@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -31,6 +31,7 @@ import { YearHeatCard } from '../yearHeatUI';
 import MangaCover from './MangaCover';
 import { RangeWrapped, WrappedPicker, type MixVideos } from './MangaWrapped';
 import type { MangaActions, MangaUiSeries } from './mangaTypes';
+import { SkeletonDashboard } from '../Skeleton';
 
 const STATUS_COLOR: Record<string, string> = { reading: '#0A84FF', planned: '#8E8E93', completed: '#30D158', onHold: '#FF9F0A', dropped: '#FF453A', none: '#3A3A3C' };
 
@@ -131,7 +132,7 @@ export default function MangaDashboard({
           ))}
         </ScrollView>
         {!st || !reads ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={p.textSecondary} />
+          <SkeletonDashboard style={{ marginTop: 20, marginHorizontal: 16 }} />
         ) : tab !== 'dashboard' ? (
           <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 30 }]}>
             {tab === 'history' &&

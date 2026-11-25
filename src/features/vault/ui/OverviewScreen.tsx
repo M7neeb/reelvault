@@ -62,6 +62,7 @@ import { GrowBar, GrowColumn, KenBurns } from './storyKit';
 import { OptionsSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { Look, OverviewData, VaultActions, VaultItem, VaultPrefs } from './types';
+import EmptyState from './EmptyState';
 
 const SIDE = 16;
 const GAP = 10;
@@ -575,12 +576,12 @@ export default function OverviewScreen({
         </View>
       )}
       {shown.length === 0 && (
-        <View style={styles.emptyBox}>
-          <Icon name="videos" size={34} color={p.textMuted} />
-          <Text style={styles.empty}>
-            {entries.length === 0 ? 'Import videos in Watch mode, then rate and track them here.' : query ? 'Nothing matches.' : 'Nothing here.'}
-          </Text>
-        </View>
+        <EmptyState
+          icon={entries.length === 0 ? 'overview' : 'search'}
+          title={entries.length === 0 ? 'Nothing to track yet' : query ? 'No matches' : 'Nothing here'}
+          text={entries.length === 0 ? 'Import videos in Watch mode, then rate and track them here like shows.' : query ? 'Try fewer words.' : 'Nothing has this status yet.'}
+          tint={entries.length === 0 ? undefined : p.textSecondary}
+        />
       )}
     </View>
   );
