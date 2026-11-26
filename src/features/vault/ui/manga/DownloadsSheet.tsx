@@ -22,6 +22,7 @@ import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import type { DownloadState, MangaActions, MangaUiSeries } from './mangaTypes';
 import { showFailure } from '../oops';
 import EmptyState from '../EmptyState';
+import { withWarn } from '../haptics';
 
 type TitleSort = 'smallest' | 'biggest' | 'reading' | 'queue';
 const SORTS: { key: TitleSort; label: string }[] = [
@@ -203,7 +204,7 @@ export default function DownloadsSheet({ downloads, items, actions, onClose }: {
     const ids = chaptersOf(ts);
     Alert.alert(ts.length === 1 ? 'Take this title out?' : `Take ${ts.length} titles out?`, `${plural(ids.length, 'chapter')} will not be downloaded.`, [
       { text: 'Keep', style: 'cancel' },
-      { text: 'Take out', style: 'destructive', onPress: () => actions.cancelDownloads(ids).then(settled).catch(showFailure) },
+      { text: 'Take out', style: 'destructive', onPress: withWarn(() => actions.cancelDownloads(ids).then(settled).catch(showFailure)) },
     ]);
   };
 

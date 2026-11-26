@@ -36,6 +36,10 @@ export type LocalSearch = {
   recent: string[];
   remember: (q: string) => void;
   clearRecent: () => void;
+  /** Videos with these words written on screen (what the look-inside scan read): how many, and how far the scan is. */
+  onScreen?: (q: string) => { count: number; looked: number; total: number };
+  /** Opens Videos with all of them selected (to trim the start off them, for example). */
+  selectOnScreen?: (q: string) => void;
 };
 
 export const KIND_ICON: Record<FindKind, IconName> = {

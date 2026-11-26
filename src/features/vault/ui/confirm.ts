@@ -1,5 +1,7 @@
 import { Alert, Platform } from 'react-native';
 
+import { warn } from './haptics';
+
 /**
  * A yes/no question before anything that changes or removes videos.
  * Alert.alert does not exist on web, so the browser preview uses window.confirm.
@@ -18,7 +20,15 @@ export function confirmAction(
   }
   Alert.alert(title, message, [
     { text: 'Cancel', style: 'cancel' },
-    { text: label, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
+    {
+      text: label,
+      style: destructive ? 'destructive' : 'default',
+      onPress: () => {
+        // Deleting, cutting, replacing: a firmer buzz than an ordinary tap.
+        if (destructive) warn();
+        onConfirm();
+      },
+    },
   ]);
 }
 

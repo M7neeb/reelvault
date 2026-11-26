@@ -298,6 +298,9 @@ function SearchPreview({ q, mine, scope }: { q?: string; mine?: boolean; scope?:
       recent: ['Harbour', 'Lighthouse', 'night walks'],
       remember: () => undefined,
       clearRecent: () => undefined,
+      // The preview has no look-inside scan: pretend a few videos show the word.
+      onScreen: (q) => ({ count: q.trim().length >= 3 ? 7 : 0, looked: 412, total: 600 }),
+      selectOnScreen: () => undefined,
     };
   }, [items]);
   return <SearchScreen connected items={items} lists={FIXTURE_LISTS} actions={actions} local={local} initialQuery={q} initialScope={scope} key={mine ? 'mine' : 'all'} />;
@@ -342,6 +345,8 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   settings: { settingsOpen: true },
   'whats-new': { whatsNewOpen: true },
   join: { joinOpen: true },
+  clips: { clipsOpen: true },
+  games: { gamesOpen: true },
   calendar: { calendarOpen: true },
   timeline: { timelineOpen: true },
   'rank-setup': { rankStep: 'setup' },
@@ -585,6 +590,9 @@ export default function PreviewRoute() {
       getImportQuality: async () => null,
       setImportQuality: noop,
       loadRank: async () => null,
+      creditsFromEnd: async () => 20,
+      loadGames: async () => null,
+      saveGames: async () => {},
       reportProblem: async () => {},
       getWhatsNewSeen: async () => '2026-11-25',
       getDigest: async () => ({ on: false, hour: 9 }),

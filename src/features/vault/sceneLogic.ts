@@ -185,3 +185,75 @@ export function findScenes(rows: SceneRow[], query: string, max = 30): SceneHit[
     .slice(0, max)
     .map(([videoId, h]) => ({ videoId, atMs: h.atMs, why: h.why }));
 }
+
+/**
+ * Videos with these words written on screen (the text read from their
+ * frames; scene words like "dog" don't count). All of them, the ones showing
+ * it in the most frames first.
+ */
+export function onScreen(rows: SceneRow[], query: string): string[] {
+  const words = norm(query)
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}-]/gu, ''))
+    .filter((w) => w.length >= 2);
+  if (!words.length) return [];
+  const count = new Map<string, number>();
+  for (const r of rows) {
+    const { text } = prepared(r);
+    // Whole words or their start ("berries!" yes, "strawberries" no).
+    const tokens = text.split(/[^\p{L}\p{N}-]+/u);
+    if (words.every((w) => tokens.some((t) => t.startsWith(w)))) count.set(r.videoId, (count.get(r.videoId) ?? 0) + 1);
+  }
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+}
+
+/** "on screen: berries" (the Videos search for text on screen) -> "berries"; anything else -> null. */
+export function onScreenQuery(q: string): string | null {
+  const m = q.match(/^\s*on screen:\s*(.*)$/i);
+  const rest = m?.[1].trim();
+  return rest ? rest : null;
+}
+
+/**
+ * The ending two episodes share (an outro, the same credits): picture prints
+ * a fixed step apart, both ending at the end of the video. Seconds of shared
+ * end, counted from the end; 0 when less than 8 seconds match. One missing or
+ * odd frame inside the shared part is let through.
+ */
+export function sharedEnding(a: string[], b: string[], stepSec: number): number {
+  const n = Math.min(a.length, b.length);
+  let matched = 0;
+  let misses = 0;
+  for (let i = 1; i <= n; i++) {
+    const x = a[a.length - i];
+    const y = b[b.length - i];
+    const same = !!x && !!y && telling(x) && hamming(x, y) <= 10;
+    if (same) {
+      matched = i;
+      misses = 0;
+    } else if (!x || !y) {
+      // unreadable: neither proof nor disproof
+    } else if (++misses > 1 || i > matched + 2) break;
+  }
+  const sec = matched * stepSec;
+  return sec >= 8 ? sec : 0;
+}
+
+/** Where to take prints for the last `lastSec` seconds, `stepSec` apart (fractions of the length). */
+export function endFractions(durationMs: number | null, lastSec: number, stepSec: number): number[] {
+  if (!durationMs || durationMs < 4000) return [];
+  const d = durationMs / 1000;
+  const start = Math.max(0.5, d - lastSec);
+  const out: number[] = [];
+  for (let t = start + stepSec; t < d - 0.2; t += stepSec) out.push(t / d);
+  return out;
+}
+
+/** The episode after this one in its series, by series order; null at the end or outside a series. */
+export function nextInSeries(members: { videoId: string; seriesId: string; position: number }[], videoId: string): string | null {
+  const me = members.find((m) => m.videoId === videoId);
+  if (!me) return null;
+  const list = members.filter((m) => m.seriesId === me.seriesId).sort((x, y) => x.position - y.position);
+  const i = list.findIndex((m) => m.videoId === videoId);
+  return list[i + 1]?.videoId ?? null;
+}

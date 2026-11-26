@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BOOK_STATUSES, displayTitle, fmtProgress, isStarted, progressOf, statusOf, type BookMark, type BookRead } from '../../books/bookLogic';
@@ -25,6 +25,7 @@ import IconButton from '../IconButton';
 import { PressableScale } from '../motion';
 import { BookCover } from './BooksScreen';
 import type { BookActions, BookUi } from './bookTypes';
+import Toggle from '../Toggle';
 
 const SERIF = Platform.select({ ios: 'Charter', web: 'Charter, Georgia, serif', default: 'serif' });
 const failed = (e: unknown) => Alert.alert('That did not work', String(e).replace(/^Error:\s*/, ''));
@@ -301,7 +302,7 @@ export default function BookInfo({
           <View style={styles.rows}>
             <View style={styles.row}>
               <Text style={styles.rowLabel}>Private</Text>
-              <Switch value={book.isPrivate} onValueChange={(v) => void actions.setPrivate([book.id], v).catch(failed)} />
+              <Toggle value={book.isPrivate} onValueChange={(v) => void actions.setPrivate([book.id], v).catch(failed)} />
             </View>
             <View style={styles.row}>
               <Text style={styles.rowLabel}>File</Text>

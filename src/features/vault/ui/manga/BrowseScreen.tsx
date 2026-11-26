@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { GatedModal as Modal } from '../screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,6 +23,7 @@ import { sheet, usePalette, useStyles, type Palette } from '../theme';
 import SourceScreen from './SourceScreen';
 import type { BrowseData, SourceGroup } from './mangaTypes';
 import { SkeletonRows } from '../Skeleton';
+import Toggle from '../Toggle';
 
 type Tab = 'sources' | 'extensions';
 
@@ -158,63 +159,63 @@ export default function BrowseScreen({
             <Text style={styles.rowTitle}>Show adult titles</Text>
             <Text style={styles.rowMeta}>Off: 18+ titles and sources stay hidden</Text>
           </View>
-          <Switch value={prefs.adult} onValueChange={(v) => actions.setAdult(v).catch(() => undefined)} />
+          <Toggle value={prefs.adult} onValueChange={(v) => actions.setAdult(v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Smaller pages</Text>
             <Text style={styles.rowMeta}>Downloads take about half the space, still sharp on the iPhone</Text>
           </View>
-          <Switch value={prefs.smallerPages} onValueChange={(v) => actions.setOption('smallerPages', v).catch(() => undefined)} />
+          <Toggle value={prefs.smallerPages} onValueChange={(v) => actions.setOption('smallerPages', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Check for new chapters</Text>
             <Text style={styles.rowMeta}>When the app opens (every 6 hours at most), with a notification</Text>
           </View>
-          <Switch value={prefs.checkOnOpen} onValueChange={(v) => actions.setOption('checkOnOpen', v).catch(() => undefined)} />
+          <Toggle value={prefs.checkOnOpen} onValueChange={(v) => actions.setOption('checkOnOpen', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Skip Completed and Dropped</Text>
             <Text style={styles.rowMeta}>The check for new chapters leaves those titles out (faster, fewer requests)</Text>
           </View>
-          <Switch value={prefs.skipFinished} onValueChange={(v) => actions.setOption('skipFinished', v).catch(() => undefined)} />
+          <Toggle value={prefs.skipFinished} onValueChange={(v) => actions.setOption('skipFinished', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Download new chapters</Text>
             <Text style={styles.rowMeta}>By themselves, for titles you are reading or plan to read</Text>
           </View>
-          <Switch value={prefs.autoDownload} onValueChange={(v) => actions.setOption('autoDownload', v).catch(() => undefined)} />
+          <Toggle value={prefs.autoDownload} onValueChange={(v) => actions.setOption('autoDownload', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Send reading progress to your servers</Text>
             <Text style={styles.rowMeta}>Suwayomi, Komga and Kavita show the page you reached in ReelVault</Text>
           </View>
-          <Switch value={prefs.syncProgress} onValueChange={(v) => actions.setOption('syncProgress', v).catch(() => undefined)} />
+          <Toggle value={prefs.syncProgress} onValueChange={(v) => actions.setOption('syncProgress', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Remove downloads after reading</Text>
             <Text style={styles.rowMeta}>Read chapters give their space back (they stay readable online)</Text>
           </View>
-          <Switch value={prefs.removeAfterRead} onValueChange={(v) => actions.setOption('removeAfterRead', v).catch(() => undefined)} />
+          <Toggle value={prefs.removeAfterRead} onValueChange={(v) => actions.setOption('removeAfterRead', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Download on Wi-Fi only</Text>
             <Text style={styles.rowMeta}>{browse.canTellWifi ? 'Waits while the phone is on mobile data' : 'Works from the next app build (17)'}</Text>
           </View>
-          <Switch value={prefs.wifiOnly} onValueChange={(v) => actions.setOption('wifiOnly', v).catch(() => undefined)} />
+          <Toggle value={prefs.wifiOnly} onValueChange={(v) => actions.setOption('wifiOnly', v).catch(() => undefined)} />
         </View>
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowTitle}>Be patient with busy sites</Text>
             <Text style={styles.rowMeta}>Each page is tried 6 times instead of 3, with longer waits</Text>
           </View>
-          <Switch value={prefs.patient} onValueChange={(v) => actions.setOption('patient', v).catch(() => undefined)} />
+          <Toggle value={prefs.patient} onValueChange={(v) => actions.setOption('patient', v).catch(() => undefined)} />
         </View>
         {actions.setParallel && (
           <TouchableOpacity
@@ -236,7 +237,7 @@ export default function BrowseScreen({
             <Text style={styles.rowTitle}>Update extensions by themselves</Text>
             <Text style={styles.rowMeta}>Once a day, when the app opens</Text>
           </View>
-          <Switch value={prefs.autoUpdateExt} onValueChange={(v) => actions.setOption('autoUpdateExt', v).catch(() => undefined)} />
+          <Toggle value={prefs.autoUpdateExt} onValueChange={(v) => actions.setOption('autoUpdateExt', v).catch(() => undefined)} />
         </View>
       </View>
     </>

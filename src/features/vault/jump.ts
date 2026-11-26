@@ -9,7 +9,9 @@ export type JumpRequest =
   | { kind: 'video'; id: string; /** Start here (a moment found inside the video). */ atMs?: number }
   | { kind: 'audio'; id: string; /** true = carry on playing; false = its page. */ play: boolean }
   | { kind: 'manga'; id: string; /** true = carry on reading; false = its page. */ read: boolean }
-  | { kind: 'books'; id: string };
+  | { kind: 'books'; id: string }
+  /** Show the videos with this written on screen, all selected (to trim or edit them together). */
+  | { kind: 'select'; onScreen: string };
 
 let pending: JumpRequest | null = null;
 const listeners = new Set<(r: JumpRequest) => void>();

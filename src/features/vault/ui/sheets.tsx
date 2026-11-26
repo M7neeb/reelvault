@@ -6,7 +6,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal } from './screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,6 +32,7 @@ import {
   type VaultItem,
   type ViewOptions,
 } from './types';
+import Toggle from './Toggle';
 
 /* -------------------------------------------------------------------- frame */
 
@@ -194,7 +195,7 @@ export function Row({
         </Text>
       )}
       {right}
-      {toggle && <Switch value={toggle.value} onValueChange={toggle.onChange} trackColor={{ false: p.switchOff, true: p.accent }} thumbColor="#fff" />}
+      {toggle && <Toggle value={toggle.value} onValueChange={toggle.onChange} trackColor={{ false: p.switchOff, true: p.accent }} thumbColor="#fff" />}
       {onPress && !toggle && !right && <Icon name="forward" size={13} color={p.textMuted} />}
     </View>
   );
@@ -269,7 +270,10 @@ export function Segment<K extends string>({
         <TouchableOpacity
           key={o.key}
           style={styles.segmentItem}
-          onPress={() => onChange(o.key)}
+          onPress={() => {
+            if (o.key !== value) tick();
+            onChange(o.key);
+          }}
           accessibilityRole="tab"
           accessibilityState={{ selected: value === o.key }}>
           <Text style={[styles.segmentText, value === o.key && styles.chipTextOn]} numberOfLines={1}>
@@ -295,7 +299,7 @@ export function ToggleRow({
   return (
     <View style={styles.toggleRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} trackColor={{ false: p.switchOff, true: p.accent }} thumbColor="#fff" />
+      <Toggle value={value} onValueChange={onChange} trackColor={{ false: p.switchOff, true: p.accent }} thumbColor="#fff" />
     </View>
   );
 }

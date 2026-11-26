@@ -122,7 +122,7 @@ import {
   updateKept,
   updateSeries,
 } from '@/features/vault/overviewStore';
-import type { OvMember, OvSeries, OvVideo } from '@/features/vault/overview';
+import { autoJoin, episodeOrder, type OvMember, type OvSeries, type OvVideo } from '@/features/vault/overview';
 import { OV_EXTRA_KEY, parseOvExtra } from '@/features/vault/ovExtra';
 import {
   onOpenRequestTap,
@@ -155,7 +155,7 @@ import { applyMetadata, pickMetadataFile } from '@/features/vault/metaImport';
 import { clearPasscodeLog, logPasscodeAttempt, passcodeLog } from '@/features/vault/passcodeLog';
 import { wifiBridge } from '@/features/vault/wifi';
 import { useInside, type InsideProgress } from '@/features/vault/scenes';
-import type { SceneRow } from '@/features/vault/sceneLogic';
+import { endFractions, sharedEnding, type SceneRow } from '@/features/vault/sceneLogic';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -419,6 +419,8 @@ export function useVaultData(): VaultData {
   const [kept, setKept] = useState<OvVideo[]>([]);
   const [series, setSeries] = useState<OvSeries[]>([]);
   const [members, setMembers] = useState<OvMember[]>([]);
+  const membersRef = useRef<OvMember[]>([]);
+  membersRef.current = members;
 
   useEffect(() => {
     // A fresh start of the app always opens on Books; switching later is remembered while it runs.
@@ -537,6 +539,38 @@ export function useVaultData(): VaultData {
     scheduleMonthWrapped().catch((e) => console.log(`[MONTH] ${String(e)}`));
     planWeekly().catch((e) => console.log(`[WEEK] ${String(e)}`));
   }, [videos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // New videos whose name belongs to a series you made ("series beries 3" next to 1 and 2) join it by themselves.
+  const joining = useRef(false);
+  useEffect(() => {
+    if (joining.current || !videos.length || !members.length) return;
+    const ov = videos.map(
+      (v) => ({ id: v.id, title: v.title, filename: v.filename, createdAt: v.createdAt, isPrivate: v.isPrivate, where: v.deletedAt ? 'trash' : 'library' }) as OvVideo
+    );
+    const joins = autoJoin(ov, members);
+    if (!joins.length) return;
+    joining.current = true;
+    (async () => {
+      const byId = new Map(ov.map((v) => [v.id, v]));
+      for (const j of joins) {
+        const before = members
+          .filter((m) => m.seriesId === j.seriesId)
+          .sort((a, b) => a.position - b.position)
+          .map((m) => byId.get(m.videoId))
+          .filter((v): v is OvVideo => !!v);
+        // Kept in name order only if it was in name order (an order you set by hand stays, the new ones go at the end).
+        const natural = episodeOrder(before).every((v, i) => v.id === before[i].id);
+        await addToSeries(j.seriesId, j.videoIds);
+        if (natural) await reorderSeries(j.seriesId, episodeOrder([...before, ...j.videoIds.map((id) => byId.get(id)!)]).map((v) => v.id));
+      }
+      console.log(`[SERIES] ${joins.reduce((n, j) => n + j.videoIds.length, 0)} new videos joined their series`);
+      await reload(['series']);
+    })()
+      .catch((e) => console.log(`[SERIES] joining failed: ${String(e)}`))
+      .finally(() => {
+        joining.current = false;
+      });
+  }, [videos, members]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Switching the daily note on or off moves On this day in or out of it.
   useEffect(
@@ -1089,6 +1123,38 @@ export function useVaultData(): VaultData {
         return all.length;
       },
       getImportQuality: async () => parseQuality(await getSetting(IMPORT_QUALITY_KEY)),
+      creditsFromEnd: async (videoId) => {
+        const mine = membersRef.current.find((m) => m.videoId === videoId);
+        if (!mine) return null;
+        const key = `credits.${mine.seriesId}`;
+        const saved = await getSetting(key);
+        if (saved !== null) return Number(saved) || null;
+        const native = ReelVaultMedia;
+        if (!native?.videoPrints) return null;
+        const byId = new Map(videosRef.current.map((v) => [v.id, v]));
+        const order = membersRef.current.filter((m) => m.seriesId === mine.seriesId).sort((a, b) => a.position - b.position);
+        const i = order.findIndex((m) => m.videoId === videoId);
+        const me = byId.get(videoId);
+        if (!me) return null;
+        const printsOf = (v: Video) => native.videoPrints!(v.uri, endFractions(v.durationMs, 120, 2));
+        const mineEnd = await printsOf(me);
+        // Its neighbours, one after the other, until one shares an ending with it.
+        for (const n of [order[i + 1], order[i - 1]]) {
+          const other = n ? byId.get(n.videoId) : undefined;
+          if (!other || other.deletedAt) continue;
+          const sec = sharedEnding(mineEnd, await printsOf(other), 2);
+          if (sec > 0) {
+            await setSetting(key, String(sec));
+            console.log(`[CREDITS] series ${mine.seriesId}: shared ending ${sec} s`);
+            return sec;
+          }
+        }
+        // Remembered as "none" once both neighbours were looked at.
+        if (order[i + 1] && order[i - 1]) await setSetting(key, '0');
+        return null;
+      },
+      loadGames: () => getSetting('games'),
+      saveGames: (json) => setSetting('games', json),
       loadRank: (kind) => getSetting(`rank.${kind}`),
       reportProblem: (note) => {
         const free = readFreeGb();

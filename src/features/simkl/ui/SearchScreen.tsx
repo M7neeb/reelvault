@@ -20,7 +20,7 @@ import Fade from '@/features/vault/ui/Fade';
 import { tick } from '@/features/vault/ui/haptics';
 import Icon from '@/features/vault/ui/Icon';
 import type { IconName } from '@/features/vault/ui/icons';
-import { rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
+import { raised, rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
 import { posterUrl, SIMKL_TYPES } from '../logic';
 import DetailModal from './DetailModal';
@@ -218,6 +218,9 @@ export default function SearchScreen({
           ))}
         </ScrollView>
 
+        {localHere?.onScreen && live && live.length >= 2 && (scope === 'all' || scope === 'video' || scope === 'mine') && (
+          <OnScreenCard local={localHere} query={live} />
+        )}
         {localHere && live && (
           <LocalResults
             key={`${scope}:${live}`}
@@ -397,8 +400,47 @@ function Tile({ t, w, mine, onPress }: { t: CatalogTitle; w: number; mine?: Simk
 
 const Fill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 };
 
+/** "berries" is written on screen in 37 videos: select them all (to trim their starts, say). */
+function OnScreenCard({ local, query }: { local: LocalSearch; query: string }) {
+  const styles = useStyles(makeStyles);
+  const p = usePalette();
+  const found = useMemo(() => local.onScreen?.(query) ?? { count: 0, looked: 0, total: 0 }, [local, query]);
+  if (!found.count) return null;
+  const waiting = found.total - found.looked;
+  return (
+    <View style={styles.onScreen}>
+      <View style={styles.onScreenIcon}>
+        <Icon name="search" size={16} color={p.accent} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.onScreenTitle} numberOfLines={2}>
+          "{query}" is on screen in {found.count} video{found.count === 1 ? '' : 's'}
+        </Text>
+        {waiting > 0 && <Text style={styles.onScreenSub}>{found.looked} of {found.total} videos looked at so far</Text>}
+      </View>
+      <TouchableOpacity
+        style={styles.onScreenBtn}
+        onPress={() => {
+          tick();
+          local.remember(query);
+          local.selectOnScreen?.(query);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Select all ${found.count} videos`}>
+        <Text style={styles.onScreenBtnText}>Select all</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const makeStyles = (p: Palette) =>
   sheet({
+    onScreen: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 14, padding: 12, borderRadius: 18, backgroundColor: raised(p) },
+    onScreenIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: p.accentSoft },
+    onScreenTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
+    onScreenSub: { color: p.textSecondary, fontSize: 13, marginTop: 2 },
+    onScreenBtn: { height: 36, paddingHorizontal: 14, borderRadius: 18, backgroundColor: p.text, alignItems: 'center', justifyContent: 'center' },
+    onScreenBtnText: { color: p.bg, fontSize: 14, fontWeight: '800' },
     screen: { flex: 1, backgroundColor: p.bg },
     title: { color: p.text, fontSize: 34, fontWeight: '800', letterSpacing: -0.8, paddingHorizontal: 16, paddingBottom: 8 },
     searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: p.elevated, borderRadius: 14, marginHorizontal: 16, paddingHorizontal: 12 },

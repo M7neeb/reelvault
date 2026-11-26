@@ -9,6 +9,18 @@ export const WHATS_NEW_KEY = 'whatsNew.seen';
 
 export const RELEASES: Release[] = [
   {
+    id: '2026-11-25b',
+    title: 'Clips, games and smarter series',
+    items: [
+      'Search a word that is written in your videos (Search tab): "on screen in 37 videos", then Select all, and ••• Trim Start & End cuts the same seconds off every one.',
+      'New videos named like a series you made ("series beries 4") join it by themselves. Overview, Belong together?, See all: Group or Not a series for every name.',
+      'Next episode: in a series, a Next episode button with a countdown shows when the ending the episodes share starts (else in the last 15 seconds).',
+      'Clips: your videos of three minutes or less in a feed you swipe up through (Library panel, Clips). Double tap to make one a favourite.',
+      'Games: Which episode is this?, Higher or lower and Name that show (Library panel, Games).',
+      'Switches, tabs and deleting now give the same small taps everywhere.',
+    ],
+  },
+  {
     id: '2026-11-25',
     title: 'Rank your favourites, and more',
     items: [

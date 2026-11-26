@@ -499,6 +499,11 @@ export type VaultActions = {
   getImportQuality: () => Promise<CompressQuality | null>;
   setImportQuality: (quality: CompressQuality | null) => Promise<void>;
   /** Covers picked by the app: the best looking frame for videos still on their import frame. */
+  /** Where the shared ending (outro, credits) of this episode's series starts, in seconds before the end; null = not found or not in a series. */
+  creditsFromEnd: (videoId: string) => Promise<number | null>;
+  /** Games: best scores and the daily streak (JSON). */
+  loadGames: () => Promise<string | null>;
+  saveGames: (json: string) => Promise<void>;
   /** Rank your favourites: the saved order (JSON), by kind ('video', 'movie', ...). */
   loadRank: (kind: string) => Promise<string | null>;
   /** Report a problem: a text file with your note and the recent log, through the share sheet. */
@@ -782,6 +787,11 @@ export type VaultScreenProps = {
   duplicateGroups: string[][];
   /** Picture fingerprints by video id (app build 18 on): Similar compares the pictures. */
   prints?: Map<string, string[]>;
+  /** What the look-inside scan read in each video (text on screen); sceneVersion changes with it. */
+  sceneRows?: { current: import('../sceneLogic').SceneRow[] };
+  sceneVersion?: number;
+  /** How far the look-inside scan is. */
+  insideProgress?: import('../scenes').InsideProgress | null;
   smartFilters: SmartFilter[];
   albums: UiAlbum[];
   folders: UiFolder[];
@@ -839,6 +849,8 @@ export type VaultScreenProps = {
     whatsNewOpen?: boolean;
     /** Join videos with the first three videos picked. */
     joinOpen?: boolean;
+    clipsOpen?: boolean;
+    gamesOpen?: boolean;
     overviewOpen?: boolean;
     mapOpen?: boolean;
     /** With viewerId: open the editor on this tab. */

@@ -19,7 +19,7 @@ import { TAB_BAR_HEIGHT, TabBarSpace } from '@/features/vault/ui/chrome';
 import { SideSafe } from '@/features/vault/ui/screen';
 import { ThemeContext } from '@/features/vault/ui/theme';
 import { resumeSavedAt } from '@/features/vault/watching';
-import { findScenes } from '@/features/vault/sceneLogic';
+import { findScenes, onScreen } from '@/features/vault/sceneLogic';
 import { progressOf } from '@/features/vault/books/bookLogic';
 import { fmtClock } from '@/features/vault/stats';
 
@@ -141,8 +141,18 @@ export default function SearchRoute() {
       recent,
       remember: (q) => saveRecent(rememberSearch(recentRef.current, q)),
       clearRecent: () => saveRecent([]),
+      onScreen: (q) => {
+        const count = onScreen(vault.sceneRows.current, q).filter((id) => shownVideos.has(id)).length;
+        const pr = vault.insideProgress;
+        // While the scan is still going, its own numbers (the whole library); after it, everything was looked at.
+        return pr?.running ? { count, looked: pr.done, total: pr.total } : { count, looked: shownVideos.size, total: shownVideos.size };
+      },
+      selectOnScreen: (q) => {
+        router.navigate('/' as Href);
+        pushJump({ kind: 'select', onScreen: q });
+      },
     };
-  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, audio.items, manga.items, simkl.items, books.items, router, week, recent, saveRecent]);
+  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, vault.insideProgress, audio.items, manga.items, simkl.items, books.items, router, week, recent, saveRecent]);
 
   return (
     <ThemeContext.Provider value={palette}>

@@ -34,6 +34,9 @@ export default function VideosRoute() {
         deletedItems={vault.deletedItems}
         duplicateGroups={vault.duplicateGroups}
         prints={vault.prints}
+        sceneRows={vault.sceneRows}
+        sceneVersion={vault.sceneVersion}
+        insideProgress={vault.insideProgress}
         smartFilters={vault.smartFilters}
         albums={vault.albums}
         folders={vault.folders}

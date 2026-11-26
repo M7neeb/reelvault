@@ -142,6 +142,8 @@ export type SidebarProps = {
   onOverview: () => void;
   onMap: () => void;
   onRank: () => void;
+  onClips: () => void;
+  onGames: () => void;
   onSettings: () => void;
   onImport: () => void;
   onInsights: (tab: 'dashboard' | 'history' | 'wrapped' | 'badges' | 'storage') => void;
@@ -246,7 +248,9 @@ export default function Sidebar(props: SidebarProps) {
     { label: 'Timeline', icon: 'timeline', onPress: props.onTimeline },
     { label: 'Places', icon: 'mapPin', onPress: props.onMap },
     { label: 'Overview', icon: 'overview', onPress: props.onOverview },
-    { label: 'Rank your videos', icon: 'trophy', onPress: props.onRank },
+    { label: 'Clips', icon: 'slideshow', onPress: props.onClips },
+    { label: 'Rank videos', icon: 'trophy', onPress: props.onRank },
+    { label: 'Games', icon: 'dice', onPress: props.onGames },
   ];
 
   return (

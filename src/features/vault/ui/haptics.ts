@@ -24,3 +24,11 @@ export function success(): void {
 export function warn(): void {
   if (on) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
 }
+
+/** For "Delete" and other destructive buttons: the firmer buzz, then the action. */
+export const withWarn =
+  (fn: () => unknown) =>
+  (): void => {
+    warn();
+    fn();
+  };

@@ -63,6 +63,7 @@ import { OptionsSheet } from './prompts';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { Look, OverviewData, VaultActions, VaultItem, VaultPrefs } from './types';
 import EmptyState from './EmptyState';
+import { SuggestionsSheet } from './seriesSuggestions';
 
 const SIDE = 16;
 const GAP = 10;
@@ -95,7 +96,7 @@ export default function OverviewScreen({
   onStats: () => void;
   onPersonalise: () => void;
   devKey?: string;
-  devSheet?: 'new' | 'edit' | 'add' | 'order';
+  devSheet?: 'new' | 'edit' | 'add' | 'order' | 'suggestions';
 }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
@@ -113,6 +114,7 @@ export default function OverviewScreen({
   const [grid, setGrid] = useState(true);
   const [openKey, setOpenKey] = useState<string | null>(devKey ?? null);
   const [maker, setMaker] = useState<{ name: string; ids: string[] } | null>(devSheet === 'new' ? { name: '', ids: [] } : null);
+  const [allSuggestions, setAllSuggestions] = useState(devSheet === 'suggestions');
   const [plays, setPlays] = useState<{ videoId: string; startedAt: number; watchedMs: number }[]>([]);
   const [extra, setExtra] = useState<OvExtra>(EMPTY_OV_EXTRA);
   const [ordering, setOrdering] = useState(devSheet === 'order');
@@ -157,7 +159,7 @@ export default function OverviewScreen({
   const best = useMemo(() => topRated(entries), [entries]);
   const ins = useMemo(() => overviewInsights(entries), [entries]);
   const suggestions = useMemo(
-    () => suggestSeries(videos, data.members).filter((s) => !prefs.hiddenSuggestions.includes(s.name)),
+    () => suggestSeries(videos, data.members, 200).filter((s) => !prefs.hiddenSuggestions.includes(s.name)),
     [videos, data.members, prefs.hiddenSuggestions]
   );
   const shown = useMemo(
@@ -358,9 +360,9 @@ export default function OverviewScreen({
 
       {suggestions.length > 0 && look !== 'simple' && (
         <>
-          <SectionHead title="Belong together?" detail={`${suggestions.length}`} />
+          <SectionHead title="Belong together?" detail={`${suggestions.length}`} action={suggestions.length > 4 ? 'See all' : undefined} onAction={() => setAllSuggestions(true)} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
-            {suggestions.map((s) => {
+            {suggestions.slice(0, 6).map((s) => {
               const thumbs = s.videoIds
                 .slice(0, 3)
                 .map((id) => videos.find((v) => v.id === id))
@@ -386,7 +388,7 @@ export default function OverviewScreen({
                       <TouchableOpacity
                         style={[styles.smallBtn, styles.smallBtnGhost]}
                         onPress={() => void actions.setPrefs({ ...prefs, hiddenSuggestions: [...prefs.hiddenSuggestions, s.name] })}>
-                        <Text style={[styles.smallBtnText, { color: p.textSoft }]}>Hide</Text>
+                        <Text style={[styles.smallBtnText, { color: p.textSoft }]}>Not a series</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -660,6 +662,19 @@ export default function OverviewScreen({
 
       {ordering && <PlanOrder planned={planned} onSave={(keys) => changeExtra((x) => ({ ...x, planOrder: keys }))} onClose={() => setOrdering(false)} />}
 
+      {allSuggestions && (
+        <SuggestionsSheet
+          suggestions={suggestions}
+          videos={videos}
+          onGroup={(sg) => actions.ovCreateSeries(sg.name, sg.videoIds).then(() => undefined)}
+          onEdit={(sg) => {
+            setAllSuggestions(false);
+            setMaker({ name: sg.name, ids: sg.videoIds });
+          }}
+          onRefuse={(sg) => actions.setPrefs({ ...prefs, hiddenSuggestions: [...prefs.hiddenSuggestions, sg.name] })}
+          onClose={() => setAllSuggestions(false)}
+        />
+      )}
       {maker && (
         <SeriesMaker
           title="New series"

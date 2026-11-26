@@ -35,7 +35,7 @@ import {
   type BookSort,
 } from '../../books/bookLogic';
 import { useTabBarSpace } from '../chrome';
-import { tick } from '../haptics';
+import { tick, withWarn } from '../haptics';
 import Icon from '../Icon';
 import IconButton from '../IconButton';
 import { tidyQuote, type DayGoal, type Quote } from '../../books/bookGoals';
@@ -670,7 +670,7 @@ export default function BooksScreen({
 function confirmPurge(ids: string[], go: () => void) {
   Alert.alert(ids.length === 1 ? 'Delete this book for good?' : `Delete ${ids.length} books for good?`, 'The book, your place in it, your bookmarks and highlights are removed from this phone.', [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Delete', style: 'destructive', onPress: go },
+    { text: 'Delete', style: 'destructive', onPress: withWarn(go) },
   ]);
 }
 

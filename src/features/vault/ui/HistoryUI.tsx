@@ -22,7 +22,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { historyDays, hourLabel, monthGrid, punchCard, unfinished, watchStats, WEEKDAYS, type Sitting } from '../history';
 import { friendlyName } from '../names';
 import { fmtMs, type VaultPlay } from '../stats';
-import { tick } from './haptics';
+import { tick, withWarn } from './haptics';
 import Icon from './Icon';
 import { Bars, Card, gradient, Ring, SectionTitle, ShareBar, StatTile } from './insightParts';
 import { LiveCard } from './live';
@@ -186,7 +186,7 @@ function HistoryList({ items, plays, thumbs, onOpen, onDelete }: { items: VaultI
     if (Platform.OS === 'web') return go();
     Alert.alert(title, body, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: go },
+      { text: 'Remove', style: 'destructive', onPress: withWarn(go) },
     ]);
   };
   const remove = (videoId: string, at: number, ms: number) =>

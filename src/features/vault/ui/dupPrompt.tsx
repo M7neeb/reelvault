@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 
 import { fmtDateTime, fmtDuration, fmtSize } from './format';
@@ -17,6 +17,7 @@ import Icon from './Icon';
 import { Modal } from './screen';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { DuplicateAsk } from './types';
+import Toggle from './Toggle';
 
 export function DuplicatePrompt({ ask }: { ask: DuplicateAsk }) {
   const styles = useStyles(makeStyles);
@@ -92,7 +93,7 @@ export function DuplicatePrompt({ ask }: { ask: DuplicateAsk }) {
           {ask.remaining > 0 && (
             <View style={styles.allRow}>
               <Text style={styles.allText}>Same answer for other copies in this import ({ask.remaining} {ask.remaining === 1 ? 'file' : 'files'} to go)</Text>
-              <Switch value={all} onValueChange={setAll} />
+              <Toggle value={all} onValueChange={setAll} />
             </View>
           )}
         </View>

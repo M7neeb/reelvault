@@ -24,6 +24,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VideoRank from './rank/VideoRank';
 import EmptyState from './EmptyState';
 import JoinSheet from './joinClips';
+import ClipsFeed from './ClipsFeed';
+import GamesModal from './GamesModal';
 import WhatsNewSheet from './WhatsNewSheet';
 import { RELEASES, toShow, type Release } from '../whatsNew';
 import type { DigestSettings } from '../digestPlan';
@@ -98,6 +100,7 @@ import ViewerModal from './ViewerModal';
 import CloudSheet from './CloudSheet';
 import { onQuick, pickFavourite, type QuickKind } from '../quickOpen';
 import { onJump, type JumpRequest } from '../jump';
+import { nextInSeries, onScreen, onScreenQuery } from '../sceneLogic';
 import { inCustomOrder, moveIds, reorderWithin, type MoveHow } from './customOrder';
 import { resumeSavedAt } from '../watching';
 import { confirmByPictures, groupByPictures, mergeGroups } from '../sceneLogic';
@@ -164,6 +167,8 @@ function VaultScreenBody({
   deletedItems,
   duplicateGroups,
   prints = NO_PRINTS,
+  sceneRows,
+  sceneVersion,
   smartFilters,
   albums,
   folders,
@@ -286,6 +291,8 @@ function VaultScreenBody({
   const [calendarOpen, setCalendarOpen] = useState(dev?.calendarOpen ?? false);
   const [timelineOpen, setTimelineOpen] = useState(dev?.timelineOpen ?? false);
   const [rankOpen, setRankOpen] = useState(!!dev?.rankStep);
+  const [clipsOpen, setClipsOpen] = useState(dev?.clipsOpen ?? false);
+  const [gamesOpen, setGamesOpen] = useState(dev?.gamesOpen ?? false);
   const [joinFor, setJoinFor] = useState<VaultItem[] | null>(dev?.joinOpen ? items.filter((v) => !v.isPrivate && !v.deletedAt).slice(0, 3) : null);
   const [overviewOpen, setOverviewOpen] = useState(dev?.overviewOpen ?? false);
   const [mapOpen, setMapOpen] = useState(dev?.mapOpen ?? false);
@@ -399,6 +406,13 @@ function VaultScreenBody({
       setResults(null);
       return;
     }
+    // "on screen: berries": videos with that written in them (what the look-inside scan read).
+    const shownText = onScreenQuery(q);
+    if (shownText) {
+      const byId = new Map(items.map((v) => [v.id, v]));
+      setResults(onScreen(sceneRows?.current ?? [], shownText).map((id) => byId.get(id)).filter((v): v is VaultItem => !!v && !v.deletedAt));
+      return;
+    }
     let cancelled = false;
     const smart = isSmartSearch(parsedSearch);
     const t = setTimeout(() => {
@@ -437,7 +451,7 @@ function VaultScreenBody({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [query, parsedSearch, actions, items, playCounts]);
+  }, [query, parsedSearch, actions, items, playCounts, sceneVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (dev?.slideshowOpen && items.length) setSlideshow({ items: items.filter((v) => !v.isPrivate), start: 0 });
@@ -493,6 +507,16 @@ function VaultScreenBody({
   // Something picked in the Search tab: play the video, or open the audio item / manga in its section.
   const [jump, setJump] = useState<JumpRequest | null>(null);
   const [sectionJump, setSectionJump] = useState<JumpRequest | null>(null);
+  // "Select all" from the Search tab: once the results are in, select every one of them.
+  const selectAllPending = useRef(false);
+  useEffect(() => {
+    if (!selectAllPending.current || !results) return;
+    selectAllPending.current = false;
+    const ids = results.filter((v) => !v.isPrivate).map((v) => v.id);
+    if (!ids.length) return;
+    setSelectMode(true);
+    setSelected(ids);
+  }, [results]);
   /** A moment found by search inside videos: the video starts there. */
   const [startAt, setStartAt] = useState<number | null>(null);
   useEffect(() => onJump(setJump), []);
@@ -507,6 +531,13 @@ function VaultScreenBody({
       if (prefs.videosMode === 'audio' || prefs.videosMode === 'manga' || prefs.videosMode === 'books') switchMode('watch');
       setStartAt(jump.atMs ?? null);
       setPlaying(v);
+      return;
+    }
+    if (jump.kind === 'select') {
+      setJump(null);
+      if (prefs.videosMode !== 'watch') switchMode('watch');
+      selectAllPending.current = true;
+      setQuery(`on screen: ${jump.onScreen}`);
       return;
     }
     setJump(null);
@@ -737,6 +768,13 @@ function VaultScreenBody({
     const names = new Map(overview.series.map((x) => [x.id, x.name]));
     return new Map(overview.members.map((m) => [m.videoId, names.get(m.seriesId) ?? 'Series']));
   }, [overview.series, overview.members]);
+  // The next episode when the video playing is in a series (private ones only while unlocked).
+  const nextEpisode = useMemo(() => {
+    if (!playing) return undefined;
+    const id = nextInSeries(overview.members, playing.id);
+    const v = id ? items.find((x) => x.id === id) : undefined;
+    return v && !v.deletedAt && (!v.isPrivate || privateOpen) ? v : undefined;
+  }, [playing, overview.members, items, privateOpen]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -1720,6 +1758,14 @@ function VaultScreenBody({
             setSidebarOpen(false);
             setRankOpen(true);
           }}
+          onClips={() => {
+            setSidebarOpen(false);
+            setClipsOpen(true);
+          }}
+          onGames={() => {
+            setSidebarOpen(false);
+            setGamesOpen(true);
+          }}
           onSettings={() => {
             setSidebarOpen(false);
             refreshSecurity();
@@ -1861,6 +1907,28 @@ function VaultScreenBody({
         />
       )}
 
+      {gamesOpen && (
+        <GamesModal
+          items={publicItems}
+          overview={overview}
+          actions={actions}
+          loadTitles={simkl?.connected ? () => simkl.insights().then((r) => r.items) : undefined}
+          onClose={() => setGamesOpen(false)}
+        />
+      )}
+      {clipsOpen && (
+        <ClipsFeed
+          items={publicItems}
+          actions={actions}
+          enableVideo={enableVideo}
+          onOpen={(v) => {
+            // The feed closes first, so its clip stops before the player starts.
+            setClipsOpen(false);
+            setPlaying(v);
+          }}
+          onClose={() => setClipsOpen(false)}
+        />
+      )}
       {rankOpen && (
         <VideoRank
           items={publicItems}
@@ -2140,6 +2208,7 @@ function VaultScreenBody({
           onLinkChanged={reloadLinks}
           resumeAt={resume.get(playing.id) ?? null}
           resumeSavedAt={resumeSavedAt(playing.id)}
+          nextEpisode={nextEpisode}
           startAt={startAt}
           prefs={prefs}
           onPrefs={(np) => actions.setPrefs(np).catch(fail('PREFS'))}

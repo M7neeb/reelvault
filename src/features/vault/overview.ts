@@ -422,3 +422,33 @@ export function overviewInsights(entries: OvEntry[]) {
   const ratedShare = entries.length ? entries.filter((e) => e.rating > 0).length / entries.length : 0;
   return { statuses, ratings, spotlight, planned, ratedShare };
 }
+
+/**
+ * New videos that belong to a series you already made: their name is the
+ * series' name plus a number ("series beries 3" next to "series beries 1"
+ * and "2"). Names you never grouped ("sd 1", "sd 2") are left alone, and a
+ * name that fits two series is left for you. Name order within each series.
+ */
+export function autoJoin(videos: OvVideo[], members: OvMember[]): { seriesId: string; videoIds: string[] }[] {
+  const byId = new Map(videos.map((v) => [v.id, v]));
+  const stemSeries = new Map<string, Set<string>>();
+  for (const m of members) {
+    const v = byId.get(m.videoId);
+    if (!v) continue;
+    const name = videoName(v);
+    const stem = seriesBase(name);
+    // Only names that had a number taken off count.
+    if (stem.length < 2 || stem === name.toLowerCase().replace(/[\s._]+/g, ' ')) continue;
+    if (!stemSeries.has(stem)) stemSeries.set(stem, new Set());
+    stemSeries.get(stem)!.add(m.seriesId);
+  }
+  const taken = new Set(members.map((m) => m.videoId));
+  const joins = new Map<string, OvVideo[]>();
+  for (const v of videos) {
+    if (taken.has(v.id) || v.isPrivate || v.where !== 'library') continue;
+    const series = stemSeries.get(seriesBase(videoName(v)));
+    if (!series || series.size !== 1) continue;
+    pushTo(joins, [...series][0], v);
+  }
+  return [...joins.entries()].map(([seriesId, list]) => ({ seriesId, videoIds: episodeOrder(list).map((v) => v.id) }));
+}

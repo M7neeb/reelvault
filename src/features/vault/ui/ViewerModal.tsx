@@ -146,6 +146,7 @@ function ViewerPage({
   onLinkChanged,
   resumeAt = null,
   resumeSavedAt = 0,
+  nextEpisode,
   startAt = null,
   prefs = DEFAULT_VAULT_PREFS,
   onPrefs,
@@ -634,16 +635,58 @@ function ViewerPage({
     return () => clearTimeout(t);
   }, [lockHint]);
 
+  // In a series, "next" means the next episode; otherwise the next video in the list.
+  const upNext = nextEpisode ?? next;
+
   // The end: the next video comes up after 5 seconds, unless you cancel (or it loops).
   useEffect(() => {
     const sub = player.addListener('playToEnd', () => {
       if (player.loop) return;
       setEnded(true);
       setChrome(true);
-      if (opts.autoplayNext && next) setUpNextLeft(5);
+      if ((opts.autoplayNext || nextEpisode) && upNext) setUpNextLeft(5);
     });
     return () => sub.remove();
-  }, [player, opts.autoplayNext, next]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [player, opts.autoplayNext, upNext, nextEpisode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The credits: where the series' shared ending starts (found once per series), else the last 15 seconds.
+  const [creditsSec, setCreditsSec] = useState<number | null>(null);
+  const [creditsLeft, setCreditsLeft] = useState<number | null>(null);
+  const creditsShown = useRef(false);
+  useEffect(() => {
+    creditsShown.current = false;
+    setCreditsSec(null);
+    setCreditsLeft(null);
+    if (!nextEpisode || !enableVideo) return;
+    // A little after it starts, so working it out never competes with the first seconds of playback.
+    const t = setTimeout(() => {
+      actions
+        .creditsFromEnd(item.id)
+        .then((s) => setCreditsSec(s))
+        .catch(() => undefined);
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [item.id, nextEpisode, enableVideo]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!nextEpisode || creditsShown.current || ended) return;
+    const total = durationSec();
+    if (total < 60) return;
+    const from = Math.min(total * 0.4, creditsSec ?? 15);
+    if (total - progress * total <= from) {
+      creditsShown.current = true;
+      setCreditsLeft(5);
+    }
+  }, [progress, creditsSec, nextEpisode, ended]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (creditsLeft === null || menuOpen || infoOpen || scrubAt !== null) return;
+    if (creditsLeft <= 0) {
+      setCreditsLeft(null);
+      if (nextEpisode) onPick?.(nextEpisode);
+      return;
+    }
+    const t = setTimeout(() => setCreditsLeft((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [creditsLeft, menuOpen, infoOpen, scrubAt]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (upNextLeft === null || menuOpen || infoOpen) return;
     if (upNextLeft <= 0) {
@@ -657,6 +700,12 @@ function ViewerPage({
 
   /** Slide to the next / previous video, the same way a swipe does. */
   function goNext(dir: 1 | -1 = 1) {
+    if (dir === 1 && nextEpisode) {
+      setUpNextLeft(null);
+      setCreditsLeft(null);
+      onPick?.(nextEpisode);
+      return;
+    }
     if ((dir === 1 && !next) || (dir === -1 && !prev)) return;
     tick();
     setUpNextLeft(null);
@@ -914,16 +963,16 @@ function ViewerPage({
           </GestureDetector>
           {ended && !locked && (
             <Animated.View entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)} style={styles.endWrap} pointerEvents="box-none">
-              {next && upNextLeft !== null ? (
+              {upNext && upNextLeft !== null ? (
                 <View style={styles.upNext}>
                   <Text style={styles.upNextKicker}>UP NEXT IN {upNextLeft}</Text>
                   <View style={styles.upNextRow}>
-                    <Image source={next.thumbSource} style={styles.upNextThumb} contentFit="cover" />
+                    <Image source={upNext.thumbSource} style={styles.upNextThumb} contentFit="cover" />
                     <View style={{ flex: 1, gap: 2 }}>
                       <Text style={styles.upNextTitle} numberOfLines={2}>
-                        {next.title || next.filename}
+                        {upNext.title || upNext.filename}
                       </Text>
-                      <Text style={styles.upNextSub}>{fmtDuration(next.durationMs) ?? ''}</Text>
+                      <Text style={styles.upNextSub}>{nextEpisode ? `Next episode · ${fmtDuration(upNext.durationMs) ?? ''}` : (fmtDuration(upNext.durationMs) ?? '')}</Text>
                     </View>
                   </View>
                   <View style={styles.upNextBar}>
@@ -945,14 +994,27 @@ function ViewerPage({
                     <Icon name="rewatch" size={22} color="#fff" />
                     <Text style={styles.endBtnText}>Replay</Text>
                   </TouchableOpacity>
-                  {next && (
-                    <TouchableOpacity style={styles.endBtn} onPress={() => goNext(1)} accessibilityLabel="Next video">
+                  {upNext && (
+                    <TouchableOpacity style={styles.endBtn} onPress={() => goNext(1)} accessibilityLabel={nextEpisode ? 'Next episode' : 'Next video'}>
                       <Icon name="nextVideo" size={22} color="#fff" />
                       <Text style={styles.endBtnText}>Next</Text>
                     </TouchableOpacity>
                   )}
                 </View>
               )}
+            </Animated.View>
+          )}
+          {creditsLeft !== null && nextEpisode && !ended && (
+            <Animated.View entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)} style={[styles.creditsWrap, { bottom: (overlay ? bottomH : insets.bottom) + 16 }]} pointerEvents="box-none">
+              <TouchableOpacity style={styles.creditsCancel} onPress={() => setCreditsLeft(null)} accessibilityLabel="Keep watching this one" hitSlop={8}>
+                <Icon name="close" size={13} color="#fff" weight="bold" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.creditsBtn} onPress={() => goNext(1)} accessibilityRole="button" accessibilityLabel={`Next episode in ${creditsLeft} seconds`}>
+                <View style={[styles.creditsFill, { width: `${((5 - creditsLeft) / 5) * 100}%` }]} />
+                <Icon name="nextVideo" size={15} color="#000" />
+                <Text style={styles.creditsText}>Next episode</Text>
+                <Text style={styles.creditsCount}>{creditsLeft}</Text>
+              </TouchableOpacity>
             </Animated.View>
           )}
           {/* ── scrubbing: the frame under your finger ── */}
@@ -1963,6 +2025,8 @@ type ViewerProps = {
   resumeAt?: number | null;
   /** When that point was saved (ms), so a short break rewinds less than a long one. */
   resumeSavedAt?: number;
+  /** The next episode of this video's series: Next episode at the credits and at the end. */
+  nextEpisode?: VaultItem;
   /** Start at this moment (ms), e.g. one found by search inside videos. */
   startAt?: number | null;
   prefs?: VaultPrefs;
@@ -2112,6 +2176,12 @@ const makeStyles = (p: Palette) =>
     endButtons: { flexDirection: 'row', gap: 28 },
     endBtn: { alignItems: 'center', gap: 6, width: 86, paddingVertical: 14, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)' },
     endBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    creditsWrap: { position: 'absolute', right: 16, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    creditsCancel: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)' },
+    creditsBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 44, paddingHorizontal: 16, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.82)', overflow: 'hidden' },
+    creditsFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#fff' },
+    creditsText: { color: '#000', fontSize: 15, fontWeight: '800' },
+    creditsCount: { color: 'rgba(0,0,0,0.55)', fontSize: 15, fontWeight: '800', fontVariant: ['tabular-nums'] },
     upNext: { width: '100%', maxWidth: 380, gap: 10, padding: 14, borderRadius: 22, backgroundColor: 'rgba(18,18,22,0.88)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
     upNextKicker: { color: 'rgba(255,255,255,0.7)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
     upNextRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
