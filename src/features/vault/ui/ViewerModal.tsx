@@ -75,6 +75,7 @@ import type { SimklBridge, VideoLink } from '@/features/simkl/ui/types';
 
 import { canResume, fmtClock, ratingLabel, resumeFrom } from '../stats';
 import type { Bookmark } from '../watching';
+import type { Intro } from '../intro';
 import { confirmAction } from './confirm';
 import { OptionsSheet } from './prompts';
 import { success, tick } from './haptics';
@@ -667,6 +668,31 @@ function ViewerPage({
     }, 8000);
     return () => clearTimeout(t);
   }, [item.id, nextEpisode, enableVideo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Skip intro: the opening this episode shares with the ones next to it in its series.
+  const [intro, setIntro] = useState<Intro | null>(null);
+  const [introDismissed, setIntroDismissed] = useState(false);
+  useEffect(() => {
+    setIntro(null);
+    setIntroDismissed(false);
+    if (!enableVideo || !actions.introFor) return;
+    const t = setTimeout(() => {
+      actions
+        .introFor(item.id)
+        .then((x) => setIntro(x))
+        .catch(() => undefined);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [item.id, enableVideo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const atSec = progress * durationSec();
+  const inIntro = !!intro && !introDismissed && !ended && atSec >= intro.startSec && atSec < intro.endSec - 2;
+  const skipIntro = () => {
+    if (!intro) return;
+    tick();
+    setIntroDismissed(true);
+    player.currentTime = intro.endSec;
+    setProgress(intro.endSec / Math.max(1, durationSec()));
+    holdUntil.current = Date.now() + 500;
+  };
   useEffect(() => {
     if (!nextEpisode || creditsShown.current || ended) return;
     const total = durationSec();
@@ -965,7 +991,7 @@ function ViewerPage({
             <Animated.View entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)} style={styles.endWrap} pointerEvents="box-none">
               {upNext && upNextLeft !== null ? (
                 <View style={styles.upNext}>
-                  <Text style={styles.upNextKicker}>UP NEXT IN {upNextLeft}</Text>
+                  <Text style={styles.upNextKicker}>Up next in {upNextLeft}</Text>
                   <View style={styles.upNextRow}>
                     <Image source={upNext.thumbSource} style={styles.upNextThumb} contentFit="cover" />
                     <View style={{ flex: 1, gap: 2 }}>
@@ -1002,6 +1028,17 @@ function ViewerPage({
                   )}
                 </View>
               )}
+            </Animated.View>
+          )}
+          {inIntro && creditsLeft === null && (
+            <Animated.View entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)} style={[styles.creditsWrap, { bottom: (overlay ? bottomH : insets.bottom) + 16 }]} pointerEvents="box-none">
+              <TouchableOpacity style={styles.creditsCancel} onPress={() => setIntroDismissed(true)} accessibilityLabel="Watch the intro" hitSlop={8}>
+                <Icon name="close" size={13} color="#fff" weight="bold" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.creditsBtn} onPress={skipIntro} accessibilityRole="button" accessibilityLabel="Skip intro">
+                <Icon name="nextVideo" size={15} color="#000" />
+                <Text style={styles.creditsText}>Skip intro</Text>
+              </TouchableOpacity>
             </Animated.View>
           )}
           {creditsLeft !== null && nextEpisode && !ended && (

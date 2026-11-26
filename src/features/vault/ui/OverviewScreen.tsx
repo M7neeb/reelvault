@@ -64,6 +64,7 @@ import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { Look, OverviewData, VaultActions, VaultItem, VaultPrefs } from './types';
 import EmptyState from './EmptyState';
 import { SuggestionsSheet } from './seriesSuggestions';
+import Shelf, { type ShelfBox } from './shelf';
 
 const SIDE = 16;
 const GAP = 10;
@@ -80,6 +81,7 @@ export default function OverviewScreen({
   onStats,
   onPersonalise,
   devKey,
+  openRequest,
   devSheet,
   enableVideo = false,
 }: {
@@ -96,6 +98,8 @@ export default function OverviewScreen({
   onStats: () => void;
   onPersonalise: () => void;
   devKey?: string;
+  /** Opens this title's page (a series tapped on the shelf elsewhere); `n` makes a repeat tap count. */
+  openRequest?: { key: string; n: number } | null;
   devSheet?: 'new' | 'edit' | 'add' | 'order' | 'suggestions';
 }) {
   const styles = useStyles(makeStyles);
@@ -113,6 +117,9 @@ export default function OverviewScreen({
   const [query, setQuery] = useState('');
   const [grid, setGrid] = useState(true);
   const [openKey, setOpenKey] = useState<string | null>(devKey ?? null);
+  useEffect(() => {
+    if (openRequest) setOpenKey(openRequest.key);
+  }, [openRequest]);
   const [maker, setMaker] = useState<{ name: string; ids: string[] } | null>(devSheet === 'new' ? { name: '', ids: [] } : null);
   const [allSuggestions, setAllSuggestions] = useState(devSheet === 'suggestions');
   const [plays, setPlays] = useState<{ videoId: string; startedAt: number; watchedMs: number }[]>([]);
@@ -156,6 +163,14 @@ export default function OverviewScreen({
   const counts = useMemo(() => filterCounts(entries), [entries]);
   const stats = useMemo(() => overviewStats(entries), [entries]);
   const going = useMemo(() => continueSeries(entries), [entries]);
+  // The shelf: every series as a box set, the ones you are watching first.
+  const shelf = useMemo<ShelfBox[]>(() => {
+    const series = entries.filter((e) => e.kind === 'series' && !e.gone);
+    const rank = (e: (typeof series)[number]) => (e.status === 'watching' ? 0 : e.status === 'plantowatch' ? 1 : e.status === 'completed' ? 3 : 2);
+    const sorted = [...series].sort((a, b) => rank(a) - rank(b) || (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0) || a.title.localeCompare(b.title));
+    const latest = series.reduce<string | null>((best, e) => (e.lastWatchedAt && (!best || e.lastWatchedAt > (series.find((x) => x.key === best)?.lastWatchedAt ?? 0)) ? e.key : best), null);
+    return sorted.map((e) => ({ key: e.key, title: e.title, count: e.episodes.length, watched: e.watchedCount, pulled: e.key === latest && e.status === 'watching' }));
+  }, [entries]);
   const best = useMemo(() => topRated(entries), [entries]);
   const ins = useMemo(() => overviewInsights(entries), [entries]);
   const suggestions = useMemo(
@@ -277,6 +292,13 @@ export default function OverviewScreen({
               ))}
             </View>
           )}
+        </>
+      )}
+
+      {shelf.length > 0 && (
+        <>
+          <SectionHead title="Your shelf" detail={`${shelf.length}`} />
+          <Shelf boxes={shelf} side={SIDE} onOpen={(key) => setOpenKey(key)} />
         </>
       )}
 
@@ -725,7 +747,7 @@ function Spotlight({ entry, video, width, onOpen, onPlay }: { entry: OvEntry; vi
   const { height: screenH } = useWindowDimensions();
   const styles = useStyles(makeStyles);
   const canPlay = !!playable(entry);
-  const kicker = entry.status === 'watching' && entry.next ? 'CONTINUE WATCHING' : entry.rating > 0 ? 'ONE OF YOUR BEST' : 'SPOTLIGHT';
+  const kicker = entry.status === 'watching' && entry.next ? 'Continue watching' : entry.rating > 0 ? 'One of your best' : 'Spotlight';
   const progress = entry.episodes.length ? entry.watchedCount / entry.episodes.length : 0;
   return (
     <Animated.View entering={enterUp(0)}>

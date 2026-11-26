@@ -156,6 +156,7 @@ import { clearPasscodeLog, logPasscodeAttempt, passcodeLog } from '@/features/va
 import { wifiBridge } from '@/features/vault/wifi';
 import { useInside, type InsideProgress } from '@/features/vault/scenes';
 import { endFractions, sharedEnding, type SceneRow } from '@/features/vault/sceneLogic';
+import { formatIntro, introOf, openingSeconds, parseIntro, partners, type Intro } from '@/features/vault/intro';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -258,6 +259,15 @@ function readFreeGb(): number | null {
     // No filesystem (web) - the UI hides the readout when this is null.
     return null;
   }
+}
+
+
+/** Picture prints a second apart over a video's first minutes (for finding its intro). */
+function openingPrints(v: Video): Promise<string[]> {
+  const secs = openingSeconds(v.durationMs);
+  const d = (v.durationMs ?? 0) / 1000;
+  if (!secs.length || !ReelVaultMedia?.videoPrints) return Promise.resolve([]);
+  return ReelVaultMedia.videoPrints(v.uri, secs.map((t) => t / d));
 }
 
 export type VaultData = {
@@ -1082,6 +1092,12 @@ export function useVaultData(): VaultData {
         const v = byId(item.id);
         if (!v) return { kind: 'failed', reason: 'not found' };
         const result = await editVideo(v, plan, { mode }, onProgress);
+        if (result.kind === 'done' && mode === 'replace') {
+          // The picture moved: its intro and what was read inside it are worked out again.
+          await setSetting(`intro.${v.id}`, '');
+          const db = await getDb();
+          await db.runAsync('DELETE FROM video_prints WHERE video_id = ?;', [v.id]).catch(() => undefined);
+        }
         if (result.kind === 'done') await refresh();
         return result;
       },
@@ -1152,6 +1168,48 @@ export function useVaultData(): VaultData {
         // Remembered as "none" once both neighbours were looked at.
         if (order[i + 1] && order[i - 1]) await setSetting(key, '0');
         return null;
+      },
+      findIntros: async (videoIds, onProgress) => {
+        const native = ReelVaultMedia;
+        const out: Record<string, Intro | null> = {};
+        if (!native?.videoPrints) return out;
+        const byId = new Map(videosRef.current.map((v) => [v.id, v]));
+        // Episodes next to each other by name share the intro ("berries 1", "berries 2", ...).
+        const list = videoIds
+          .map((id) => byId.get(id))
+          .filter((v): v is Video => !!v)
+          .sort((a, b) => (a.title || a.filename).localeCompare(b.title || b.filename, undefined, { numeric: true, sensitivity: 'base' }));
+        const prints: string[][] = [];
+        for (const [i, v] of list.entries()) {
+          prints.push(await openingPrints(v).catch(() => []));
+          onProgress((i + 1) / list.length);
+        }
+        for (const [i, v] of list.entries()) {
+          const found = introOf(prints[i], partners(prints, i), openingSeconds(v.durationMs));
+          out[v.id] = found;
+          if (found) await setSetting(`intro.${v.id}`, formatIntro(found));
+        }
+        return out;
+      },
+      introFor: async (videoId) => {
+        const key = `intro.${videoId}`;
+        const saved = await getSetting(key);
+        if (saved) return parseIntro(saved);
+        const mine = membersRef.current.find((m) => m.videoId === videoId);
+        const byId = new Map(videosRef.current.map((v) => [v.id, v]));
+        const me = byId.get(videoId);
+        if (!mine || !me || !ReelVaultMedia?.videoPrints) return null;
+        const order = membersRef.current.filter((m) => m.seriesId === mine.seriesId).sort((a, b) => a.position - b.position);
+        const i = order.findIndex((m) => m.videoId === videoId);
+        const others = partners(order, i, 1)
+          .map((m) => byId.get(m.videoId))
+          .filter((v): v is Video => !!v && !v.deletedAt);
+        if (!others.length) return null;
+        const mineP = await openingPrints(me);
+        const found = introOf(mineP, await Promise.all(others.map((o) => openingPrints(o).catch(() => []))), openingSeconds(me.durationMs));
+        // "-" = looked, none: not worked out again every time it plays.
+        await setSetting(key, found ? formatIntro(found) : '-');
+        return found;
       },
       loadGames: () => getSetting('games'),
       saveGames: (json) => setSetting('games', json),

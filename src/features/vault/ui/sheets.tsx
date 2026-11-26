@@ -10,7 +10,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 import { Modal } from './screen';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { dayKey, matchesRule } from './logic';
+import { dayKey, hasThing, matchesRule } from './logic';
 import { tick } from './haptics';
 import { SPRING } from './motion';
 import Icon from './Icon';
@@ -23,6 +23,7 @@ import {
   THEMES,
   THUMB_INFOS,
   THUMB_SIZES,
+  type HasKey,
   type Orientation,
   type SmartRule,
   type UiAlbum,
@@ -709,6 +710,32 @@ const SMART_TEMPLATES: { name: string; rule: SmartRule }[] = [
   { name: 'Added this month', rule: { addedWithinDays: 30 } },
   { name: 'Watched this week', rule: { watchedWithinDays: 7 } },
   { name: 'Long ones', rule: { minDurationSec: 1200 } },
+  { name: 'Not rated yet', rule: { has: { rating: false } } },
+  { name: 'Still on the first frame', rule: { has: { cover: false } } },
+  { name: 'No keywords, no album', rule: { has: { keywords: false, album: false } } },
+  { name: 'Not in a series', rule: { has: { series: false } } },
+];
+
+/** The "has / doesn't have" rows of the filter editor, in this order. */
+const HAS_ROWS: { key: HasKey; label: string }[] = [
+  { key: 'rating', label: 'Rating' },
+  { key: 'cover', label: 'Own cover' },
+  { key: 'keywords', label: 'Keywords' },
+  { key: 'album', label: 'In an album' },
+  { key: 'series', label: 'In a series' },
+  { key: 'title', label: 'Title' },
+  { key: 'notes', label: 'Notes' },
+  { key: 'watched', label: 'Watched' },
+  { key: 'resume', label: 'Half watched' },
+  { key: 'onScreen', label: 'Text on screen' },
+  { key: 'simkl', label: 'Linked to Simkl' },
+  { key: 'location', label: 'Location' },
+];
+type HasPick = 'any' | 'yes' | 'no';
+const HAS_OPTIONS: { key: HasPick; label: string }[] = [
+  { key: 'any', label: 'Either' },
+  { key: 'yes', label: 'Has' },
+  { key: 'no', label: "Hasn't" },
 ];
 const ORIENTATIONS: { key: Orientation; label: string }[] = [
   { key: 'landscape', label: 'Landscape' },
@@ -754,6 +781,17 @@ export function SmartFilterSheet({
     [items]
   );
   const set = (patch: Partial<SmartRule>) => setRule((r) => ({ ...r, ...patch }));
+  const setHas = (key: HasKey, want: boolean | undefined) =>
+    setRule((r) => {
+      const has = { ...r.has, [key]: want };
+      if (want === undefined) delete has[key];
+      return { ...r, has: Object.keys(has).length ? has : undefined };
+    });
+  const hasCounts = useMemo(() => {
+    const out = {} as Record<HasKey, number>;
+    for (const r of HAS_ROWS) out[r.key] = items.filter((v) => hasThing(v, r.key)).length;
+    return out;
+  }, [items]);
 
   function toggleAny(t: string) {
     const current = rule.anyTags ?? [];
@@ -812,6 +850,29 @@ export function SmartFilterSheet({
           <Text style={styles.muted}>A smart album fills itself: new videos that match join it on their own, and ones that stop matching leave.</Text>
         </Section>
       )}
+
+      <Section label="Has or hasn't">
+        {HAS_ROWS.map((r) => {
+          const want = rule.has?.[r.key];
+          return (
+            <View key={r.key} style={styles.hasRow}>
+              <View style={styles.hasText}>
+                <Text style={styles.hasLabel} numberOfLines={1}>
+                  {r.label}
+                </Text>
+                <Text style={styles.hasCount}>{hasCounts[r.key] === items.length ? 'All have it' : hasCounts[r.key] === 0 ? 'None have it' : `${hasCounts[r.key]} have it`}</Text>
+              </View>
+              <View style={styles.hasSeg}>
+                <Segment
+                  options={HAS_OPTIONS}
+                  value={want === undefined ? 'any' : want ? 'yes' : 'no'}
+                  onChange={(k) => setHas(r.key, k === 'any' ? undefined : k === 'yes')}
+                />
+              </View>
+            </View>
+          );
+        })}
+      </Section>
 
       <Section label={searching ? 'Save as Smart Filter (optional)' : 'Name'}>
         <View style={styles.inputRow}>
@@ -1153,6 +1214,11 @@ const makeStyles = (p: Palette) =>
     numberLabel: { color: p.textMuted, fontSize: 11 },
 
     segment: { flexDirection: 'row', backgroundColor: p.circle, borderRadius: 10, padding: 3 },
+    hasRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 },
+    hasText: { flex: 1, minWidth: 0 },
+    hasLabel: { color: p.text, fontSize: 15, fontWeight: '600' },
+    hasCount: { color: p.textSecondary, fontSize: 12, fontVariant: ['tabular-nums'], marginTop: 1 },
+    hasSeg: { width: 196 },
     segmentItem: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
     segmentPill: { position: 'absolute', top: 3, bottom: 3, left: 0, borderRadius: 8, backgroundColor: p.accent },
     segmentText: { color: p.textSoft, fontWeight: '600', fontSize: 13 },

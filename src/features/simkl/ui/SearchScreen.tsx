@@ -14,10 +14,12 @@ import { useWindowDimensions } from '@/features/vault/ui/screen';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 
 import { useTabBarSpace } from '@/features/vault/ui/chrome';
 import Fade from '@/features/vault/ui/Fade';
 import { tick } from '@/features/vault/ui/haptics';
+import { enterUp } from '@/features/vault/ui/motion';
 import Icon from '@/features/vault/ui/Icon';
 import type { IconName } from '@/features/vault/ui/icons';
 import { raised, rgbOf, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
@@ -114,6 +116,11 @@ export default function SearchScreen({
         },
       },
     [local, live]
+  );
+  // Words written on screen in your videos (searched once per query; the card and the list both use it).
+  const onScreenFound = useMemo(
+    () => (local?.onScreen && live && live.length >= 2 && (scope === 'all' || scope === 'video' || scope === 'mine') ? local.onScreen(live) : null),
+    [local, live, scope]
   );
   const searchFor = (q: string) => {
     setQuery(q);
@@ -218,9 +225,7 @@ export default function SearchScreen({
           ))}
         </ScrollView>
 
-        {localHere?.onScreen && live && live.length >= 2 && (scope === 'all' || scope === 'video' || scope === 'mine') && (
-          <OnScreenCard local={localHere} query={live} />
-        )}
+        {onScreenFound && <OnScreenCard local={localHere!} query={live!} found={onScreenFound} />}
         {localHere && live && (
           <LocalResults
             key={`${scope}:${live}`}
@@ -228,7 +233,7 @@ export default function SearchScreen({
             query={live}
             kinds={LOCAL_KINDS[scope]}
             compact={onSimkl}
-            quiet={onSimkl && scope !== 'all'}
+            quiet={(onSimkl && scope !== 'all') || !!onScreenFound?.count}
             onTitle={openTitle}
           />
         )}
@@ -401,35 +406,49 @@ function Tile({ t, w, mine, onPress }: { t: CatalogTitle; w: number; mine?: Simk
 const Fill = { position: 'absolute' as const, top: 0, left: 0, right: 0, bottom: 0 };
 
 /** "berries" is written on screen in 37 videos: select them all (to trim their starts, say). */
-function OnScreenCard({ local, query }: { local: LocalSearch; query: string }) {
+function OnScreenCard({ local, query, found }: { local: LocalSearch; query: string; found: { count: number; looked: number; total: number } }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
-  const found = useMemo(() => local.onScreen?.(query) ?? { count: 0, looked: 0, total: 0 }, [local, query]);
-  if (!found.count) return null;
   const waiting = found.total - found.looked;
+  const none = found.count === 0;
   return (
-    <View style={styles.onScreen}>
-      <View style={styles.onScreenIcon}>
-        <Icon name="search" size={16} color={p.accent} />
+    <Animated.View entering={enterUp(0)} layout={LinearTransition.duration(220)} style={styles.onScreen}>
+      <View style={[styles.onScreenIcon, none && { backgroundColor: raised(p) }]}>
+        <Icon name="search" size={16} color={none ? p.textSecondary : p.accent} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.onScreenTitle} numberOfLines={2}>
-          "{query}" is on screen in {found.count} video{found.count === 1 ? '' : 's'}
+          {none
+            ? `"${query}" isn't written on screen in ${waiting > 0 ? 'the videos read so far' : 'any of your videos'}`
+            : `"${query}" is on screen in ${found.count} video${found.count === 1 ? '' : 's'}`}
         </Text>
-        {waiting > 0 && <Text style={styles.onScreenSub}>{found.looked} of {found.total} videos looked at so far</Text>}
+        {waiting > 0 ? (
+          <>
+            <Text style={styles.onScreenSub}>
+              {found.looked} of {found.total} videos read. The rest are read while ReelVault is open and nothing is playing.
+            </Text>
+            <View style={styles.onScreenTrack}>
+              <View style={[styles.onScreenFill, { width: `${Math.round((found.looked / Math.max(1, found.total)) * 100)}%` }]} />
+            </View>
+          </>
+        ) : (
+          none && <Text style={styles.onScreenSub}>Only words written in the picture count, not spoken ones.</Text>
+        )}
       </View>
-      <TouchableOpacity
-        style={styles.onScreenBtn}
-        onPress={() => {
-          tick();
-          local.remember(query);
-          local.selectOnScreen?.(query);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={`Select all ${found.count} videos`}>
-        <Text style={styles.onScreenBtnText}>Select all</Text>
-      </TouchableOpacity>
-    </View>
+      {!none && (
+        <TouchableOpacity
+          style={styles.onScreenBtn}
+          onPress={() => {
+            tick();
+            local.remember(query);
+            local.selectOnScreen?.(query);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Select all ${found.count} videos`}>
+          <Text style={styles.onScreenBtnText}>Select all</Text>
+        </TouchableOpacity>
+      )}
+    </Animated.View>
   );
 }
 
@@ -439,6 +458,8 @@ const makeStyles = (p: Palette) =>
     onScreenIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: p.accentSoft },
     onScreenTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
     onScreenSub: { color: p.textSecondary, fontSize: 13, marginTop: 2 },
+    onScreenTrack: { height: 4, borderRadius: 2, marginTop: 8, overflow: 'hidden', backgroundColor: p.scheme === 'light' ? p.card : p.circle },
+    onScreenFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     onScreenBtn: { height: 36, paddingHorizontal: 14, borderRadius: 18, backgroundColor: p.text, alignItems: 'center', justifyContent: 'center' },
     onScreenBtnText: { color: p.bg, fontSize: 14, fontWeight: '800' },
     screen: { flex: 1, backgroundColor: p.bg },

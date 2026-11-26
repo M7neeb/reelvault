@@ -38,3 +38,31 @@ test('the "on screen:" search words', () => {
   assert.equal(onScreenQuery('berries'), null);
   assert.equal(onScreenQuery('on screen:   '), null);
 });
+
+test('a letter misread off the picture still matches longer words', async () => {
+  const { startsLike } = await import('../src/features/vault/sceneLogic.ts');
+  const misread = [
+    { videoId: 'x', atMs: 0, labels: '', words: 'BERRLES season 2' },
+    { videoId: 'y', atMs: 0, labels: '', words: 'beries' },
+    { videoId: 'z', atMs: 0, labels: '', words: 'cherries' },
+  ];
+  assert.deepEqual(onScreen(misread, 'berries').sort(), ['x', 'y']);
+  // Short words must be exact: "sd" never matches "sb".
+  assert.equal(startsLike('sb', 'sd'), false);
+  assert.equal(startsLike('berriest', 'berries'), true);
+  assert.equal(startsLike('strawberries', 'berries'), false);
+});
+
+test('reads the first two minutes closely, the rest spread out, never more than the cap', async () => {
+  const { readTimes } = await import('../src/features/vault/sceneLogic.ts');
+  const short = readTimes(30_000);
+  assert.deepEqual(short.slice(0, 3), [1, 3, 5]);
+  assert.ok(short.every((t) => t < 30));
+  const long = readTimes(20 * 60_000);
+  assert.equal(long.length, 100);
+  assert.equal(long.filter((t) => t < 120).length, 60);
+  assert.ok(long.at(-1) < 1200);
+  assert.deepEqual(readTimes(null), []);
+  // Times only go forward.
+  assert.ok(long.every((t, i) => i === 0 || t > long[i - 1]));
+});

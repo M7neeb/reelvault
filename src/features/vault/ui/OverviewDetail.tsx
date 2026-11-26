@@ -11,6 +11,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { DISPLAY_FONT } from './paletteMath';
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Modal, useWindowDimensions } from './screen';
 import { Image } from 'expo-image';
@@ -255,7 +256,7 @@ export default function OverviewDetail({
             <View style={styles.heroBody}>
               <Cover source={entry.cover} title={entry.title} width={118} height={168} radius={12} />
               <View style={styles.heroText}>
-                <Text style={styles.kind}>{series ? `SERIES · ${entry.episodes.length} EPISODES` : 'VIDEO'}</Text>
+                <Text style={styles.kind}>{series ? `Series · ${entry.episodes.length} episodes` : 'Video'}</Text>
                 <Text style={styles.heroTitle} numberOfLines={3}>
                   {entry.title}
                 </Text>
@@ -672,7 +673,8 @@ function EpisodeRow({
     <TouchableOpacity style={styles.ep} onPress={onPress} onLongPress={onMore} accessibilityLabel={`Episode ${ep.number}, ${ep.name}`}>
       <TouchableOpacity onPress={onToggle} hitSlop={8} accessibilityLabel={ep.watched ? 'Mark not watched' : 'Mark watched'}>
         <View style={[styles.epNum, ep.watched && styles.epNumOn]}>
-          {ep.watched ? <Icon name="check" size={13} color="#fff" weight="bold" /> : <Text style={styles.epNumText}>{ep.number}</Text>}
+          <Text style={[styles.epNumText, ep.watched && styles.epNumSeen]}>{String(ep.number).padStart(2, '0')}</Text>
+          {ep.watched && <Icon name="check" size={10} color={p.success} weight="bold" />}
         </View>
       </TouchableOpacity>
       <View style={styles.epThumb}>
@@ -1028,9 +1030,10 @@ const makeStyles = (p: Palette) =>
     hint: { color: p.textSecondary, fontSize: 12, paddingHorizontal: SIDE, paddingTop: 8 },
 
     ep: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: SIDE, paddingVertical: 8 },
-    epNum: { width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: p.border, alignItems: 'center', justifyContent: 'center' },
-    epNumOn: { backgroundColor: p.success, borderColor: p.success },
-    epNumText: { color: p.textSoft, fontSize: 12, fontWeight: '800' },
+    epNum: { width: 38, alignItems: 'center', justifyContent: 'center' },
+    epNumOn: {},
+    epNumText: { color: p.text, fontSize: 26, lineHeight: 28, fontFamily: DISPLAY_FONT.bold },
+    epNumSeen: { color: p.textMuted },
     epThumb: {},
     epGone: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' },
     epTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.3)' },

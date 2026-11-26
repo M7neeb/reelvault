@@ -73,7 +73,7 @@ export function WifiScreen({ wifi, ask, onClose }: { wifi: WifiBridge | null; as
               <Icon name="close" size={16} color="#fff" />
             </TouchableOpacity>
           </View>
-          <Text style={styles.kicker}>FROM COMPUTER · WI-FI</Text>
+          <Text style={styles.kicker}>From computer · Wi-Fi</Text>
           <Text style={styles.title}>Send videos from your PC</Text>
 
           {!wifi ? (

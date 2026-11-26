@@ -424,7 +424,7 @@ function FeaturedCard({ m, width, thumbs, items, fav, fresh, active, onPress, on
           </View>
           {fresh && (
             <View style={styles.newChip}>
-              <Text style={styles.newChipText}>NEW</Text>
+              <Text style={styles.newChipText}>New</Text>
             </View>
           )}
         </View>
@@ -953,7 +953,7 @@ export function MemoryPlayer({
                       <TouchableOpacity style={styles.upNext} onPress={() => onNext(next)} accessibilityLabel={`Play next: ${next.title}`}>
                         <Image source={thumbs.get(next.coverId)} style={styles.upNextImg} contentFit="cover" />
                         <View style={{ flex: 1, gap: 2 }}>
-                          <Text style={styles.upNextKicker}>UP NEXT</Text>
+                          <Text style={styles.upNextKicker}>Up next</Text>
                           <Text style={styles.upNextTitle} numberOfLines={1}>
                             {next.title}
                           </Text>

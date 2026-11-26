@@ -32,7 +32,7 @@ export default function Ambient({
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, height !== undefined && { bottom: undefined, height }, styles.clip, style]} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       {/* Larger than the box: a blur fades out at the picture's edges. */}
       <Image source={source} style={styles.picture} contentFit="cover" blurRadius={dark ? 70 : 90} transition={250} />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(${bg},${dark ? 0.5 : 0.62})` }]} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(${bg},${dark ? 0.72 : 0.8})` }]} />
       <Fade color={bg} from={0} to={1} style={styles.fade} />
     </View>
   );
@@ -41,5 +41,5 @@ export default function Ambient({
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden' },
   picture: { position: 'absolute', top: '-15%', left: '-15%', width: '130%', height: '130%' },
-  fade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '45%' },
+  fade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '60%' },
 });

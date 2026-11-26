@@ -8,6 +8,8 @@ import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 
 import Fade from '@/features/vault/ui/Fade';
+import { DISPLAY_FONT } from '@/features/vault/ui/paletteMath';
+import { Spine } from '@/features/vault/ui/spine';
 
 import { posterUrl } from '../logic';
 
@@ -26,7 +28,7 @@ export default function Poster({
   title,
   width,
   height,
-  radius = 8,
+  radius = 6,
   size = '_c',
   style,
   hideTitle,
@@ -47,7 +49,8 @@ export default function Poster({
   const box = {
     width,
     height,
-    borderRadius: radius,
+    // Boxes, not cards: corners stay tight whatever the caller asks.
+    borderRadius: Math.min(radius, 8),
     overflow: 'hidden' as const,
   };
   if (!path) {
@@ -75,14 +78,14 @@ export default function Poster({
               right: 8,
               bottom: 10,
               color: '#fff',
-              fontSize: fs,
-              lineHeight: Math.round(fs * 1.15),
-              fontWeight: '800',
-              letterSpacing: -0.2,
+              fontSize: Math.round(fs * 1.15),
+              lineHeight: Math.round(fs * 1.2),
+              fontFamily: DISPLAY_FONT.bold,
             }}>
             {title}
           </Text>
         )}
+        {!hideTitle && <Spine name={title} width={width >= 90 ? 4 : 3} />}
         {children}
       </View>
     );
@@ -90,6 +93,7 @@ export default function Poster({
   return (
     <View style={[box, { backgroundColor: '#1c1c1e' }, style]}>
       <Image source={{ uri: posterUrl(path, size) }} style={{ width, height }} contentFit="cover" transition={150} recyclingKey={path} />
+      {!hideTitle && <Spine name={title} width={width >= 90 ? 4 : 3} />}
       {children}
     </View>
   );

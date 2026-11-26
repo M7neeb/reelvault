@@ -20,6 +20,7 @@ import { SideSafe } from '@/features/vault/ui/screen';
 import { ThemeContext } from '@/features/vault/ui/theme';
 import { resumeSavedAt } from '@/features/vault/watching';
 import { findScenes, onScreen } from '@/features/vault/sceneLogic';
+import { canLookInside } from '@/features/vault/scenes';
 import { progressOf } from '@/features/vault/books/bookLogic';
 import { fmtClock } from '@/features/vault/stats';
 
@@ -142,10 +143,11 @@ export default function SearchRoute() {
       remember: (q) => saveRecent(rememberSearch(recentRef.current, q)),
       clearRecent: () => saveRecent([]),
       onScreen: (q) => {
+        if (!canLookInside()) return null;
         const count = onScreen(vault.sceneRows.current, q).filter((id) => shownVideos.has(id)).length;
         const pr = vault.insideProgress;
         // While the scan is still going, its own numbers (the whole library); after it, everything was looked at.
-        return pr?.running ? { count, looked: pr.done, total: pr.total } : { count, looked: shownVideos.size, total: shownVideos.size };
+        return pr?.running ? { count, looked: pr.done, total: pr.total, running: true } : { count, looked: shownVideos.size, total: shownVideos.size, running: !pr };
       },
       selectOnScreen: (q) => {
         router.navigate('/' as Href);

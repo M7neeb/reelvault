@@ -37,7 +37,8 @@ export type LocalSearch = {
   remember: (q: string) => void;
   clearRecent: () => void;
   /** Videos with these words written on screen (what the look-inside scan read): how many, and how far the scan is. */
-  onScreen?: (q: string) => { count: number; looked: number; total: number };
+  /** null when this app build can't look inside videos. */
+  onScreen?: (q: string) => { count: number; looked: number; total: number; running: boolean } | null;
   /** Opens Videos with all of them selected (to trim the start off them, for example). */
   selectOnScreen?: (q: string) => void;
 };
@@ -93,7 +94,7 @@ export function JumpShelf({ local, onTitle, kinds }: { local: LocalSearch; onTit
                 <View style={{ flex: 1, gap: 3 }}>
                   <View style={styles.kindRow}>
                     <Icon name={KIND_ICON[j.kind]} size={11} color={p.accent} />
-                    <Text style={styles.kindText}>{kindLabel(j.kind).toUpperCase()}</Text>
+                    <Text style={styles.kindText}>{kindLabel(j.kind)}</Text>
                   </View>
                   <Text style={styles.jumpTitle} numberOfLines={2}>
                     {j.title}
@@ -233,7 +234,7 @@ const makeStyles = (p: Palette) =>
     jumpCard: { width: 268, backgroundColor: p.elevated, borderRadius: 16, overflow: 'hidden' },
     jumpRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 },
     kindRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-    kindText: { color: p.accent, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+    kindText: { color: p.accent, fontSize: 12, fontWeight: '600' },
     jumpTitle: { color: p.text, fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
     jumpSub: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
     playDot: { width: 30, height: 30, borderRadius: 15, backgroundColor: p.accent, alignItems: 'center', justifyContent: 'center' },

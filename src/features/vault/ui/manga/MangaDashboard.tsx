@@ -186,7 +186,7 @@ export default function MangaDashboard({
                           })}
                         </View>
                         <View style={{ flex: 1, gap: 3 }}>
-                          <Text style={styles.memKicker}>{m.kicker.toUpperCase()}</Text>
+                          <Text style={styles.memKicker}>{m.kicker}</Text>
                           <Text style={styles.memTitle} numberOfLines={2}>
                             {m.title}
                           </Text>
@@ -301,7 +301,7 @@ export default function MangaDashboard({
 
             <TouchableOpacity activeOpacity={0.85} style={styles.wrapCard} onPress={() => setStory({ range: yearRangeOf(year, now), mix: false })} accessibilityLabel={`Open your ${year} Reading Wrapped`}>
               <View style={styles.wrapGlow} />
-              <Text style={styles.wrapKicker}>READING WRAPPED</Text>
+              <Text style={styles.wrapKicker}>Reading wrapped</Text>
               <Text style={styles.wrapTitle}>Your {year} in manga</Text>
               <Text style={styles.wrapSub}>Your #1, your most read, your busiest month and genre. Weeks, months, all time and Videos + Manga are in Wrapped.</Text>
             </TouchableOpacity>

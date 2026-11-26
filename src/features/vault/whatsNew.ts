@@ -9,6 +9,20 @@ export const WHATS_NEW_KEY = 'whatsNew.seen';
 
 export const RELEASES: Release[] = [
   {
+    id: '2026-11-26',
+    title: 'A new look, and Find the intro',
+    items: [
+      'Trim Start & End has Find the intro: it compares episodes next to each other by name and cuts each one exactly where its own intro ends.',
+      'Filter videos by what they have or don\'t: a rating, your own cover, keywords, an album, a series, a title, notes, plays, text on screen, a Simkl link (Library panel, Filter videos). Save it as a smart filter to keep it.',
+      'Skip intro: in a series, a button shows while the intro plays and jumps past it.',
+      'Searching for words written in your videos now always tells you what it found, or how many videos it has read so far, instead of showing nothing.',
+      'With the new app build, text on screen is read much more carefully, and the first two minutes of every video closely, so titles in intros are found. Your videos are read once more by themselves.',
+      'A new look: your library as a shelf of box sets. Every series, show, book, audiobook and manga has its own spine colour down its edge; episodes carry big numbers; titles are set in a narrow display face; corners are tighter and the accent is a deep red (Personalise has the others).',
+      'Your shelf (Watch and Overview): your series standing side by side with their episode count and how far you are. The one you are watching stands pulled out; tap one and it slides off the shelf.',
+      'Posters, covers, shelves and cards dip a little under your finger, and the select tick pops in.',
+    ],
+  },
+  {
     id: '2026-11-25b',
     title: 'Clips, games and smarter series',
     items: [

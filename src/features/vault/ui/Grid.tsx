@@ -14,6 +14,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ScrollView as RNScrollView, Text, TouchableOpacity, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
+import Animated from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
@@ -23,6 +24,8 @@ import { computeSectionedLayout, visibleTiles, type Tile } from './layout';
 import { daysLeft, groupItems } from './logic';
 import { useTabBarSpace } from './chrome';
 import Icon from './Icon';
+import { checkPop, PressableScale } from './motion';
+import { Spine } from './spine';
 import { sheet, useStyles, type Palette } from './theme';
 import type { VaultItem, ViewOptions } from './types';
 
@@ -62,6 +65,8 @@ type Props = {
   onScrollExtra?: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
   /** Videos linked to a Simkl movie or episode (a small TV mark). */
   linked?: Set<string>;
+  /** Video id -> its series name: the tile gets that series' spine. */
+  series?: Map<string, string>;
   /** "Continue another time" points: a thin bar where you stopped. */
   resume?: Map<string, number>;
   /** Play the tile in the middle of the screen, silently (a setting; off while something is open on top). */
@@ -83,6 +88,7 @@ export default function Grid({
   onPressTile,
   onLongPressTile,
   linked,
+  series,
   resume,
   seriesOf,
   onPinchSize,
@@ -250,6 +256,7 @@ export default function Grid({
                 copyRank={dupRank.get(item.id)}
                 albumNames={albumNames}
                 linked={linked?.has(item.id) ?? false}
+                seriesName={series?.get(item.id)}
                 resumeAt={resume?.get(item.id)}
                 live={liveId === item.id && !!item.uri && (item.durationMs ?? 1) > 0}
                 now={now}
@@ -299,6 +306,7 @@ const TileView = memo(function TileView({
   copyRank,
   albumNames,
   linked,
+  seriesName,
   resumeAt,
   live,
   now,
@@ -315,6 +323,7 @@ const TileView = memo(function TileView({
   copyRank: number | undefined;
   albumNames: Map<number, string>;
   linked: boolean;
+  seriesName?: string;
   resumeAt?: number;
   live?: boolean;
   now: number;
@@ -335,9 +344,10 @@ const TileView = memo(function TileView({
   const hasTagMark = viewOptions.showKeywords && item.tagCount > 0;
 
   return (
-    <TouchableOpacity
+    <PressableScale
       style={[styles.cell, { left: tile.x, top: tile.y, width: tile.w, height: tile.h }]}
-      activeOpacity={0.8}
+      scaleTo={0.965}
+      accessibilityRole="button"
       onPress={() => onPress(item)}
       onLongPress={onLongPress ? () => onLongPress(item) : undefined}
       delayLongPress={350}>
@@ -348,6 +358,7 @@ const TileView = memo(function TileView({
         recyclingKey={item.id}
       />
       {live && <TilePreview uri={item.uri} durationMs={item.durationMs} />}
+      {seriesName && <Spine name={seriesName} width={tile.w >= 120 ? 4 : 3} />}
       {item.inTray && <View style={styles.trayOutline} pointerEvents="none" />}
       {resumeAt !== undefined && !!item.durationMs && (
         <View style={styles.resumeTrack} pointerEvents="none">
@@ -390,10 +401,14 @@ const TileView = memo(function TileView({
       )}
       {selectMode && (
         <View style={[styles.check, isSelected && styles.checkOn]}>
-          {isSelected && <Icon name="check" size={12} color="#fff" weight="bold" />}
+          {isSelected && (
+            <Animated.View entering={checkPop}>
+              <Icon name="check" size={12} color="#fff" weight="bold" />
+            </Animated.View>
+          )}
         </View>
       )}
-    </TouchableOpacity>
+    </PressableScale>
   );
 });
 

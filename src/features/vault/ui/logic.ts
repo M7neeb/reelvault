@@ -5,6 +5,7 @@
 
 import type {
   GroupBy,
+  HasKey,
   DateGroup,
   LayoutStyle,
   Orientation,
@@ -51,6 +52,8 @@ type RuleTarget = {
   albumIds?: number[];
   meta?: UiMeta | null;
   inTray?: boolean;
+  /** A cover was set (picked by you, or the best frame picked by the app). */
+  customCover?: boolean;
 };
 
 export function orientationOf(width: number | null | undefined, height: number | null | undefined): Orientation | null {
@@ -97,7 +100,50 @@ export function watchInfoOf(plays: { videoId: string; startedAt: number }[]): Wa
 
 const DAY_MS = 86_400_000;
 
+/** What the filter editor's "has" rules need that a video row doesn't carry. */
+export type HasInfo = { series: Set<string>; simkl: Set<string>; onScreen: Set<string>; resume: Set<string> };
+let HAS: HasInfo = { series: new Set(), simkl: new Set(), onScreen: new Set(), resume: new Set() };
+/** Kept up to date by the screen, like setWatchInfo. */
+export function setHasInfo(info: HasInfo): void {
+  HAS = info;
+}
+
+export function hasThing(item: RuleTarget, key: HasKey, watch: WatchInfo = WATCH, info: HasInfo = HAS): boolean {
+  const id = item.id ?? '';
+  switch (key) {
+    case 'cover':
+      return !!item.customCover;
+    case 'rating':
+      return item.rating > 0;
+    case 'keywords':
+      return item.tagNames.length > 0;
+    case 'album':
+      return (item.albumIds?.length ?? 0) > 0;
+    case 'title':
+      return !!item.title?.trim();
+    case 'notes':
+      return !!item.notes?.trim();
+    case 'series':
+      return info.series.has(id);
+    case 'simkl':
+      return info.simkl.has(id);
+    case 'watched':
+      return (watch.get(id)?.plays ?? 0) > 0;
+    case 'onScreen':
+      return info.onScreen.has(id);
+    case 'location':
+      return !!item.meta?.location;
+    case 'resume':
+      return info.resume.has(id);
+  }
+}
+
 export function matchesRule(item: RuleTarget, rule: SmartRule, watch: WatchInfo = WATCH, now: number = Date.now()): boolean {
+  if (rule.has) {
+    for (const [key, want] of Object.entries(rule.has) as [HasKey, boolean | undefined][]) {
+      if (want !== undefined && hasThing(item, key, watch) !== want) return false;
+    }
+  }
   if (rule.anyTags?.length && !rule.anyTags.some((t) => item.tagNames.includes(t))) return false;
   if (rule.watched || rule.minPlays || rule.notWatchedDays || rule.watchedWithinDays) {
     const w = item.id ? watch.get(item.id) : undefined;
@@ -183,6 +229,21 @@ const range = (min: number | undefined, max: number | undefined, unit: string) =
       : `up to ${max} ${unit}`;
 
 /** `rated 8+ · #travel · watched` - the line under a smart filter's name. */
+const HAS_WORDS: Record<HasKey, string> = {
+  cover: 'own cover',
+  rating: 'rating',
+  keywords: 'keywords',
+  album: 'album',
+  title: 'title',
+  notes: 'notes',
+  series: 'series',
+  simkl: 'Simkl link',
+  watched: 'plays',
+  onScreen: 'text on screen',
+  location: 'location',
+  resume: 'half watched',
+};
+
 export function describeRule(rule: SmartRule): string {
   const parts: string[] = [];
   if (rule.minRating && rule.maxRating !== undefined) parts.push(`rated ${rule.minRating}–${rule.maxRating}`);
@@ -205,6 +266,9 @@ export function describeRule(rule: SmartRule): string {
   if (rule.minAlbums !== undefined || rule.maxAlbums !== undefined) parts.push(range(rule.minAlbums, rule.maxAlbums, 'albums'));
   if (rule.hasLocation !== undefined) parts.push(rule.hasLocation ? 'with location' : 'no location');
   if (rule.inTray) parts.push('in tray');
+  for (const [key, want] of Object.entries(rule.has ?? {}) as [HasKey, boolean | undefined][]) {
+    if (want !== undefined) parts.push(`${want ? 'with' : 'no'} ${HAS_WORDS[key]}`);
+  }
   if (rule.anyTags?.length) parts.push(rule.anyTags.map((t) => `#${t}`).join(' or '));
   if (rule.watched) parts.push(rule.watched === 'never' ? 'never watched' : 'watched');
   if (rule.minPlays) parts.push(`played ${rule.minPlays}+ times`);
@@ -271,6 +335,13 @@ export function parseRule(json: string): SmartRule {
     if (tags.length) rule.anyTags = tags;
   }
   if (r.watched === 'never' || r.watched === 'watched') rule.watched = r.watched;
+  if (r.has && typeof r.has === 'object') {
+    const has: Partial<Record<HasKey, boolean>> = {};
+    for (const [key, want] of Object.entries(r.has as Record<string, unknown>)) {
+      if (key in HAS_WORDS && typeof want === 'boolean') has[key as HasKey] = want;
+    }
+    if (Object.keys(has).length) rule.has = has;
+  }
   for (const key of ['minPlays', 'notWatchedDays', 'watchedWithinDays', 'addedWithinDays', 'filmedWithinDays'] as const) {
     const v = num(r[key], 1, 100_000);
     if (v !== undefined) rule[key] = Math.round(v);

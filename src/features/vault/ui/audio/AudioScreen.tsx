@@ -20,7 +20,7 @@ import { tick } from '../haptics';
 import Icon from '../Icon';
 import Ambient from '../Ambient';
 import IconButton from '../IconButton';
-import { enterUp } from '../motion';
+import { enterUp, PressableScale } from '../motion';
 import { ModeSwitch, type VideosMode } from '../overviewParts';
 import { OptionsSheet, PromptSheet, type OptionItem } from '../prompts';
 import RatingPicker from '../RatingPicker';
@@ -208,7 +208,7 @@ export default function AudioScreen({
               const left = Math.max(0, totalMs(i) * (1 - pr));
               return (
                 <Animated.View key={i.id} entering={FadeInDown.delay(n * 60)}>
-                  <TouchableOpacity style={styles.resume} onPress={() => onOpen(i)} onLongPress={() => onInfo(i)} accessibilityLabel={`Continue ${displayTitle(i)}`}>
+                  <PressableScale style={styles.resume} onPress={() => onOpen(i)} onLongPress={() => onInfo(i)} accessibilityLabel={`Continue ${displayTitle(i)}`}>
                     <AudioCover item={i} size={132} radius={16} />
                     <View style={styles.resumeBar}>
                       <View style={[styles.resumeFill, { width: `${Math.round(pr * 100)}%` }]} />
@@ -224,7 +224,7 @@ export default function AudioScreen({
                         <Icon name="audio" size={11} color="#fff" />
                       </View>
                     )}
-                  </TouchableOpacity>
+                  </PressableScale>
                 </Animated.View>
               );
             })}
@@ -237,7 +237,7 @@ export default function AudioScreen({
           <Text style={styles.section}>Listen next</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SIDE, gap: 12 }}>
             {upNext.map((i, n) => (
-              <TouchableOpacity
+              <PressableScale
                 key={i.id}
                 style={styles.queued}
                 onPress={() => onOpen(i)}
@@ -251,7 +251,7 @@ export default function AudioScreen({
                 <Text style={styles.resumeTitle} numberOfLines={2}>
                   {displayTitle(i)}
                 </Text>
-              </TouchableOpacity>
+              </PressableScale>
             ))}
           </ScrollView>
         </View>
@@ -262,7 +262,7 @@ export default function AudioScreen({
           <Text style={styles.section}>Series</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: SIDE, gap: 12 }}>
             {allSeries.map((s) => (
-              <TouchableOpacity
+              <PressableScale
                 key={s.name}
                 style={styles.seriesCard}
                 onPress={() => {
@@ -283,7 +283,7 @@ export default function AudioScreen({
                 <Text style={styles.meta} numberOfLines={1}>
                   {s.finished === s.books.length ? `All ${s.books.length} finished` : `${s.finished} of ${s.books.length} finished`}
                 </Text>
-              </TouchableOpacity>
+              </PressableScale>
             ))}
           </ScrollView>
         </View>

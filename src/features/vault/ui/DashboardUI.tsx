@@ -39,9 +39,9 @@ import type { Memory } from '../memories';
 import { TONES } from './MemoriesUI';
 import { LiveCard } from './live';
 import { enterUp, PressableScale } from './motion';
-import { Aurora, CountUp, hexA, KenBurns, Pulse } from './storyKit';
+import { CountUp, hexA, KenBurns, Pulse } from './storyKit';
 import { Segment } from './sheets';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import { raised, sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 
 const PERIODS: { key: DashPeriod; label: string }[] = [
@@ -133,16 +133,16 @@ export default function Dashboard({
   const left = useMemo(() => unfinished(items, plays, 10), [items, plays]);
   const [pickSeed, setPickSeed] = useState(0);
   const pick = useMemo(() => {
-    if (pickSeed === 0 && left[0]) return { video: left[0].video, why: `You stopped at ${Math.round(left[0].share * 100)} %`, kicker: 'PICK UP WHERE YOU LEFT OFF' };
+    if (pickSeed === 0 && left[0]) return { video: left[0].video, why: `You stopped at ${Math.round(left[0].share * 100)} %`, kicker: 'Pick up where you left off' };
     const fav = again[0] ? byIdMap.get(again[0].video.id) : undefined;
-    if (pickSeed <= 1 && fav) return { video: fav, why: again[0].why, kicker: 'A FORGOTTEN FAVOURITE' };
+    if (pickSeed <= 1 && fav) return { video: fav, why: again[0].why, kicker: 'A forgotten favourite' };
     let s = pickSeed * 9301 + 49297;
     const rand = () => {
       s = (s * 9301 + 49297) % 233280;
       return s / 233280;
     };
     const v = randomPick(items, plays, now, rand);
-    return v ? { video: v, why: v.rating ? `Rated ★ ${v.rating}` : 'Something different', kicker: 'TONIGHT’S PICK' } : null;
+    return v ? { video: v, why: v.rating ? `Rated ★ ${v.rating}` : 'Something different', kicker: 'Tonight’s pick' } : null;
   }, [pickSeed, left, again, items, plays, byIdMap]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The unfinished ones not already shown as tonight's pick.
@@ -235,13 +235,12 @@ export default function Dashboard({
       )}
 
       {/* ── this week's goal ─────────────────────────────────────── */}
-      <Animated.View entering={enterUp(0)} style={[styles.goal, gradient('linear-gradient(135deg, #0A84FF 0%, #3A2BB8 55%, #1A0F4A 100%)')]}>
-        <Aurora colors={['#0A84FF', '#1A0F4A']} accent="#BF5AF2" width={width - 32} height={150} />
-        <Ring size={112} stroke={11} progress={week.ms / goalMs} color={week.ms >= goalMs ? '#30D158' : '#FFFFFF'} track="rgba(255,255,255,0.2)">
+      <Animated.View entering={enterUp(0)} style={[styles.goal, { backgroundColor: raised(p) }]}>
+        <Ring size={112} stroke={11} progress={week.ms / goalMs} color={week.ms >= goalMs ? p.success : p.accent} track={p.circle}>
           <Text style={styles.goalPct}>{Math.min(999, Math.round((week.ms / goalMs) * 100))}%</Text>
         </Ring>
         <View style={{ flex: 1, gap: 3 }}>
-          <Text style={styles.goalKicker}>THIS WEEK</Text>
+          <Text style={styles.goalKicker}>This week</Text>
           <CountUp to={week.ms} format={(n) => (n >= 60000 ? fmtMs(n) : `${Math.round(n / 60000)} min`)} style={styles.goalValue} />
           <Text style={styles.goalSub}>
             {week.ms >= goalMs ? 'Goal reached. Nice!' : `${fmtMs(toGo)} to go · about ${fmtMs(toGo / Math.max(1, week.daysLeft))} a day`}
@@ -297,7 +296,7 @@ export default function Dashboard({
             />
             <View pointerEvents="none" style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }, gradient(`linear-gradient(90deg, ${hexA(TONES[memory.tone % TONES.length][1], 0.9)} 0%, ${hexA(TONES[memory.tone % TONES.length][1], 0.35)} 55%, ${hexA(TONES[memory.tone % TONES.length][1], 0)} 100%)`, 'transparent')]} />
             <View style={{ flex: 1, gap: 3, padding: 16, justifyContent: 'flex-end' }}>
-              <Text style={[styles.memoryKicker, { color: TONES[memory.tone % TONES.length][0] }]}>A MEMORY FOR YOU · {memory.kicker}</Text>
+              <Text style={[styles.memoryKicker, { color: TONES[memory.tone % TONES.length][0] }]}>A memory for you · {memory.kicker}</Text>
               <Text style={styles.memoryTitle} numberOfLines={2}>
                 {memory.title}
               </Text>
@@ -351,7 +350,7 @@ export default function Dashboard({
 
       {/* ── watch time ───────────────────────────────────────────── */}
       <Card index={1}>
-        <Text style={styles.kicker}>WATCH TIME · {d.label.toUpperCase()}</Text>
+        <Text style={styles.kicker}>Watch time · {d.label}</Text>
         <CountUp key={period} to={d.watchedMs} format={(n) => (n >= 60000 ? fmtMs(n) : '0 min')} style={styles.hero} ms={800} />
         <View style={styles.heroRow}>
           {change ? <ChangePill text={change} up={d.change === null ? true : d.change > 0} /> : null}
@@ -378,14 +377,14 @@ export default function Dashboard({
         <Card index={2} title="This year vs last year" sub={`${new Date(now).getFullYear()} against ${new Date(now).getFullYear() - 1}, to the same day`}>
           <View style={styles.yoyRow}>
             <View style={styles.yoyBox}>
-              <Text style={styles.kicker}>{yoy.month.label.toUpperCase()} SO FAR</Text>
+              <Text style={styles.kicker}>{yoy.month.label} so far</Text>
               <Text style={styles.yoyValue}>{yoy.month.now ? fmtMs(yoy.month.now) : '0 min'}</Text>
               <Text style={styles.muted}>
                 {yoy.month.then ? `${fmtMs(yoy.month.then)} a year ago` : 'nothing a year ago'} {pct(yoy.month.now, yoy.month.then) ? `· ${pct(yoy.month.now, yoy.month.then)}` : ''}
               </Text>
             </View>
             <View style={styles.yoyBox}>
-              <Text style={styles.kicker}>THE YEAR SO FAR</Text>
+              <Text style={styles.kicker}>The year so far</Text>
               <Text style={styles.yoyValue}>{yoy.ytd.now ? fmtMs(yoy.ytd.now) : '0 min'}</Text>
               <Text style={styles.muted}>
                 {yoy.ytd.then ? `${fmtMs(yoy.ytd.then)} last year` : 'nothing last year'} {pct(yoy.ytd.now, yoy.ytd.then) ? `· ${pct(yoy.ytd.now, yoy.ytd.then)}` : ''}
@@ -625,7 +624,7 @@ export default function Dashboard({
                   <Text style={styles.milePct}>{Math.floor(((totalMs - prevH * 3_600_000) / ((nextH - prevH) * 3_600_000)) * 100)}%</Text>
                 </Ring>
                 <View style={{ flex: 1, gap: 3 }}>
-                  <Text style={styles.kicker}>NEXT MILESTONE</Text>
+                  <Text style={styles.kicker}>Next milestone</Text>
                   <Text style={styles.mileTitle}>{nextH} {nextH === 1 ? 'hour' : 'hours'} watched</Text>
                   <Text style={styles.muted}>
                     {fmtMs(totalMs)} so far · {fmtMs(nextH * 3_600_000 - totalMs)} to go
@@ -640,9 +639,9 @@ export default function Dashboard({
       {/* ── taste ─────────────────────────────────────────────────── */}
       <SectionTitle index={9} title="Your taste" />
       <View style={styles.tasteRow}>
-        <Animated.View entering={enterUp(10)} style={[styles.taste, { ...gradient('linear-gradient(150deg, #FF375F 0%, #8E1B47 100%)') } as object]}>
-          <Icon name="heart" size={16} color="rgba(255,255,255,0.85)" />
-          <Text style={styles.tasteKicker}>FAVOURITE TAG</Text>
+        <Animated.View entering={enterUp(10)} style={[styles.taste, { backgroundColor: raised(p) }]}>
+          <Icon name="heart" size={16} color={p.accent} />
+          <Text style={styles.tasteKicker}>Favourite tag</Text>
           <Text style={styles.tasteTitle} numberOfLines={1}>
             {all.favouriteTag ? `#${all.favouriteTag.tag}` : '—'}
           </Text>
@@ -654,9 +653,9 @@ export default function Dashboard({
               : 'Tag and rate some videos'}
           </Text>
         </Animated.View>
-        <Animated.View entering={enterUp(11)} style={[styles.taste, { ...gradient('linear-gradient(150deg, #0A84FF 0%, #1B2F8E 100%)') } as object]}>
-          <Icon name="play" size={16} color="rgba(255,255,255,0.85)" />
-          <Text style={styles.tasteKicker}>WATCHED MOST</Text>
+        <Animated.View entering={enterUp(11)} style={[styles.taste, { backgroundColor: raised(p) }]}>
+          <Icon name="play" size={16} color={p.accent} />
+          <Text style={styles.tasteKicker}>Watched most</Text>
           <Text style={styles.tasteTitle} numberOfLines={1}>
             {all.mostWatchedTag ? `#${all.mostWatchedTag.tag}` : '—'}
           </Text>
@@ -790,9 +789,9 @@ const makeStyles = (p: Palette) =>
     memoryAll: { color: '#fff', fontSize: 13, fontWeight: '800' },
     goal: { flexDirection: 'row', alignItems: 'center', gap: 18, borderRadius: 26, padding: 18, overflow: 'hidden' },
     goalWeek: { flexDirection: 'row', gap: 4, height: 40, marginTop: 6 },
-    goalDayTrack: { flex: 1, width: '70%', borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.18)', justifyContent: 'flex-end', overflow: 'hidden' },
-    goalDayFill: { width: '100%', borderRadius: 3, backgroundColor: '#fff' },
-    goalDayLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: '800' },
+    goalDayTrack: { flex: 1, width: '70%', borderRadius: 3, backgroundColor: p.circle, justifyContent: 'flex-end', overflow: 'hidden' },
+    goalDayFill: { width: '100%', borderRadius: 3, backgroundColor: p.accent },
+    goalDayLabel: { color: p.textSecondary, fontSize: 9, fontWeight: '800' },
     pick: { borderRadius: 28, overflow: 'hidden', backgroundColor: '#000' },
     pickBody: { position: 'absolute', left: 18, right: 18, bottom: 16, gap: 3 },
     pickKicker: { color: '#FFD60A', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
@@ -828,14 +827,14 @@ const makeStyles = (p: Palette) =>
     yoyThumb: { width: '100%', aspectRatio: 1.7, borderRadius: 12, overflow: 'hidden', backgroundColor: p.tile },
     milePct: { color: p.text, fontSize: 18, fontWeight: '900' },
     mileTitle: { color: p.text, fontSize: 19, fontWeight: '800' },
-    goalPct: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
-    goalKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-    goalValue: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: -0.8 },
-    goalSub: { color: 'rgba(255,255,255,0.88)', fontSize: 13, fontWeight: '600' },
+    goalPct: { color: p.text, fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
+    goalKicker: { color: p.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    goalValue: { color: p.text, fontSize: 30, fontWeight: '900', letterSpacing: -0.8 },
+    goalSub: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
     goalRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
-    goalBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' },
-    goalBtnText: { color: '#fff', fontSize: 20, fontWeight: '800', marginTop: -2 },
-    goalLabel: { color: '#fff', fontSize: 13, fontWeight: '800' },
+    goalBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: p.circle, alignItems: 'center', justifyContent: 'center' },
+    goalBtnText: { color: p.text, fontSize: 20, fontWeight: '800', marginTop: -2 },
+    goalLabel: { color: p.text, fontSize: 13, fontWeight: '800' },
     noteRow: { gap: 10, paddingHorizontal: 16 },
     note: { backgroundColor: p.elevated, borderRadius: 18, padding: 14, gap: 6, borderWidth: 1, borderColor: 'transparent', minHeight: 132 },
     noteIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
@@ -862,9 +861,9 @@ const makeStyles = (p: Palette) =>
 
     tasteRow: { flexDirection: 'row', gap: 10 },
     taste: { flex: 1, borderRadius: 20, padding: 14, gap: 3, minHeight: 140, justifyContent: 'flex-end' },
-    tasteKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '900', letterSpacing: 0.8, marginTop: 'auto' },
-    tasteTitle: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
-    tasteSub: { color: 'rgba(255,255,255,0.82)', fontSize: 12, fontWeight: '600' },
+    tasteKicker: { color: p.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 0.8, marginTop: 'auto' },
+    tasteTitle: { color: p.text, fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+    tasteSub: { color: p.textSecondary, fontSize: 12, fontWeight: '600' },
     tagName: { color: p.text, fontSize: 15, fontWeight: '700' },
 
     rateRow: { flexDirection: 'row', alignItems: 'center', gap: 18 },

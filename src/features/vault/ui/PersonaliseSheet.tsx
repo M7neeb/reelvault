@@ -16,7 +16,7 @@ import { success, tick } from './haptics';
 import Icon from './Icon';
 import { Chip, Section, Segment, SheetFrame, ToggleRow, Wrap } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
-import { ACCENTS, LOOKS, type Look, type VaultActions, type VaultItem, type VaultPrefs, type ViewOptions } from './types';
+import { ACCENTS, DEFAULT_ACCENT, LOOKS, type Look, type VaultActions, type VaultItem, type VaultPrefs, type ViewOptions } from './types';
 import { COLOR_SETS, FONTS, tintPalette } from './paletteMath';
 import { friendlyName } from '../names';
 import { QUICK_LINKS } from '../quickOpen';
@@ -213,14 +213,14 @@ export default function PersonaliseSheet({
       <Section card label="Accent colour">
         <View style={styles.swatches}>
           {ACCENTS.map((a) => {
-            const on = (viewOptions.accent ?? '#0A84FF').toLowerCase() === a.key.toLowerCase();
+            const on = (viewOptions.accent ?? DEFAULT_ACCENT).toLowerCase() === a.key.toLowerCase();
             return (
               <TouchableOpacity
                 key={a.key}
                 style={[styles.swatch, { backgroundColor: a.key }, on && styles.swatchOn]}
                 onPress={() => {
                   tick();
-                  onViewOptions({ ...viewOptions, accent: a.key === '#0A84FF' ? null : a.key });
+                  onViewOptions({ ...viewOptions, accent: a.key === DEFAULT_ACCENT ? null : a.key });
                 }}
                 accessibilityLabel={a.label}>
                 {on && <Icon name="check" size={16} color="#fff" weight="bold" />}

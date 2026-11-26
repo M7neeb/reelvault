@@ -102,13 +102,68 @@ export function tintPalette<T extends { scheme: 'light' | 'dark' }>(base: T, hex
   };
 }
 
-type Style = Record<string, unknown>;
+export type Style = Record<string, unknown>;
 
 /**
  * Applies the look to a set of styles: the font on every text style that has
  * no font of its own, card corners rounder or squarer (pills stay pills),
  * and a thin border on cards when outlined.
  */
+const HEAVY = new Set(['700', '800', '900', 'bold']);
+
+/**
+ * One type voice for the whole app: big titles bold, everything else at most
+ * semibold, and no small shouty all-caps labels. Applied to every style sheet.
+ */
+/** The box-set display face: titles and big numbers, condensed like a spine. */
+export const DISPLAY_FONT = { bold: 'BarlowCondensed_700Bold', semibold: 'BarlowCondensed_600SemiBold' } as const;
+
+export function calmType(x: Style, name = '', display = false): Style {
+  const size = typeof x.fontSize === 'number' ? x.fontSize : null;
+  if (size === null) return x;
+  const out = { ...x };
+  // Titles and big numbers (19 pt and up, bold) take the condensed display face.
+  if (display && size >= 19 && !('fontFamily' in out) && typeof out.fontWeight === 'string' && (HEAVY.has(out.fontWeight) || out.fontWeight === '600')) {
+    out.fontFamily = size >= 26 ? DISPLAY_FONT.bold : DISPLAY_FONT.semibold;
+    delete out.fontWeight;
+    out.fontSize = Math.round(size * 1.1);
+    if (typeof out.lineHeight === 'number') out.lineHeight = Math.round(out.lineHeight * 1.1);
+    if (typeof out.letterSpacing === 'number' && out.letterSpacing < 0) out.letterSpacing = 0;
+    return out;
+  }
+  // Little labels over a title ("kickers") read as a quiet line, not a shout.
+  if (/kicker|eyebrow/i.test(name) && size <= 14) {
+    out.letterSpacing = 0;
+    out.fontWeight = '600';
+    out.fontSize = Math.max(size, 13);
+    delete out.textTransform;
+    return out;
+  }
+  if (typeof out.fontWeight === 'string' && HEAVY.has(out.fontWeight)) out.fontWeight = size >= 28 ? '700' : '600';
+  // Wide tracking only suits all-caps, which small labels no longer use.
+  if (size <= 14 && typeof out.letterSpacing === 'number' && out.letterSpacing > 0.3) out.letterSpacing = 0.2;
+  if (out.textTransform === 'uppercase' && size <= 14) {
+    delete out.textTransform;
+    out.letterSpacing = 0;
+    out.fontWeight = '600';
+    out.fontSize = Math.max(size, 13);
+  }
+  return out;
+}
+
+/**
+ * Box corners: tight radii instead of soft cards and pills. Circles (round
+ * buttons, avatars) stay round; a pill becomes a rounded rectangle.
+ */
+export function boxCorner(x: Style): number {
+  const r = x.borderRadius as number;
+  const w = typeof x.width === 'number' ? x.width : null;
+  const h = typeof x.height === 'number' ? x.height : null;
+  if (w !== null && h !== null && w === h && r * 2 >= w - 1) return r;
+  if (h !== null && r * 2 >= h - 1) return Math.max(6, Math.round(h * 0.26));
+  return Math.max(6, Math.round(r * 0.5));
+}
+
 export function restyle<T extends Record<string, unknown>>(
   styles: T,
   o: { font: string | null; corners: CornerKey; outlined: boolean; cardColors: string[]; border: string }
@@ -119,11 +174,16 @@ export function restyle<T extends Record<string, unknown>>(
       out[k] = v;
       continue;
     }
-    const x: Style = { ...(v as Style) };
+    const x: Style = calmType({ ...(v as Style) }, k, !o.font);
     if (o.font && 'fontSize' in x && !('fontFamily' in x)) x.fontFamily = o.font;
-    if (typeof x.borderRadius === 'number' && x.borderRadius >= 8 && x.borderRadius < 400) {
+    if (o.corners === 'standard' && typeof x.borderRadius === 'number' && x.borderRadius >= 400) {
+      // "As round as it gets": a pill unless it is a circle.
+      const w = typeof x.width === 'number' ? x.width : null;
+      if (w === null || w !== x.height) x.borderRadius = typeof x.height === 'number' ? Math.max(6, Math.round(x.height * 0.26)) : 10;
+    } else if (typeof x.borderRadius === 'number' && x.borderRadius >= 8 && x.borderRadius < 400) {
       if (o.corners === 'round') x.borderRadius = Math.round(x.borderRadius * 1.45);
       else if (o.corners === 'square') x.borderRadius = Math.min(x.borderRadius, 4);
+      else x.borderRadius = boxCorner(x);
     }
     if (o.outlined && typeof x.backgroundColor === 'string' && o.cardColors.includes(x.backgroundColor) && typeof x.borderRadius === 'number' && !('borderWidth' in x)) {
       x.borderWidth = 1;

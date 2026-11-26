@@ -12,7 +12,7 @@ import { friendlyName } from '../names';
 import { fmtDuration } from './format';
 import { gradient } from './insightParts';
 import { LiveCard } from './live';
-import { enterUp } from './motion';
+import { enterUp, PressableScale } from './motion';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 
@@ -32,7 +32,7 @@ export function HomeRows({ rows, onPlay, onHide }: { rows: HomeRow<VaultItem>[];
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
             {row.videos.map((v, i) => (
-              <TouchableOpacity key={v.id} style={[styles.card, row.key === 'best' && i === 0 && styles.cardWide]} onPress={() => onPlay(row.videos, v)} accessibilityLabel={`${friendlyName(v)}. Play ${row.title}`}>
+              <PressableScale key={v.id} style={[styles.card, row.key === 'best' && i === 0 && styles.cardWide]} onPress={() => onPlay(row.videos, v)} accessibilityLabel={`${friendlyName(v)}. Play ${row.title}`}>
                 <View style={[styles.media, row.key === 'best' && i === 0 && styles.mediaWide]}>
                   <LiveCard id={`home-${row.key}-${v.id}`} uri={v.uri} durationMs={v.durationMs} cover={v.thumbSource} radius={0} style={StyleSheet.absoluteFill} video={v} soundStyle={{ top: 6, right: 6 }} />
                   <View pointerEvents="none" style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.7) 100%)', 'transparent')]} />
@@ -50,7 +50,7 @@ export function HomeRows({ rows, onPlay, onHide }: { rows: HomeRow<VaultItem>[];
                 <Text style={styles.name} numberOfLines={1}>
                   {friendlyName(v)}
                 </Text>
-              </TouchableOpacity>
+              </PressableScale>
             ))}
           </ScrollView>
         </Animated.View>

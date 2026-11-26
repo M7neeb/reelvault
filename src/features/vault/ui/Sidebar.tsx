@@ -76,13 +76,13 @@ function DrawerRow({
   );
 }
 
-function ActionRow({ label, onPress, indent }: { label: string; onPress: () => void; indent?: boolean }) {
+function ActionRow({ label, onPress, indent, icon = 'plus' }: { label: string; onPress: () => void; indent?: boolean; icon?: IconName }) {
   const styles = useStyles(makeStyles);
   const p = usePalette();
   return (
     <TouchableOpacity style={[styles.row, indent && styles.indent]} onPress={onPress} accessibilityRole="button">
       <View style={styles.rowLead}>
-        <Icon name="plus" size={15} color={p.link} weight="bold" />
+        <Icon name={icon} size={15} color={p.link} weight="bold" />
       </View>
       <Text style={styles.add} numberOfLines={1}>
         {label}
@@ -127,6 +127,8 @@ export type SidebarProps = {
   onPick: (f: Filter) => void;
   onClose: () => void;
   onNewSmart: () => void;
+  /** Filter the videos once (rating, cover, keywords... has or hasn't), without saving. */
+  onFilterNow?: () => void;
   onNewAlbum: (opts: { folderId?: number | null; isPrivate?: boolean }) => void;
   onNewFolder: () => void;
   onAlbumOptions: (album: UiAlbum) => void;
@@ -279,8 +281,7 @@ export default function Sidebar(props: SidebarProps) {
             {TILES.map((t) => (
               <TouchableOpacity key={t.tab} style={[styles.tile, { width: tileWidth }]} onPress={() => props.onInsights(t.tab)} accessibilityRole="button" accessibilityLabel={t.label}>
                 <View style={styles.tileIcon}>
-                  <View style={[StyleSheet.absoluteFill, styles.tileWash, { backgroundColor: t.color }]} />
-                  <Icon name={t.icon} size={18} color={t.color} />
+                  <Icon name={t.icon} size={18} color={p.text} />
                 </View>
                 <Text style={styles.tileLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   {t.label}
@@ -368,6 +369,7 @@ export default function Sidebar(props: SidebarProps) {
 
           <Heading title="Smart Filters" />
           {topFilters.map((s) => smartRow(s))}
+          {props.onFilterNow && <ActionRow label="Filter videos" icon="options" onPress={props.onFilterNow} />}
           <ActionRow label="New smart filter" onPress={props.onNewSmart} />
 
           <Heading title="Status" />
@@ -519,8 +521,7 @@ const makeStyles = (p: Palette) =>
     tilesBleed: { marginHorizontal: -10, marginBottom: 14 },
     tiles: { paddingHorizontal: 20, gap: 8 },
     tile: { alignItems: 'center', gap: 7 },
-    tileIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-    tileWash: { opacity: 0.16 },
+    tileIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: p.circle },
     tileLabel: { color: p.textSoft, fontSize: 12, fontWeight: '600' },
 
     headingRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 26, paddingBottom: 8 },

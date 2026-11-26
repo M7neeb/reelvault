@@ -270,6 +270,48 @@ public class ReelVaultMediaModule: Module {
       }
     }
 
+    /// Text on screen and scene words at the given seconds, read carefully
+    /// (the accurate reader, with spelling help) from bigger frames than
+    /// scanFrames: titles and logos in intros come out right.
+    AsyncFunction("readFrames") { (input: String, seconds: [Double], side: Double, promise: Promise) in
+      guard let inURL = Self.url(input) else {
+        promise.resolve([[String: Any]]())
+        return
+      }
+      DispatchQueue.global(qos: .utility).async {
+        let asset = AVURLAsset(url: inURL)
+        let length = asset.duration.seconds
+        guard length.isFinite, length > 0 else {
+          promise.resolve([[String: Any]]())
+          return
+        }
+        let g = Self.frameGenerator(asset, side: CGFloat(max(320, min(1920, side))))
+        var out: [[String: Any]] = []
+        for t in seconds where t >= 0 && t < length {
+          autoreleasepool {
+            guard let image = try? g.copyCGImage(at: CMTime(seconds: t, preferredTimescale: 600), actualTime: nil) else { return }
+            let handler = VNImageRequestHandler(cgImage: image, options: [:])
+            let classify = VNClassifyImageRequest()
+            let text = VNRecognizeTextRequest()
+            text.recognitionLevel = .accurate
+            text.usesLanguageCorrection = true
+            text.minimumTextHeight = 0.02
+            try? handler.perform([classify, text])
+            let labels = (classify.results ?? [])
+              .filter { $0.confidence >= 0.3 }
+              .prefix(8)
+              .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
+            let words = (text.results ?? [])
+              .compactMap { $0.topCandidates(1).first?.string }
+              .joined(separator: " ")
+            if labels.isEmpty && words.isEmpty { return }
+            out.append(["atMs": t * 1000, "labels": Array(labels), "text": String(words.prefix(400))])
+          }
+        }
+        promise.resolve(out)
+      }
+    }
+
     /// How each frame would do as a cover, at fractions of the video: brightness, contrast,
     /// sharpness and colourfulness (0...1 scales, measured on a small grey/colour copy) and the
     /// faces in it (how many, the biggest one's share of the picture, the best capture quality).

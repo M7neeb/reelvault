@@ -44,9 +44,9 @@ import { DUR, enterUp, PressableScale, SPRING } from './motion';
 import { MemoriesTab, MemoryPlayer } from './MemoriesUI';
 import { AppSpaceCard, ImportShrinkCard, SpacePlanner, TrashCard } from './storageParts';
 import { settleFreezes } from '../streakFreeze';
-import { Aurora, CountUp, GrowBar } from './storyKit';
+import { CountUp, GrowBar } from './storyKit';
 import { toOvVideo } from './overviewParts';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import { raised, sheet, usePalette, useStyles, type Palette } from './theme';
 import { DEFAULT_VAULT_PREFS, type OverviewData, type VaultActions, type VaultItem, type VaultPrefs } from './types';
 import { previous, WrappedPicker, WrappedStory, type StoryInput, type WrappedGroup } from './WrappedUI';
 import { MixWrappedCard, type MixVideos } from './manga/MangaWrapped';
@@ -95,8 +95,8 @@ function TabStrip({ value, onChange, dots = {} }: { value: InsightsTab; onChange
         const on = t.key === value;
         return (
           <TouchableOpacity key={t.key} style={styles.tab} onPress={() => onChange(t.key)} accessibilityRole="tab" accessibilityState={{ selected: on }}>
-            <View style={[styles.tabIcon, { backgroundColor: on ? t.color : `${t.color}22` }]}>
-              <Icon name={t.icon} size={14} color={on ? '#fff' : t.color} />
+            <View style={[styles.tabIcon, { backgroundColor: on ? p.accent : p.circle }]}>
+              <Icon name={t.icon} size={14} color={on ? '#fff' : p.textSecondary} />
               {!!dots[t.key] && (
                 <Animated.View entering={ZoomIn.springify()} style={styles.tabDot}>
                   <Text style={styles.tabDotText}>{dots[t.key]! > 9 ? '9+' : dots[t.key]}</Text>
@@ -471,7 +471,6 @@ export default function VideoInsightsModal({
       <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerKicker}>REELVAULT</Text>
             <Text style={styles.headerTitle}>My Videos</Text>
           </View>
           <IconButton icon="close" label="Close" onPress={onClose} />
@@ -699,15 +698,14 @@ function Storage({
   return (
     <>
       {/* ── the phone ─────────────────────────────────────────── */}
-      <Animated.View entering={enterUp(0)} style={[styles.storeHero, gradient('linear-gradient(135deg, #1F6F3F 0%, #0B3B2A 60%, #06201A 100%)')]}>
-        <Aurora colors={['#1F6F3F', '#06201A']} accent="#64D2FF" width={width - 32} height={220} />
+      <Animated.View entering={enterUp(0)} style={[styles.storeHero, { backgroundColor: raised(p) }]}>
         <View style={styles.storeRow}>
-          <Ring size={110} stroke={11} progress={phoneGb ? appGb / phoneGb : 0} color="#30D158" track="rgba(255,255,255,0.18)">
+          <Ring size={110} stroke={11} progress={phoneGb ? appGb / phoneGb : 0} color={p.success} track={p.circle}>
             <Text style={styles.storePct}>{phoneGb ? `${Math.round((appGb / phoneGb) * 100)}%` : '–'}</Text>
             <Text style={styles.storePctLabel}>of your room</Text>
           </Ring>
           <View style={{ flex: 1, gap: 3 }}>
-            <Text style={styles.storeKicker}>REELVAULT USES</Text>
+            <Text style={styles.storeKicker}>ReelVault uses</Text>
             <CountUp to={s.totalBytes + s.deletedBytes} format={fmtBytes} style={styles.storeValue} />
             <Text style={styles.storeSub}>
               {s.count} videos{s.count ? ` · ${fmtBytes(s.totalBytes / s.count)} each on average` : ''}
@@ -884,19 +882,19 @@ const makeStyles = (p: Palette) =>
 
     storeHero: { borderRadius: 26, padding: 18, gap: 16, overflow: 'hidden' },
     storeRow: { flexDirection: 'row', alignItems: 'center', gap: 18 },
-    storeFoot: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 16, padding: 12 },
-    storeFootTitle: { color: '#fff', fontSize: 15, fontWeight: '800' },
+    storeFoot: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: p.circle, borderRadius: 16, padding: 12 },
+    storeFootTitle: { color: p.text, fontSize: 15, fontWeight: '800' },
     grade: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     gradeText: { color: '#000', fontSize: 24, fontWeight: '900' },
     tile: { flex: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: p.card },
     tileText: { position: 'absolute', left: 8, right: 6, bottom: 6 },
     tileValue: { color: '#fff', fontSize: 13, fontWeight: '900' },
     tileLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '700' },
-    storePct: { color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
-    storePctLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: '800' },
-    storeKicker: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-    storeValue: { color: '#fff', fontSize: 34, fontWeight: '900', letterSpacing: -1 },
-    storeSub: { color: 'rgba(255,255,255,0.88)', fontSize: 13, fontWeight: '600' },
+    storePct: { color: p.text, fontSize: 24, fontWeight: '900', letterSpacing: -0.6 },
+    storePctLabel: { color: p.textSecondary, fontSize: 9, fontWeight: '800' },
+    storeKicker: { color: p.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    storeValue: { color: p.text, fontSize: 34, fontWeight: '900', letterSpacing: -1 },
+    storeSub: { color: p.textSecondary, fontSize: 13, fontWeight: '600' },
 
     idea: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
     ideaIcon: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#30D15826', alignItems: 'center', justifyContent: 'center' },

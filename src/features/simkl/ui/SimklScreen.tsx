@@ -22,6 +22,7 @@ import Glass from '@/features/vault/ui/Glass';
 import { success, tick } from '@/features/vault/ui/haptics';
 import Icon from '@/features/vault/ui/Icon';
 import IconButton from '@/features/vault/ui/IconButton';
+import { PressableScale } from '@/features/vault/ui/motion';
 import { OptionsSheet } from '@/features/vault/ui/prompts';
 import { raised, sheet, usePalette, useStyles, type Palette } from '@/features/vault/ui/theme';
 
@@ -320,7 +321,7 @@ export default function SimklScreen(props: SimklScreenProps) {
                   const it = libraryMap.get(x.simklId);
                   const label = x.type === 'movie' ? 'Movie' : x.episode ? episodeCode(x.type, x.season ?? 1, x.episode) : '';
                   return (
-                    <TouchableOpacity
+                    <PressableScale
                       key={x.playbackId}
                       style={{ width: 150 }}
                       onPress={() => setOpen(it ? asTitle(it) : { simklId: x.simklId, type: x.type, title: x.title, year: null, poster: null, slug: null })}
@@ -348,7 +349,7 @@ export default function SimklScreen(props: SimklScreenProps) {
                       <Text style={styles.shelfSub} numberOfLines={1}>
                         {[label, `${Math.round(x.progress)}%`, x.pausedAt ? fmtAgo(x.pausedAt) : null].filter(Boolean).join(' · ')}
                       </Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                   );
                 })}
               </ScrollView>
@@ -416,7 +417,7 @@ export default function SimklScreen(props: SimklScreenProps) {
               {plannedShelf.length > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
                   {plannedShelf.map((i) => (
-                    <TouchableOpacity key={i.simklId} style={{ width: 112 }} onPress={() => setOpen(asTitle(i))} accessibilityLabel={i.title}>
+                    <PressableScale key={i.simklId} style={{ width: 112 }} onPress={() => setOpen(asTitle(i))} accessibilityLabel={i.title}>
                       <Poster path={i.poster} title={i.title} width={112} height={166} radius={10}>
                         {i.imdbRating !== null && (
                           <View style={styles.imdbBadge}>
@@ -428,7 +429,7 @@ export default function SimklScreen(props: SimklScreenProps) {
                         {i.title}
                       </Text>
                       <Text style={styles.shelfSub}>{[i.year, i.runtime ? `${i.runtime} min` : null].filter(Boolean).join(' · ')}</Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                   ))}
                 </ScrollView>
               )}
@@ -464,7 +465,7 @@ export default function SimklScreen(props: SimklScreenProps) {
               {shownDay && shownDay.rows.length > 0 ? (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shelf}>
                   {shownDay.rows.map((r, n) => (
-                    <TouchableOpacity key={`${r.simklId}-${n}`} style={{ width: 104 }} onPress={() => setOpen(r)} accessibilityLabel={r.title}>
+                    <PressableScale key={`${r.simklId}-${n}`} style={{ width: 104 }} onPress={() => setOpen(r)} accessibilityLabel={r.title}>
                       <Poster path={r.poster} title={r.title} width={104} height={154} radius={10}>
                         {!!r.date && (
                           <View style={styles.timeBadge}>
@@ -478,7 +479,7 @@ export default function SimklScreen(props: SimklScreenProps) {
                       <Text style={styles.shelfSub} numberOfLines={1}>
                         {hideSpoilers ? 'New episode' : (r.episodeLabel ?? (category === 'movie' ? 'Release' : 'New episode'))}
                       </Text>
-                    </TouchableOpacity>
+                    </PressableScale>
                   ))}
                 </ScrollView>
               ) : (
@@ -506,7 +507,7 @@ export default function SimklScreen(props: SimklScreenProps) {
                     accessibilityLabel={`${x.title}, new`}>
                     <Poster path={x.poster} title={x.title} width={104} height={154} radius={10}>
                       <View style={styles.newBadge}>
-                        <Text style={styles.newBadgeText}>NEW</Text>
+                        <Text style={styles.newBadgeText}>New</Text>
                       </View>
                     </Poster>
                     <Text style={styles.shelfTitle} numberOfLines={1}>
@@ -920,7 +921,7 @@ function UpNextCard({
   const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
   const when = item.nextDate ? `Aired ${fmtDay(item.nextDate)}` : item.lastWatchedAt ? `Watched ${fmtAgo(item.lastWatchedAt)}` : null;
   return (
-    <TouchableOpacity style={[styles.upCard, { width }]} onPress={onOpen} activeOpacity={0.9} accessibilityLabel={`${item.title}, ${item.nextToWatch}`}>
+    <PressableScale style={[styles.upCard, { width }]} onPress={onOpen} accessibilityLabel={`${item.title}, ${item.nextToWatch}`}>
       {art ? (
         <Image source={{ uri: art }} style={StyleFill} contentFit="cover" transition={200} blurRadius={fanart ? 0 : 24} recyclingKey={art} />
       ) : (
@@ -954,7 +955,7 @@ function UpNextCard({
       <View style={styles.upTrack}>
         <View style={[styles.upFill, { width: `${Math.round(progress * 100)}%` }]} />
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -995,7 +996,7 @@ function UpNextHero({
   const progress = item.totalEpisodes > 0 ? Math.min(1, item.watchedEpisodes / item.totalEpisodes) : 0;
   const when = item.nextDate ? `Aired ${fmtDay(item.nextDate)}` : item.lastWatchedAt ? `Watched ${fmtAgo(item.lastWatchedAt)}` : null;
   return (
-    <TouchableOpacity style={[styles.hero, { width, height: Math.round(Math.min(width * 0.66, Math.max(220, screenH * 0.66))) }]} onPress={onOpen} activeOpacity={0.92} accessibilityLabel={`${item.title}, up next ${item.nextToWatch}`}>
+    <PressableScale scaleTo={0.98} style={[styles.hero, { width, height: Math.round(Math.min(width * 0.66, Math.max(220, screenH * 0.66))) }]} onPress={onOpen} accessibilityLabel={`${item.title}, up next ${item.nextToWatch}`}>
       {art ? (
         <Image source={{ uri: art }} style={StyleFill} contentFit="cover" transition={250} recyclingKey={art} />
       ) : item.poster ? (
@@ -1005,7 +1006,7 @@ function UpNextHero({
       )}
       <Fade color="0,0,0" from={0} to={0.92} style={[StyleFill, { top: '30%' }]} />
       <View style={styles.heroChip}>
-        <Text style={styles.heroChipText}>UP NEXT</Text>
+        <Text style={styles.heroChipText}>Up next</Text>
       </View>
       <View style={styles.heroBody}>
         {!art && <Poster path={item.poster} title={item.title} width={70} height={104} radius={8} />}
@@ -1036,7 +1037,7 @@ function UpNextHero({
       <View style={styles.upTrack}>
         <View style={[styles.upFill, { width: `${Math.round(progress * 100)}%` }]} />
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
@@ -1075,10 +1076,10 @@ function WatchlistHero({
     .map((part) => String(part).replace(/ /g, '\u00a0'))
     .join(' · ');
   return (
-    <TouchableOpacity
+    <PressableScale
       style={[styles.hero, { width, height: Math.round(Math.max(200, width * 0.56)) }]}
       onPress={onOpen}
-      activeOpacity={0.92}
+
       accessibilityRole="button"
       accessibilityLabel={`${item.title}. ${meta}. Opens its page`}>
       {art ? (
@@ -1108,7 +1109,7 @@ function WatchlistHero({
           <Icon name="forward" size={18} color="#fff" weight="bold" />
         </Glass>
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 

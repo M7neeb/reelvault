@@ -197,7 +197,7 @@ function UnlockReveal({ list, thumbs, onPin, pinned, onDone }: { list: Achieveme
 
         <View style={[styles.revealBody, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 30 }]} pointerEvents="box-none">
           <Animated.Text entering={FadeIn.duration(DUR.slow)} style={[styles.revealKicker, { color: light }]}>
-            {list.length > 1 ? `NEW BADGE · ${i + 1} OF ${list.length}` : 'NEW BADGE'}
+            {list.length > 1 ? `New badge · ${i + 1} of ${list.length}` : 'New badge'}
           </Animated.Text>
           <View pointerEvents="box-none">
             <Float amount={5}>
@@ -401,7 +401,7 @@ export default function Badges({
             <Text style={styles.levelWord}>LEVEL</Text>
           </Ring>
           <View style={{ flex: 1, gap: 3 }}>
-            <Text style={styles.heroKicker}>YOU ARE A</Text>
+            <Text style={styles.heroKicker}>You are a</Text>
             <Text style={styles.heroTitle} numberOfLines={1} adjustsFontSizeToFit>
               {level.title}
             </Text>
@@ -479,8 +479,8 @@ export default function Badges({
         <>
           <SectionTitle index={3} title="Challenges" detail="A new one every week and month" />
           <Animated.View entering={enterUp(3)} style={styles.challenges}>
-            {week && <ChallengeCard a={week} label="THIS WEEK" left={weekLeft} color="#FF9F0A" onPress={() => setOpen(week)} />}
-            {month && <ChallengeCard a={month} label={now.toLocaleDateString(undefined, { month: 'long' }).toUpperCase()} left={monthLeft} color="#0A84FF" onPress={() => setOpen(month)} />}
+            {week && <ChallengeCard a={week} label="This week" left={weekLeft} color="#FF9F0A" onPress={() => setOpen(week)} />}
+            {month && <ChallengeCard a={month} label={now.toLocaleDateString(undefined, { month: 'long' })} left={monthLeft} color="#0A84FF" onPress={() => setOpen(month)} />}
           </Animated.View>
         </>
       )}

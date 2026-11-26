@@ -46,7 +46,8 @@ test('restyle: fonts on text, corners on cards (pills stay pills), outlined card
   assert.deepEqual(round.row, { flexDirection: 'row' });
   const square = restyle(s, { font: null, corners: 'square', outlined: false, cardColors: [], border: '' });
   assert.equal(square.card.borderRadius, 4);
-  assert.equal(square.title.fontFamily, undefined);
+  // No font chosen: titles take the condensed display face.
+  assert.equal(square.title.fontFamily, 'BarlowCondensed_600SemiBold');
   // The originals are untouched.
   assert.equal(s.card.borderRadius, 16);
 });

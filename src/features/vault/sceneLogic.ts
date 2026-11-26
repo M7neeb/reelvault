@@ -202,9 +202,47 @@ export function onScreen(rows: SceneRow[], query: string): string[] {
     const { text } = prepared(r);
     // Whole words or their start ("berries!" yes, "strawberries" no).
     const tokens = text.split(/[^\p{L}\p{N}-]+/u);
-    if (words.every((w) => tokens.some((t) => t.startsWith(w)))) count.set(r.videoId, (count.get(r.videoId) ?? 0) + 1);
+    if (words.every((w) => tokens.some((t) => startsLike(t, w)))) count.set(r.videoId, (count.get(r.videoId) ?? 0) + 1);
   }
   return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+}
+
+/** At most one letter wrong, missing or extra (a <= 1 edit apart). */
+function oneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/**
+ * The token starts with the word. Text read off a picture has the odd wrong
+ * letter ("berrles"), so words of 5 letters or more may be one letter off.
+ */
+export function startsLike(token: string, word: string): boolean {
+  if (token.startsWith(word)) return true;
+  if (word.length < 5 || token.length < word.length - 1) return false;
+  return [word.length - 1, word.length, word.length + 1].some((n) => n <= token.length && oneEdit(token.slice(0, n), word));
+}
+
+/**
+ * Seconds to read carefully: every 2 s in the first two minutes (where intro
+ * titles are), then evenly over the rest, at most `max` frames in all.
+ */
+export function readTimes(durationMs: number | null, max = 100): number[] {
+  if (!durationMs || durationMs < 500) return [];
+  const d = durationMs / 1000;
+  const out: number[] = [];
+  for (let t = Math.min(1, d / 2); t < Math.min(d, 120) && out.length < max; t += 2) out.push(Math.round(t * 10) / 10);
+  const left = max - out.length;
+  if (d > 120 && left > 0) {
+    const rest = d - 120;
+    const n = Math.min(left, Math.ceil(rest / 4));
+    for (let i = 0; i < n; i++) out.push(Math.round((120 + (rest * (i + 0.5)) / n) * 10) / 10);
+  }
+  return out;
 }
 
 /** "on screen: berries" (the Videos search for text on screen) -> "berries"; anything else -> null. */

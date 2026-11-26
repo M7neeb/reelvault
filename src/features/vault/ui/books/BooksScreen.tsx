@@ -9,6 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { Spine } from '../spine';
 import { Alert, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
@@ -59,20 +60,22 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
   const height = Math.round(width * 1.5);
   if (book.coverUri)
     return (
-      <View style={[styles.cover, { width, height, borderRadius: radius }]}>
+      <View style={[styles.cover, { width, height, borderRadius: Math.min(radius, 8) }]}>
         <Image source={{ uri: book.coverUri }} style={{ width, height }} contentFit="cover" transition={120} recyclingKey={book.coverUri} />
+        <Spine name={displayTitle(book)} width={width >= 90 ? 4 : 3} />
       </View>
     );
   // Too narrow to set a title without breaking words: the first letter stands in.
   if (width < 80)
     return (
-      <View style={[styles.cover, styles.plainCover, styles.plainSmall, { width, height, borderRadius: radius }]}>
+      <View style={[styles.cover, styles.plainCover, styles.plainSmall, { width, height, borderRadius: Math.min(radius, 8) }]}>
         <Text style={[styles.plainInitial, { fontSize: Math.round(width * 0.46) }]}>{displayTitle(book).replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase()}</Text>
+        <Spine name={displayTitle(book)} width={3} />
       </View>
     );
   const titleSize = coverTitleSize(width, displayTitle(book));
   return (
-    <View style={[styles.cover, styles.plainCover, { width, height, borderRadius: radius, padding: Math.max(6, width * 0.1) }]}>
+    <View style={[styles.cover, styles.plainCover, { width, height, borderRadius: Math.min(radius, 8), padding: Math.max(6, width * 0.1) }]}>
       <Text style={[styles.plainTitle, { fontSize: titleSize, lineHeight: Math.round(titleSize * 1.23) }]} numberOfLines={5}>
         {displayTitle(book)}
       </Text>
@@ -81,6 +84,7 @@ export function BookCover({ book, width, radius = 4 }: { book: Pick<BookUi, 'cov
           {book.author}
         </Text>
       )}
+      <Spine name={displayTitle(book)} width={width >= 90 ? 4 : 3} />
     </View>
   );
 }

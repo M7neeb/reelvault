@@ -32,6 +32,8 @@ type NativeMedia = {
   videoPrints?(input: string, fractions: number[]): Promise<string[]>;
   /** Scene words and text on screen, a frame every `everySec` (at most `maxFrames`). Missing before app build 18. */
   scanFrames?(input: string, everySec: number, maxFrames: number): Promise<{ atMs: number; labels: string[]; text: string }[]>;
+  /** Careful text reading at the given seconds (app build 27 on). */
+  readFrames?(input: string, seconds: number[], side: number): Promise<{ atMs: number; labels: string[]; text: string }[]>;
   stopVolumeKeys?(): void;
   /** Read aloud with the phone's voices, from paragraph `from` on. Missing before app 1.13. */
   speak?(paragraphs: string[], from: number, speed: number, voice: string, title: string, artist: string): void;

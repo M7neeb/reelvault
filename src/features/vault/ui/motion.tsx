@@ -44,6 +44,13 @@ export const zoomIn = new Keyframe({
   100: { opacity: 1, transform: [{ scale: 1 }], easing: EASE_OUT },
 }).duration(DUR.base);
 
+/** A tick mark landing: small to full size with a little overshoot. */
+export const checkPop = new Keyframe({
+  0: { opacity: 0, transform: [{ scale: 0.4 }] },
+  60: { opacity: 1, transform: [{ scale: 1.15 }], easing: EASE_OUT },
+  100: { opacity: 1, transform: [{ scale: 1 }], easing: EASE_IN_OUT },
+}).duration(DUR.base);
+
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 /**

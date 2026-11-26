@@ -7,8 +7,12 @@
 
 import { useRef, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { trimPlan, type EditPlan } from '../edit';
+import { atStart, type Intro } from '../intro';
+import { enterUp } from './motion';
+import { success } from './haptics';
 import { confirmAction } from './confirm';
 import { Chip, Section, SheetFrame, ToggleRow, Wrap } from './sheets';
 import { sheet, usePalette, useStyles, type Palette } from './theme';
@@ -30,6 +34,7 @@ export function TrimManySheet({
   items,
   available,
   onEdit,
+  onFindIntros,
   onCancel,
   onClose,
 }: {
@@ -37,6 +42,8 @@ export function TrimManySheet({
   /** False until the app build has the editor (1.1). */
   available: boolean;
   onEdit: (item: VaultItem, plan: EditPlan, mode: 'replace' | 'copy', onProgress: (f: number) => void) => Promise<UiSmallerResult>;
+  /** Finds each video's intro (the opening it shares with the ones next to it by name). */
+  onFindIntros?: (ids: string[], onProgress: (f: number) => void) => Promise<Record<string, Intro | null>>;
   onCancel: () => void;
   onClose: () => void;
 }) {
@@ -49,13 +56,43 @@ export function TrimManySheet({
   const [run, setRun] = useState<Run | null>(null);
   const [tally, setTally] = useState<Tally | null>(null);
   const stopped = useRef(false);
+  const [intros, setIntros] = useState<Record<string, Intro | null> | null>(null);
+  const [finding, setFinding] = useState<number | null>(null);
+  const [byIntro, setByIntro] = useState(false);
 
   const start = seconds(startText);
   const end = seconds(endText);
-  const valid = start !== null && end !== null && start + end > 0;
-  const plans = valid ? items.map((v) => trimPlan(v.durationMs, start, end, exact)) : [];
+  const introAt = (v: VaultItem) => {
+    const x = intros?.[v.id] ?? null;
+    return atStart(x) ? x : null;
+  };
+  const valid = byIntro ? end !== null : start !== null && end !== null && start + end > 0;
+  const plans = valid
+    ? items.map((v) => {
+        if (!byIntro) return trimPlan(v.durationMs, start!, end!, exact);
+        const x = introAt(v);
+        return x ? trimPlan(v.durationMs, x.endSec, end!, exact) : null;
+      })
+    : [];
   const usable = plans.filter(Boolean).length;
   const tooShort = valid ? items.length - usable : 0;
+  const introEnds = items.map(introAt).filter((x): x is Intro => !!x).map((x) => x.endSec);
+  const laterIntros = intros ? items.filter((v) => intros[v.id] && !atStart(intros[v.id])).length : 0;
+
+  async function findIntros() {
+    if (!onFindIntros) return;
+    setFinding(0);
+    const found = await onFindIntros(
+      items.map((v) => v.id),
+      (f) => setFinding(f)
+    ).catch(() => ({}) as Record<string, Intro | null>);
+    setFinding(null);
+    setIntros(found);
+    if (items.some((v) => atStart(found[v.id] ?? null))) {
+      success();
+      setByIntro(true);
+    }
+  }
 
   async function go() {
     stopped.current = false;
@@ -66,7 +103,7 @@ export function TrimManySheet({
       const plan = plans[index];
       const name = item.title ?? item.filename;
       if (!plan) {
-        t = { ...t, skipped: t.skipped + 1, notes: [...t.notes, `${name}: too short`] };
+        t = { ...t, skipped: t.skipped + 1, notes: [...t.notes, `${name}: ${byIntro ? 'no intro at the start found' : 'too short'}`] };
         setTally(t);
         continue;
       }
@@ -81,7 +118,7 @@ export function TrimManySheet({
   }
 
   function confirmStart() {
-    const what = [start ? `the first ${start} s` : '', end ? `the last ${end} s` : ''].filter(Boolean).join(' and ');
+    const what = [byIntro ? 'the intro' : start ? `the first ${start} s` : '', end ? `the last ${end} s` : ''].filter(Boolean).join(' and ');
     confirmAction(
       `Cut ${what} of ${usable === 1 ? 'this video' : `${usable} videos`}?`,
       keep
@@ -124,7 +161,7 @@ export function TrimManySheet({
           ? { label: 'Stop', onPress: () => ((stopped.current = true), onCancel()) }
           : tally
             ? { label: 'Done', onPress: onClose }
-            : { label: 'Trim', onPress: confirmStart, disabled: !available || !valid || usable === 0 }
+            : { label: 'Trim', onPress: confirmStart, disabled: !available || !valid || usable === 0 || finding !== null }
       }>
       <Text style={styles.body}>{items.length === 1 ? (items[0].title ?? items[0].filename) : `${items.length} videos`}</Text>
 
@@ -132,14 +169,54 @@ export function TrimManySheet({
 
       {!run && !tally && (
         <>
-          <Section label="Cut from the start">
-            {input(startText, setStartText, 'Seconds to cut from the start')}
-            <Wrap>
-              {START_PICKS.map((s) => (
-                <Chip key={s} label={`${s} s`} on={start === s} onPress={() => setStartText(String(s))} />
-              ))}
-            </Wrap>
-          </Section>
+          {onFindIntros && available && (
+            <Section label="The intro">
+              {finding !== null ? (
+                <>
+                  <Text style={styles.body}>Looking at the first minutes of each video…</Text>
+                  <View style={styles.track}>
+                    <View style={[styles.fill, { width: `${Math.round(finding * 100)}%` }]} />
+                  </View>
+                </>
+              ) : intros ? (
+                <Animated.View entering={enterUp(0)} style={{ gap: 8 }}>
+                  <Text style={styles.body}>
+                    {introEnds.length
+                      ? `Found the intro at the start of ${introEnds.length} of ${items.length}: ${fmtRange(introEnds)} long.`
+                      : 'No shared intro at the start of these videos.'}
+                    {laterIntros ? ` ${laterIntros === 1 ? 'One has' : `${laterIntros} have`} it after an opening scene, so ${laterIntros === 1 ? 'it is' : 'those are'} left as they are.` : ''}
+                  </Text>
+                  {introEnds.length > 0 && (
+                    <Wrap>
+                      <Chip label="Cut each one's intro" on={byIntro} onPress={() => setByIntro(true)} />
+                      <Chip label="Same seconds for all" on={!byIntro} onPress={() => setByIntro(false)} />
+                    </Wrap>
+                  )}
+                </Animated.View>
+              ) : (
+                <>
+                  <TouchableOpacity style={styles.find} onPress={() => void findIntros()} accessibilityRole="button">
+                    <Text style={styles.findText}>Find the intro</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.hint}>
+                    {items.length > 1
+                      ? 'Compares the videos next to each other by name and finds the opening they share, so each one is cut where its own intro ends.'
+                      : 'Needs two or more videos of the same show to compare.'}
+                  </Text>
+                </>
+              )}
+            </Section>
+          )}
+          {!byIntro && (
+            <Section label="Cut from the start">
+              {input(startText, setStartText, 'Seconds to cut from the start')}
+              <Wrap>
+                {START_PICKS.map((s) => (
+                  <Chip key={s} label={`${s} s`} on={start === s} onPress={() => setStartText(String(s))} />
+                ))}
+              </Wrap>
+            </Section>
+          )}
           <Section label="Cut from the end">
             {input(endText, setEndText, 'Seconds to cut from the end')}
             <Wrap>
@@ -161,7 +238,8 @@ export function TrimManySheet({
           {!valid && <Text style={styles.warn}>Enter how many seconds to cut.</Text>}
           {valid && tooShort > 0 && (
             <Text style={styles.hint}>
-              {tooShort === 1 ? 'One video is' : `${tooShort} videos are`} too short for that and will be left alone.
+              {tooShort === 1 ? 'One video' : `${tooShort} videos`}{' '}
+              {byIntro ? (tooShort === 1 ? 'has' : 'have') + ' no intro at the start found and will be left alone.' : (tooShort === 1 ? 'is' : 'are') + ' too short for that and will be left alone.'}
             </Text>
           )}
         </>
@@ -210,4 +288,14 @@ const makeStyles = (p: Palette) =>
     input: { backgroundColor: p.card, color: p.text, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 17, minWidth: 80, textAlign: 'center' },
     track: { height: 6, borderRadius: 3, backgroundColor: p.card, overflow: 'hidden' },
     fill: { height: 6, backgroundColor: p.accent },
+    find: { alignSelf: 'flex-start', height: 40, paddingHorizontal: 18, borderRadius: 20, backgroundColor: p.text, alignItems: 'center', justifyContent: 'center' },
+    findText: { color: p.bg, fontSize: 15, fontWeight: '700' },
   });
+
+/** [11, 12, 14] -> "11-14 s"; [12, 12] -> "12 s". */
+function fmtRange(secs: number[]): string {
+  const lo = Math.min(...secs);
+  const hi = Math.max(...secs);
+  const f = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+  return lo === hi ? `${f(lo)} s` : `${f(lo)}–${f(hi)} s`;
+}

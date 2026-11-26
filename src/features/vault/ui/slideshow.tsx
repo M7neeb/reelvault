@@ -924,7 +924,7 @@ function EndCard({ list, title, stoppedAfter, onReplay, onSetup, onClose }: { li
       </View>
       <View style={[StyleSheet.absoluteFill, gradient('linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.85) 70%)', 'rgba(0,0,0,0.6)')]} />
       <View style={[styles.end, { paddingBottom: insets.bottom + 30 }]}>
-        <Text style={styles.setupKicker}>{stoppedAfter ? `STOPPED AFTER ${stoppedAfter} MINUTES` : title ? title.toUpperCase() : 'THAT WAS THE SLIDESHOW'}</Text>
+        <Text style={styles.setupKicker}>{stoppedAfter ? `Stopped after ${stoppedAfter} minutes` : title ? title : 'That was the slideshow'}</Text>
         <Words text={stoppedAfter ? 'Sleep well.' : `${total} ${total === 1 ? 'video' : 'videos'}, start to finish`} style={styles.setupTitle} />
         <View style={styles.endThumbs}>
           {list.slice(0, 5).map((v, i) => (

@@ -340,7 +340,7 @@ export function PhotoCard({
         </View>
       )}
       <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '900', letterSpacing: 0.6 }} numberOfLines={1}>
-        {kicker.toUpperCase()}
+        {kicker}
       </Text>
       <Text style={{ color: '#fff', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {value}

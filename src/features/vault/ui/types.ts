@@ -131,7 +131,10 @@ export const LOOKS: { key: Look; label: string; hint: string }[] = [
 ];
 
 /** Accent colours offered in Settings (null = the default blue). */
+/** The accent when none is chosen (the box-set spine red). */
+export const DEFAULT_ACCENT = '#FF5A36';
 export const ACCENTS: { key: string; label: string }[] = [
+  { key: DEFAULT_ACCENT, label: 'Vermilion' },
   { key: '#0A84FF', label: 'Blue' },
   { key: '#5E5CE6', label: 'Indigo' },
   { key: '#BF5AF2', label: 'Purple' },
@@ -252,7 +255,12 @@ export type SmartRule = {
   addedWithinDays?: number;
   /** Filmed in the last N days. */
   filmedWithinDays?: number;
+  /** Has (true) or doesn't have (false) each of these; left out = either. */
+  has?: Partial<Record<HasKey, boolean>>;
 };
+
+/** Things a video has or doesn't have, for the filter editor. */
+export type HasKey = 'cover' | 'rating' | 'keywords' | 'album' | 'title' | 'notes' | 'series' | 'simkl' | 'watched' | 'onScreen' | 'location' | 'resume';
 
 export type SmartFilter = { id: number; name: string; rule: SmartRule; folderId: number | null };
 
@@ -501,6 +509,10 @@ export type VaultActions = {
   /** Covers picked by the app: the best looking frame for videos still on their import frame. */
   /** Where the shared ending (outro, credits) of this episode's series starts, in seconds before the end; null = not found or not in a series. */
   creditsFromEnd: (videoId: string) => Promise<number | null>;
+  /** The intro of each of these videos (the opening they share with the ones next to them by name); null = none found. */
+  findIntros: (videoIds: string[], onProgress: (f: number) => void) => Promise<Record<string, import('../intro').Intro | null>>;
+  /** This episode's intro, from the episodes next to it in its series (found once, then remembered). */
+  introFor: (videoId: string) => Promise<import('../intro').Intro | null>;
   /** Games: best scores and the daily streak (JSON). */
   loadGames: () => Promise<string | null>;
   saveGames: (json: string) => Promise<void>;
@@ -849,6 +861,8 @@ export type VaultScreenProps = {
     whatsNewOpen?: boolean;
     /** Join videos with the first three videos picked. */
     joinOpen?: boolean;
+    trimManyOpen?: boolean;
+    filterNowOpen?: boolean;
     clipsOpen?: boolean;
     gamesOpen?: boolean;
     overviewOpen?: boolean;

@@ -77,24 +77,24 @@ export const raised = (p: Palette): string => (p.scheme === 'light' ? p.elevated
 export const DARK: Palette = {
   scheme: 'dark',
   bg: '#000000',
-  tile: '#141416',
-  panel: '#151517',
-  viewerBar: '#0b0b0d',
-  card: '#1f1f22',
-  border: '#2c2c30',
-  separator: 'rgba(255,255,255,0.12)',
+  tile: '#121214',
+  panel: '#101012',
+  viewerBar: '#070708',
+  card: '#1a1a1d',
+  border: '#26262a',
+  separator: 'rgba(255,255,255,0.09)',
   text: '#ffffff',
   textSoft: '#e7e9ec',
-  textSecondary: '#8e939b',
-  textMuted: '#5b6472',
+  textSecondary: '#8d8d95',
+  textMuted: '#5c5c64',
   circle: 'rgba(120,120,128,0.32)',
   floating: 'rgba(120,120,128,0.42)',
   icon: '#ffffff',
   headerBg: 'rgba(0,0,0,0.55)',
   backdrop: 'rgba(0,0,0,0.55)',
-  accent: '#0A84FF',
-  accentSoft: 'rgba(10,132,255,0.22)',
-  link: '#4aa8ff',
+  accent: '#FF5A36',
+  accentSoft: 'rgba(255,90,54,0.2)',
+  link: '#FF7A5C',
   keyword: '#2f9ee0',
   rating: '#F5A623',
   danger: '#c0392b',
@@ -103,7 +103,7 @@ export const DARK: Palette = {
   starOff: '#4a4a4e',
   switchOff: '#3a3a3e',
   glassFallback: 'rgba(58,58,62,0.72)',
-  elevated: '#1c1c1e',
+  elevated: '#151517',
   success: '#30D158',
 };
 
@@ -126,9 +126,9 @@ export const LIGHT: Palette = {
   icon: '#1c1c1e',
   headerBg: 'rgba(255,255,255,0.8)',
   backdrop: 'rgba(0,0,0,0.3)',
-  accent: '#0A84FF',
-  accentSoft: 'rgba(10,132,255,0.14)',
-  link: '#007AFF',
+  accent: '#E4472A',
+  accentSoft: 'rgba(228,71,42,0.12)',
+  link: '#D33F23',
   keyword: '#2f9ee0',
   rating: '#F5A623',
   danger: '#e5484d',
@@ -167,7 +167,6 @@ export function useStyles<T extends object>(factory: (p: Palette) => T): T {
 
 function build<T extends object>(factory: (p: Palette) => T, p: Palette): T {
   const styles = factory(p);
-  if (!p.font && (p.corners ?? 'standard') === 'standard' && !p.outlined) return styles;
   return restyle(styles as Record<string, unknown>, {
     font: p.font ?? null,
     corners: p.corners ?? 'standard',
@@ -207,7 +206,7 @@ export function themeFor(
   return { ...p, font, glass: o.glass ?? 'regular', corners, outlined, art: o.artwork ?? true, key: [scheme, p.bg, p.accent, font ?? '', corners, outlined ? 1 : 0].join('|') };
 }
 
-/** The palette with your accent colour (Settings → Personalise); null keeps the default blue. */
+/** The palette with your accent colour (Settings → Personalise); null keeps the default vermilion. */
 export function withAccent(p: Palette, accent: string | null | undefined): Palette {
   if (!accent) return p;
   const rgb = rgbOf(accent);

@@ -4,6 +4,8 @@
  */
 
 import { useEffect, useState } from 'react';
+import { DISPLAY_FONT } from './paletteMath';
+import { Spine } from './spine';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -128,7 +130,7 @@ export function Cover({
   title,
   width,
   height,
-  radius = 10,
+  radius = 6,
   hideTitle,
   children,
 }: {
@@ -140,16 +142,17 @@ export function Cover({
   hideTitle?: boolean;
   children?: React.ReactNode;
 }) {
-  const box = { width, height, borderRadius: radius, overflow: 'hidden' as const };
+  const box = { width, height, borderRadius: Math.min(radius, 8), overflow: 'hidden' as const };
   if (!source) {
     return (
       <View style={[box, { backgroundColor: `hsl(${hueFor(title)}, 46%, 36%)` }]}>
         <Fade color="0,0,0" from={0} to={0.6} style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }} />
         {!hideTitle && (
-          <Text numberOfLines={3} style={{ position: 'absolute', left: 8, right: 8, bottom: 9, color: '#fff', fontSize: 13, fontWeight: '800' }}>
+          <Text numberOfLines={3} style={{ position: 'absolute', left: 10, right: 8, bottom: 9, color: '#fff', fontSize: 16, fontFamily: DISPLAY_FONT.bold }}>
             {title}
           </Text>
         )}
+        <Spine name={title} />
         {children}
       </View>
     );
@@ -157,6 +160,7 @@ export function Cover({
   return (
     <View style={[box, { backgroundColor: '#1c1c1e' }]}>
       <Image source={source} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={120} />
+      <Spine name={title} />
       {children}
     </View>
   );

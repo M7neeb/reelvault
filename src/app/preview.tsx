@@ -299,7 +299,7 @@ function SearchPreview({ q, mine, scope }: { q?: string; mine?: boolean; scope?:
       remember: () => undefined,
       clearRecent: () => undefined,
       // The preview has no look-inside scan: pretend a few videos show the word.
-      onScreen: (q) => ({ count: q.trim().length >= 3 ? 7 : 0, looked: 412, total: 600 }),
+      onScreen: (q) => ({ count: q.trim().length >= 3 && !q.includes('zz') ? 7 : 0, looked: 412, total: 600, running: true }),
       selectOnScreen: () => undefined,
     };
   }, [items]);
@@ -345,6 +345,8 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   settings: { settingsOpen: true },
   'whats-new': { whatsNewOpen: true },
   join: { joinOpen: true },
+  'trim-many': { trimManyOpen: true },
+  'filter-now': { filterNowOpen: true },
   clips: { clipsOpen: true },
   games: { gamesOpen: true },
   calendar: { calendarOpen: true },
@@ -591,6 +593,14 @@ export default function PreviewRoute() {
       setImportQuality: noop,
       loadRank: async () => null,
       creditsFromEnd: async () => 20,
+      findIntros: async (ids, onProgress) => {
+        for (let i = 1; i <= 10; i++) {
+          await new Promise((r) => setTimeout(r, 120));
+          onProgress(i / 10);
+        }
+        return Object.fromEntries(ids.map((id, i) => [id, i % 4 === 3 ? null : i % 5 === 4 ? { startSec: 62, endSec: 92 } : { startSec: 0, endSec: 11 + (i % 3) }]));
+      },
+      introFor: async () => ({ startSec: 2, endSec: 30 }),
       loadGames: async () => null,
       saveGames: async () => {},
       reportProblem: async () => {},

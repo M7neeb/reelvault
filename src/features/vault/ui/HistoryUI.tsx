@@ -28,8 +28,8 @@ import { Bars, Card, gradient, Ring, SectionTitle, ShareBar, StatTile } from './
 import { LiveCard } from './live';
 import { DUR, enterUp, PressableScale } from './motion';
 import { Segment } from './sheets';
-import { Aurora, CountUp, GrowBar } from './storyKit';
-import { sheet, usePalette, useStyles, type Palette } from './theme';
+import { CountUp, GrowBar } from './storyKit';
+import { raised, sheet, usePalette, useStyles, type Palette } from './theme';
 import type { VaultItem } from './types';
 
 type Thumbs = Map<string, VaultItem['thumbSource']>;
@@ -222,12 +222,12 @@ function HistoryList({ items, plays, thumbs, onOpen, onDelete }: { items: VaultI
             <View style={styles.lastTop} pointerEvents="none">
               <View style={styles.liveChip}>
                 <View style={styles.liveDot} />
-                <Text style={styles.liveText}>LAST WATCHED</Text>
+                <Text style={styles.liveText}>Last watched</Text>
               </View>
             </View>
             <View style={styles.lastBody} pointerEvents="none">
               <Text style={styles.lastKicker}>
-                {days[0].title.toUpperCase()} · {time(last.at)}
+                {days[0].title} · {time(last.at)}
               </Text>
               <Text style={styles.lastTitle} numberOfLines={2}>
                 {friendlyName(lastVideo)}
@@ -467,9 +467,8 @@ function Stats({ items, plays, thumbs, onOpen, frozenDays = [] }: { items: Vault
 
   return (
     <>
-      <Animated.View entering={enterUp(1)} style={[styles.hero, gradient('linear-gradient(135deg, #FF9F0A 0%, #FF375F 50%, #5E1A3A 100%)')]}>
-        <Aurora colors={['#FF9F0A', '#5E1A3A']} accent="#FFD60A" width={width - 32} height={190} />
-        <Text style={styles.heroKicker}>ALL YOUR WATCHING{s.firstPlayAt ? ` · SINCE ${new Date(s.firstPlayAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }).toUpperCase()}` : ''}</Text>
+      <Animated.View entering={enterUp(1)} style={[styles.hero, { backgroundColor: raised(p) }]}>
+        <Text style={styles.heroKicker}>All your watching{s.firstPlayAt ? ` since ${new Date(s.firstPlayAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}` : ''}</Text>
         <CountUp to={s.totalMs} format={(n) => fmtMs(n)} style={styles.heroValue} />
         <View style={styles.heroRow}>
           <View style={styles.heroFact}>
@@ -670,12 +669,12 @@ const makeStyles = (p: Palette) =>
     punchCell: { borderRadius: 3 },
     punchHour: { color: p.textMuted, fontSize: 9, fontWeight: '700' },
     hero: { borderRadius: 26, padding: 18, gap: 6, overflow: 'hidden' },
-    heroKicker: { color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
-    heroValue: { color: '#fff', fontSize: 46, fontWeight: '900', letterSpacing: -1.4 },
+    heroKicker: { color: p.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+    heroValue: { color: p.text, fontSize: 46, fontWeight: '900', letterSpacing: -1.4 },
     heroRow: { flexDirection: 'row', gap: 10, marginTop: 6 },
-    heroFact: { flex: 1, backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 14, padding: 10 },
-    heroNum: { color: '#fff', fontSize: 22, fontWeight: '900' },
-    heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '700' },
+    heroFact: { flex: 1, backgroundColor: p.circle, borderRadius: 14, padding: 10 },
+    heroNum: { color: p.text, fontSize: 22, fontWeight: '900' },
+    heroLabel: { color: p.textSecondary, fontSize: 12, fontWeight: '700' },
     tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
     finish: { flexDirection: 'row', alignItems: 'center', gap: 16 },
     finishPct: { color: p.text, fontSize: 22, fontWeight: '900' },

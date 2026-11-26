@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Shelf, { type ShelfBox } from './shelf';
 import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import type { VideoLink } from '@/features/simkl/ui/types';
 import { StatusBar } from 'expo-status-bar';
@@ -50,7 +51,7 @@ import {
   resolveScheme,
   safeBatchGb,
 } from './logic';
-import { heroHeight, setWatchInfo, showsHero, watchInfoOf } from './logic';
+import { heroHeight, setHasInfo, setWatchInfo, showsHero, watchInfoOf } from './logic';
 import { CompareModal } from './playback';
 import { SlideshowModal, type ShowMusic } from './slideshow';
 import { LiveProvider, useLiveScope } from './live';
@@ -279,7 +280,7 @@ function VaultScreenBody({
   }, []);
   const [bulkOpen, setBulkOpen] = useState(dev?.bulkOpen ?? false);
   const [settingsOpen, setSettingsOpen] = useState(dev?.settingsOpen ?? false);
-  const [trimFor, setTrimFor] = useState<VaultItem[] | null>(null);
+  const [trimFor, setTrimFor] = useState<VaultItem[] | null>(dev?.trimManyOpen ? items.filter((v) => !v.isPrivate && !v.deletedAt).slice(0, 8) : null);
   const [smallerFor, setSmallerFor] = useState<VaultItem[] | null>(
     dev?.smallerOpen && dev.selectedIds?.length ? items.filter((v) => (dev.selectedIds ?? []).includes(v.id)) : null
   );
@@ -348,7 +349,7 @@ function VaultScreenBody({
     rule: SmartRule;
     mode: 'save' | 'search';
   } | null>(
-    dev?.smartEditorOpen ? { name: 'Best travel clips', rule: { minRating: 8, tags: ['holiday'] }, mode: 'save' } : null
+    dev?.smartEditorOpen ? { name: 'Best travel clips', rule: { minRating: 8, tags: ['holiday'] }, mode: 'save' } : dev?.filterNowOpen ? { name: '', rule: { has: { cover: false, rating: false } }, mode: 'search' } : null
   );
   const [filter, setFilter] = useState<Filter>(
     dev?.albumId !== undefined
@@ -618,6 +619,13 @@ function VaultScreenBody({
     return m;
   }, [groups]);
 
+  // The filter editor's "has / doesn't have" rules read this (series, Simkl link, text on screen, half watched).
+  const hasInfo = useMemo(() => {
+    const onScreenIds = new Set((sceneRows?.current ?? []).filter((r) => r.words.trim()).map((r) => r.videoId));
+    const info = { series: new Set(overview.members.map((m) => m.videoId)), simkl: linkedIds, onScreen: onScreenIds, resume: new Set(resume.keys()) };
+    setHasInfo(info);
+    return info;
+  }, [overview.members, linkedIds, sceneVersion, resume]); // eslint-disable-line react-hooks/exhaustive-deps
   const shownRaw = useMemo(() => {
     const byGroups = (gs: string[][]) => {
       const byId = new Map(publicItems.map((v) => [v.id, v]));
@@ -674,7 +682,7 @@ function VaultScreenBody({
       default:
         return pool;
     }
-  }, [filter, pool, visibleTrash, visibleGroups, similarGroups, publicItems, albums, tagMap, smartFilters]);
+  }, [filter, pool, visibleTrash, visibleGroups, similarGroups, publicItems, albums, tagMap, smartFilters, hasInfo]); // eslint-disable-line react-hooks/exhaustive-deps
   // Most / least / last watched are sorted here, from your plays (duplicates and Recently Deleted keep their order).
   const shown = useMemo(
     () =>
@@ -762,6 +770,23 @@ function VaultScreenBody({
     tick();
     setViewOptions({ ...viewOptions, size: next });
   }
+
+  // The shelf on the Watch page: your series as box sets, the last one you watched first.
+  const [ovOpen, setOvOpen] = useState<{ key: string; n: number } | null>(null);
+  const shelfBoxes = useMemo<ShelfBox[]>(() => {
+    const shown = new Set(publicItems.filter((v) => !v.deletedAt).map((v) => v.id));
+    const lastAt = new Map<string, number>();
+    for (const x of allPlays) lastAt.set(x.videoId, Math.max(lastAt.get(x.videoId) ?? 0, x.startedAt));
+    const boxes = overview.series
+      .map((sr) => {
+        const ids = overview.members.filter((m) => m.seriesId === sr.id && shown.has(m.videoId)).map((m) => m.videoId);
+        const last = Math.max(0, ...ids.map((id) => lastAt.get(id) ?? 0));
+        return { key: `s:${sr.id}`, title: sr.name, count: ids.length, watched: ids.filter((id) => (playCounts.get(id) ?? 0) > 0).length, last };
+      })
+      .filter((b) => b.count > 0)
+      .sort((a, b) => b.last - a.last || a.title.localeCompare(b.title));
+    return boxes.map((b, i) => ({ key: b.key, title: b.title, count: b.count, watched: b.watched, pulled: i === 0 && b.last > 0 && b.watched < b.count }));
+  }, [overview.series, overview.members, publicItems, allPlays, playCounts]);
 
   // Video id -> series name, for "Group by series".
   const seriesOf = useMemo(() => {
@@ -1477,6 +1502,19 @@ function VaultScreenBody({
           </ScrollView>
         </View>
       )}
+      {!results && !special && look !== 'simple' && shelfBoxes.length > 0 && (
+        <View style={styles.shelfWrap}>
+          <Text style={styles.shelfTitle}>Your shelf</Text>
+          <Shelf
+            boxes={shelfBoxes}
+            side={12}
+            onOpen={(key) => {
+              setOvOpen({ key, n: Date.now() });
+              switchMode('overview');
+            }}
+          />
+        </View>
+      )}
       {homeList.length > 0 && (
         <HomeRows
           rows={homeList}
@@ -1587,6 +1625,7 @@ function VaultScreenBody({
           onPressTile={onPressTile}
           onLongPressTile={mode === 'normal' ? onLongPressTile : undefined}
           linked={look === 'simple' ? undefined : linkedIds}
+          series={seriesOf}
           resume={look === 'simple' ? undefined : resume}
           seriesOf={seriesOf}
           onPinchSize={look === 'simple' || look === 'compact' ? undefined : pinchSize}
@@ -1707,6 +1746,10 @@ function VaultScreenBody({
           onNewSmart={() => {
             setSidebarOpen(false);
             setEditingSmart({ ...newSmartFilterDraft(''), mode: 'save' });
+          }}
+          onFilterNow={() => {
+            setSidebarOpen(false);
+            setEditingSmart({ name: '', rule: filter.kind === 'rule' ? filter.rule : {}, mode: 'search' });
           }}
           onNewAlbum={(opts) => newAlbum(opts)}
           onNewFolder={() =>
@@ -1840,6 +1883,7 @@ function VaultScreenBody({
           items={trimFor}
           available={actions.canMakeSmaller()}
           onEdit={actions.onEditVideo}
+          onFindIntros={actions.findIntros}
           onCancel={actions.onCancelMakeSmaller}
           onClose={() => setTrimFor(null)}
         />
@@ -2100,6 +2144,7 @@ function VaultScreenBody({
       {videosMode === 'overview' && (
         <Animated.View style={StyleSheet.absoluteFill} entering={FadeIn.duration(DUR.base)} exiting={FadeOut.duration(DUR.fast)}>
           <OverviewScreen
+            openRequest={ovOpen}
             enableVideo={enableVideo}
             items={publicItems}
             deletedItems={deletedItems.filter((v) => !v.isPrivate)}
@@ -2440,6 +2485,8 @@ const makeStyles = (p: Palette) =>
     dangerPill: { backgroundColor: p.danger, paddingHorizontal: 15, paddingVertical: 8, borderRadius: 999 },
     pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
     note: { color: p.textSecondary, fontSize: 12, paddingHorizontal: 4 },
+    shelfWrap: { marginTop: 4, marginBottom: 14, gap: 2 },
+    shelfTitle: { color: p.text, fontSize: 20, fontWeight: '700', paddingHorizontal: 12 },
     sortRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingHorizontal: 4, paddingTop: 2 },
     chipRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     shelfHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingRight: 8 },

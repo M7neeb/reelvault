@@ -172,7 +172,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   for (const [years, list] of byYear) {
     const exact = list.some((v) => new Date(v.createdAt).getDate() === today.getDate() && new Date(v.createdAt).getMonth() === today.getMonth());
     add('onThisDay', `otd:${today.getFullYear() - years}`, list, {
-      kicker: 'ON THIS DAY',
+      kicker: 'On this day',
       title: `${plural(years, 'year')} ago${exact ? ' today' : ' this week'}`,
       subtitle: `${fmtDay(list[0].createdAt)} · ${plural(list.length, 'video')}`,
       mood: 'gentle',
@@ -187,7 +187,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   const yearAgo = all.filter((v) => Math.abs(v.createdAt - lastYear) <= 15 * DAY && !otdIds.has(v.id));
   if (yearAgo.length >= 3)
     add('yearAgo', `yago:${today.getFullYear() - 1}-${today.getMonth() + 1}`, yearAgo, {
-      kicker: 'ONE YEAR AGO',
+      kicker: 'One year ago',
       title: `${monthName(lastYear)}, a year ago`,
       subtitle: `${fmtDay(yearAgo[0].createdAt, { day: 'numeric', month: 'short' })} – ${fmtDay(yearAgo[yearAgo.length - 1].createdAt, { day: 'numeric', month: 'short', year: 'numeric' })} · ${plural(yearAgo.length, 'video')}`,
       mood: 'gentle',
@@ -199,7 +199,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   if (all.length >= 12) {
     const first = all.slice(0, Math.min(8, Math.max(3, Math.floor(all.length / 20))));
     add('first', 'first', first, {
-      kicker: 'WHERE IT BEGAN',
+      kicker: 'Where it began',
       title: 'Your first videos',
       subtitle: `Since ${fmtDay(first[0].createdAt)} · the very start`,
       mood: 'gentle',
@@ -213,7 +213,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
     if (all.length < n) break;
     const around = all.slice(Math.max(0, n - 3), n + 2);
     add('milestone', `milestone:${n}`, around, {
-      kicker: 'MILESTONE',
+      kicker: 'Milestone',
       title: `Video number ${n.toLocaleString('en-GB')}`,
       subtitle: `Filmed ${fmtDay(all[n - 1].createdAt)}`,
       mood: 'epic',
@@ -229,7 +229,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   });
   if (night.length >= 4)
     add('night', 'night', night, {
-      kicker: 'AFTER DARK',
+      kicker: 'After dark',
       title: 'Night moments',
       subtitle: `${plural(night.length, 'video')} filmed after 9 pm`,
       mood: 'epic',
@@ -252,7 +252,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
         const weekend = days <= 3 && (startDow === 5 || startDow === 6);
         const title = days === 1 ? 'A day away' : weekend ? 'A weekend away' : `${days} days away`;
         add('trip', `trip:${sod(run[0].createdAt)}`, run, {
-          kicker: 'TRIP',
+          kicker: 'Trip',
           title: `${title}, ${monthName(run[0].createdAt)} ${new Date(run[0].createdAt).getFullYear()}`,
           subtitle: `${far >= 1000 ? `${(far / 1000).toFixed(1)}k` : far} km from home · ${plural(run.length, 'video')}`,
           mood: 'epic',
@@ -280,7 +280,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
     if (s.length < 3 || s.every((v) => inTrip.has(v.id))) continue;
     const tag = sharedTag(s);
     add('day', `day:${sod(s[0].createdAt)}`, s, {
-      kicker: fmtDay(s[0].createdAt, { weekday: 'long' }).toUpperCase(),
+      kicker: cap(fmtDay(s[0].createdAt, { weekday: 'long' })),
       title: tag ? `${cap(tag)}, ${fmtDay(s[0].createdAt, { day: 'numeric', month: 'long' })}` : daypartTitle(s),
       subtitle: `${fmtDay(s[0].createdAt)} · ${plural(s.length, 'video')}`,
       mood: 'upbeat',
@@ -292,13 +292,13 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   // The last two weeks.
   const recent = all.filter((v) => ageDays(v.createdAt) <= 14);
   if (recent.length >= 4)
-    add('recent', 'recent', recent, { kicker: 'RECENTLY', title: 'The last two weeks', subtitle: plural(recent.length, 'video'), mood: 'upbeat', tone: 3, score: 60 });
+    add('recent', 'recent', recent, { kicker: 'Recently', title: 'The last two weeks', subtitle: plural(recent.length, 'video'), mood: 'upbeat', tone: 3, score: 60 });
 
   // On repeat: what you play most.
   const repeat = all.filter((v) => (playsOf.get(v.id) ?? 0) >= 3).sort((a, b) => (playsOf.get(b.id) ?? 0) - (playsOf.get(a.id) ?? 0)).slice(0, 10);
   if (repeat.length >= 3)
     add('repeat', 'repeat', [...repeat].sort((a, b) => a.createdAt - b.createdAt), {
-      kicker: 'MOST PLAYED',
+      kicker: 'Most played',
       title: 'On repeat',
       subtitle: `The ${repeat.length} videos you play again and again`,
       mood: 'upbeat',
@@ -316,7 +316,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   for (const [k, list] of monthGroups) {
     if (list.length < 4) continue;
     add('month', `month:${new Date(k).getFullYear()}-${new Date(k).getMonth() + 1}`, list, {
-      kicker: 'BEST OF THE MONTH',
+      kicker: 'Best of the month',
       title: `Best of ${monthName(k)}`,
       subtitle: `${new Date(k).getFullYear()} · ${plural(list.length, 'video')}`,
       mood: 'gentle',
@@ -339,7 +339,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   for (const [k, g] of seasonGroups) {
     if (g.list.length < 5) continue;
     add('season', `season:${k}`, g.list, {
-      kicker: 'SEASON',
+      kicker: 'Season',
       title: `${g.name} ${g.year}`,
       subtitle: plural(g.list.length, 'video'),
       mood: g.name === 'Summer' ? 'upbeat' : 'gentle',
@@ -356,7 +356,7 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
     const y1 = new Date(list[0].createdAt).getFullYear();
     const y2 = new Date(list[list.length - 1].createdAt).getFullYear();
     add('theme', `theme:${tag.toLowerCase()}`, list, {
-      kicker: 'THEME',
+      kicker: 'Theme',
       title: `${cap(tag)} moments`,
       subtitle: `${plural(list.length, 'video')} · ${y1 === y2 ? y1 : `${y1}–${y2}`}`,
       mood: 'upbeat',
@@ -368,10 +368,10 @@ export function memories(videos: MVideo[], plays: RPlay[], now: number): Memory[
   // Favourites and forgotten gems.
   const favs = all.filter((v) => v.rating >= 8);
   if (favs.length >= 3)
-    add('favourites', 'favourites', favs, { kicker: 'TOP RATED', title: 'Your favourites', subtitle: `${plural(favs.length, 'video')} rated 8 or more`, mood: 'epic', tone: 8, score: 40 });
+    add('favourites', 'favourites', favs, { kicker: 'Top rated', title: 'Your favourites', subtitle: `${plural(favs.length, 'video')} rated 8 or more`, mood: 'epic', tone: 8, score: 40 });
   const gems = all.filter((v) => v.rating >= 7 && (lastPlay.get(v.id) ?? v.importedAt) < now - 90 * DAY);
   if (gems.length >= 3)
-    add('gems', 'gems', gems, { kicker: 'REDISCOVER', title: 'Forgotten gems', subtitle: 'Great videos you haven’t watched in months', mood: 'gentle', tone: 9, score: 42 });
+    add('gems', 'gems', gems, { kicker: 'Rediscover', title: 'Forgotten gems', subtitle: 'Great videos you haven’t watched in months', mood: 'gentle', tone: 9, score: 42 });
 
   // Whole years.
   const years = new Map<number, MVideo[]>();
@@ -443,7 +443,7 @@ export function thenAndNow(all: MVideo[], playsOf: Map<string, number>): Memory[
     out.push({
       id: g.id,
       kind: 'thenNow',
-      kicker: 'THEN AND NOW',
+      kicker: 'Then and now',
       title: g.name ? `${g.name}, then and now` : `The same spot, ${y1} and ${y2}`,
       subtitle: `${y1} and ${y2} · ${plural(gap, 'year')} apart`,
       videoIds: pairs.flat(),
@@ -556,7 +556,7 @@ export function customMemory(c: CustomMemory, videos: MVideo[], plays: RPlay[]):
   return {
     id: c.id,
     kind: 'custom',
-    kicker: 'MADE BY YOU',
+    kicker: 'Made by you',
     title: c.title,
     subtitle: plural(list.length, 'video'),
     videoIds: ids,
