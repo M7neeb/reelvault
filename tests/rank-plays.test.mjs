@@ -23,6 +23,6 @@ test('grid previews stop while a page with its own videos is open', () => {
   const src = read('VaultScreen.tsx');
   const m = /const gridPlays = ([^;]+);/.exec(src);
   assert.ok(m, 'gridPlays is defined');
-  for (const open of ['playing', 'slideshow', 'insights', 'rankOpen', 'clipsOpen', 'gamesOpen', 'triage']) assert.match(m[1], new RegExp(`!${open}\\b`), open);
+  for (const open of ['playing', 'slideshow', 'insights', 'rankOpen', 'clipsOpen', 'gamesOpen', 'triage', 'sidebarOpen']) assert.match(m[1], new RegExp(`!${open}\\b`), open);
   assert.match(src, /livePreview=\{gridPlays\}/);
 });

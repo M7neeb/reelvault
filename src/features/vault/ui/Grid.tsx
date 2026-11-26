@@ -166,14 +166,21 @@ export default function Grid({
 
   const visibleHeaders = layout.headers.filter((h) => h.y < windowBottom && h.y + GROUP_HEADER > windowTop);
 
-  const pinch = Gesture.Pinch()
-    .runOnJS(true)
-    .onEnd((e) => {
-      if (!onPinchSize) return;
-      if (e.scale > 1.18) onPinchSize(1);
-      else if (e.scale < 0.85) onPinchSize(-1);
-    });
-  const gestures = Gesture.Simultaneous(pinch, Gesture.Native());
+  // Built once: the grid re-renders while panels sit over it, and gestures made
+  // fresh each render get swapped mid-touch.
+  const pinchRef = useRef(onPinchSize);
+  pinchRef.current = onPinchSize;
+  const gestures = useMemo(() => {
+    const pinch = Gesture.Pinch()
+      .runOnJS(true)
+      .onEnd((e) => {
+        const step = pinchRef.current;
+        if (!step) return;
+        if (e.scale > 1.18) step(1);
+        else if (e.scale < 0.85) step(-1);
+      });
+    return Gesture.Simultaneous(pinch, Gesture.Native());
+  }, []);
 
   function jumpToSection(key: string) {
     const target = layout.headers.find((h) => h.key === key);

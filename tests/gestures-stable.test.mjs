@@ -5,7 +5,7 @@ import { test } from 'node:test';
 // Screens that re-render many times a second while something plays (progress bars, timers). Gestures
 // created on every render there are replaced mid-touch, and a tap that spans a re-render is dropped:
 // "tapping the playing video doesn't hide the controls". Each must build its gestures once, in useMemo.
-const PLAYING_SCREENS = ['src/features/vault/ui/ViewerModal.tsx', 'src/features/vault/ui/MemoriesUI.tsx', 'src/features/vault/ui/slideshow.tsx'];
+const PLAYING_SCREENS = ['src/features/vault/ui/ViewerModal.tsx', 'src/features/vault/ui/MemoriesUI.tsx', 'src/features/vault/ui/slideshow.tsx', 'src/features/vault/ui/Grid.tsx'];
 
 /** The source of `const gestures = useMemo(...)`, up to its dependency list. */
 function memoBlock(src) {

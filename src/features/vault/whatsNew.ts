@@ -14,6 +14,7 @@ export const RELEASES: Release[] = [
     items: [
       'Rank videos: both clips play again, and the grid\'s previews pause while you rank.',
       'Each clip has a speaker button for its sound. Turning one on mutes the other.',
+      'The Library panel: the grid behind it stops its previews while the panel is open, so taps on the right-hand Browse buttons should land.',
     ],
   },
   {
