@@ -21,6 +21,7 @@ import { ThemeContext } from '@/features/vault/ui/theme';
 import { resumeSavedAt } from '@/features/vault/watching';
 import { findScenes, onScreen } from '@/features/vault/sceneLogic';
 import { canLookInside } from '@/features/vault/scenes';
+import { creatorMatches } from '@/features/vault/creatorLogic';
 import { progressOf } from '@/features/vault/books/bookLogic';
 import { fmtClock } from '@/features/vault/stats';
 
@@ -149,12 +150,25 @@ export default function SearchRoute() {
         // While the scan is still going, its own numbers (the whole library); after it, everything was looked at.
         return pr?.running ? { count, looked: pr.done, total: pr.total, running: true } : { count, looked: shownVideos.size, total: shownVideos.size, running: !pr };
       },
+      creators: (q) => {
+        const typed = q.replace(/^\s*@/, '').trim();
+        if (!typed) return [];
+        return Object.entries(vault.creatorMap)
+          .map(([name, ids]) => ({ name, count: ids.filter((id) => shownVideos.has(id)).length }))
+          .filter((c) => c.count > 0 && creatorMatches(c.name, typed))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 6);
+      },
+      openCreator: (name) => {
+        router.navigate('/' as Href);
+        pushJump({ kind: 'creator', name });
+      },
       selectOnScreen: (q) => {
         router.navigate('/' as Href);
         pushJump({ kind: 'select', onScreen: q });
       },
     };
-  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, vault.insideProgress, audio.items, manga.items, simkl.items, books.items, router, week, recent, saveRecent]);
+  }, [vault.items, vault.resume, vault.sceneRows, vault.sceneVersion, vault.insideProgress, vault.creatorMap, audio.items, manga.items, simkl.items, books.items, router, week, recent, saveRecent]);
 
   return (
     <ThemeContext.Provider value={palette}>

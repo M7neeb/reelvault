@@ -153,6 +153,7 @@ const PUBLIC_ITEMS: VaultItem[] = SAMPLE_NAMES.map((filename, i) => ({
   importedAt: Date.UTC(2026, 9, 13, 18, 30) - i * 26 * 60 * 60 * 1000,
   tagCount: TAG_SETS[i].length,
   tagNames: TAG_SETS[i],
+  creators: i % 4 === 0 ? ['Lena Moss'] : i % 4 === 1 ? ['Kai Rivers'] : [],
   deletedAt: null,
   status: STATUS_SET[i],
   isPrivate: false,
@@ -184,6 +185,7 @@ const PRIVATE_ITEMS: VaultItem[] = PRIVATE_NAMES.map((filename, i) => ({
   importedAt: Date.UTC(2026, 9, 2, 10, 0) - i * 26 * 60 * 60 * 1000,
   tagCount: 0,
   tagNames: [],
+  creators: [],
   deletedAt: null,
   status: null,
   isPrivate: true,
@@ -239,6 +241,7 @@ export const FIXTURE_DELETED: VaultItem[] = DELETED_NAMES.map((filename, i) => (
   importedAt: Date.UTC(2026, 8, 1, 12, 0),
   tagCount: 0,
   tagNames: [],
+  creators: [],
   deletedAt: Date.now() - DELETED_DAYS_AGO[i] * DAY - 60 * 60 * 1000,
   status: null,
   isPrivate: false,
@@ -262,6 +265,12 @@ export const FIXTURE_TAGS: UiTag[] = [
 ].map((name, i) => ({ id: i + 1, name, pinned: name === 'holiday' }));
 
 /** name -> ids, the same shape the native layer hands over. */
+/** Creators on the fixture videos (Creators in the Library panel). */
+export const FIXTURE_CREATOR_MAP: Record<string, string[]> = {
+  'Lena Moss': FIXTURE_ITEMS.filter((v) => v.creators.includes('Lena Moss')).map((v) => v.id),
+  'Kai Rivers': FIXTURE_ITEMS.filter((v) => v.creators.includes('Kai Rivers')).map((v) => v.id),
+};
+
 export const FIXTURE_TAG_MAP: Record<string, string[]> = Object.fromEntries(
   FIXTURE_TAGS.map((t) => [t.name, FIXTURE_ITEMS.filter((v) => v.tagNames.includes(t.name)).map((v) => v.id)])
 );

@@ -25,6 +25,7 @@ import {
   FIXTURE_SMART_FILTERS,
   FIXTURE_TAGS,
   FIXTURE_TAG_MAP,
+  FIXTURE_CREATOR_MAP,
   fixtureFrames,
   fixtureSearch,
   fixturePlays,
@@ -299,6 +300,8 @@ function SearchPreview({ q, mine, scope }: { q?: string; mine?: boolean; scope?:
       remember: () => undefined,
       clearRecent: () => undefined,
       // The preview has no look-inside scan: pretend a few videos show the word.
+      creators: (q) => (/^@?(le|lena)/i.test(q.trim()) ? [{ name: 'Lena Moss', count: 3 }] : []),
+      openCreator: () => undefined,
       onScreen: (q) => ({ count: q.trim().length >= 3 && !q.includes('zz') ? 7 : 0, looked: 412, total: 600, running: true }),
       selectOnScreen: () => undefined,
     };
@@ -346,6 +349,8 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'whats-new': { whatsNewOpen: true },
   join: { joinOpen: true },
   'trim-many': { trimManyOpen: true },
+  creators: { creatorsOpen: true },
+  'creator-filter': { creator: 'Lena Moss' },
   'filter-now': { filterNowOpen: true },
   clips: { clipsOpen: true },
   games: { gamesOpen: true },
@@ -515,6 +520,12 @@ export default function PreviewRoute() {
       onPurgeMany: noop,
       onRateMany: noop,
       onAddTagMany: noop,
+      addCreator: async () => undefined,
+      removeCreator: async () => undefined,
+      renameCreator: async () => undefined,
+      deleteCreator: async () => undefined,
+      creatorSuggestions: async () => [{ name: 'mrbeast', ids: FIXTURE_ITEMS.slice(2, 5).map((v) => v.id) }, { name: 'lil.cat', ids: FIXTURE_ITEMS.slice(5, 7).map((v) => v.id) }],
+      dismissCreatorSuggestion: async () => undefined,
       onSetStatus: noop,
       onSetFlag: noop,
       onSetTray: noop,
@@ -756,6 +767,7 @@ export default function PreviewRoute() {
           items={items}
           allTags={FIXTURE_TAGS}
           tagMap={FIXTURE_TAG_MAP}
+          creatorMap={FIXTURE_CREATOR_MAP}
           deletedItems={FIXTURE_DELETED}
           duplicateGroups={FIXTURE_DUPLICATE_GROUPS}
           smartFilters={FIXTURE_SMART_FILTERS}

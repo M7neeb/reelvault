@@ -790,36 +790,44 @@ export function MemoryPlayer({
   }, [paused, ended, clips.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ty = useSharedValue(0);
-  const pan = Gesture.Pan()
-    .activeOffsetY(14)
-    .failOffsetX([-30, 30])
-    .onUpdate((e) => {
-      'worklet';
-      ty.value = Math.max(0, e.translationY);
-    })
-    .onEnd((e) => {
-      'worklet';
-      if (e.translationY > 120 || e.velocityY > 900) ty.value = withTiming(height, { duration: DUR.base }, (d) => d && scheduleOnRN(onClose));
-      else ty.value = withSpring(0, SPRING);
-    });
-  const tap = Gesture.Tap()
-    .runOnJS(true)
-    .maxDuration(250)
-    .onEnd((e, ok) => {
-      if (!ok || e.y < insets.top + 70) return;
-      if (iRef.current >= clips.length) {
-        if (e.x < width * 0.2) go(iRef.current - 1);
-        return;
-      }
-      if (e.y > height - insets.bottom - 110 && e.x > width * 0.6) return; // the Open button
-      go(e.x < width / 3 ? iRef.current - 1 : iRef.current + 1);
-    });
-  const hold = Gesture.LongPress()
-    .runOnJS(true)
-    .minDuration(200)
-    .onStart(() => setPaused(true))
-    .onFinalize(() => setPaused(false));
-  const gestures = Gesture.Race(pan, hold, tap);
+  // Gestures built once: this screen re-renders every 50 ms while a memory plays, and gestures made
+  // anew on each render dropped taps. Handlers read the latest values through `live`.
+  const live = useRef({ go, onClose, clips, insets, width, height });
+  live.current = { go, onClose, clips, insets, width, height };
+  const gestures = useMemo(() => {
+    const close = () => live.current.onClose();
+    const pan = Gesture.Pan()
+      .activeOffsetY(14)
+      .failOffsetX([-30, 30])
+      .onUpdate((e) => {
+        'worklet';
+        ty.value = Math.max(0, e.translationY);
+      })
+      .onEnd((e) => {
+        'worklet';
+        if (e.translationY > 120 || e.velocityY > 900) ty.value = withTiming(height, { duration: DUR.base }, (d) => d && scheduleOnRN(close));
+        else ty.value = withSpring(0, SPRING);
+      });
+    const tap = Gesture.Tap()
+      .runOnJS(true)
+      .maxDuration(250)
+      .onEnd((e, ok) => {
+        const { go: goTo, clips: list, insets: safe, width: w, height: h } = live.current;
+        if (!ok || e.y < safe.top + 70) return;
+        if (iRef.current >= list.length) {
+          if (e.x < w * 0.2) goTo(iRef.current - 1);
+          return;
+        }
+        if (e.y > h - safe.bottom - 110 && e.x > w * 0.6) return; // the Open button
+        goTo(e.x < w / 3 ? iRef.current - 1 : iRef.current + 1);
+      });
+    const hold = Gesture.LongPress()
+      .runOnJS(true)
+      .minDuration(200)
+      .onStart(() => setPaused(true))
+      .onFinalize(() => setPaused(false));
+    return Gesture.Race(pan, hold, tap);
+  }, [height]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: ty.value }, { scale: 1 - Math.min(0.1, ty.value / 3000) }], borderRadius: Math.min(30, ty.value / 4) }));
 
   const clip = i >= 0 && i < clips.length ? clips[i] : null;

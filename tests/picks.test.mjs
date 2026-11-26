@@ -23,12 +23,12 @@ test('spreadsheet cells: quotes, commas, line breaks and formulas are made safe'
 
 test('spreadsheet: a header row, then one row per video', () => {
   const csv = toCsv([
-    { title: 'Lake', filename: 'IMG_1.mov', createdAt: null, importedAt: null, durationMs: 90_000, sizeBytes: 10_485_760, rating: 8, flag: 1, status: 'Watched', keywords: ['trip', 'summer'], albums: ['Holiday'], caption: null, plays: 3, watchedMs: 240_000 },
+    { title: 'Lake', filename: 'IMG_1.mov', createdAt: null, importedAt: null, durationMs: 90_000, sizeBytes: 10_485_760, rating: 8, flag: 1, status: 'Watched', keywords: ['trip', 'summer'], albums: ['Holiday'], creators: ['Lena Moss'], caption: null, plays: 3, watchedMs: 240_000 },
   ]);
   const lines = csv.replace('﻿', '').trim().split('\r\n');
   assert.equal(lines.length, 2);
   assert.ok(lines[0].startsWith('Title,File,Filmed'));
-  assert.equal(lines[1], 'Lake,IMG_1.mov,,,1:30,10,8,Pick,Watched,trip; summer,Holiday,,3,4');
+  assert.equal(lines[1], 'Lake,IMG_1.mov,,,1:30,10,8,Pick,Watched,trip; summer,Holiday,Lena Moss,,3,4');
 });
 
 test('cloud sign-in: the address carries PKCE and our redirect; the code comes back only with our state', () => {

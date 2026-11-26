@@ -13,6 +13,8 @@ export type Filter =
   | { kind: 'tray' }
   | { kind: 'located' }
   | { kind: 'tag'; tag: string }
+  /** Everything one creator made. */
+  | { kind: 'creator'; name: string }
   | { kind: 'status'; status: UiStatus }
   | { kind: 'smart'; id: number }
   | { kind: 'album'; id: number }
@@ -59,6 +61,8 @@ export function filterLabel(f: Filter, smartFilters: SmartFilter[], albums: UiAl
       return 'With Location';
     case 'tag':
       return `# ${f.tag}`;
+    case 'creator':
+      return `@${f.name}`;
     case 'status':
       return STATUS_TITLES[f.status];
     case 'smart':

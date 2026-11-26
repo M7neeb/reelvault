@@ -34,6 +34,8 @@ export type BackupVideo = {
   /** v2: the Simkl movie or episode it is linked to. */
   link?: Record<string, unknown> | null;
   inTray?: boolean;
+  /** Who made it (Creators). */
+  creators?: string[];
   /** v2: the id the video had, so settings that name videos (pins) can find it again. */
   id?: string;
 };

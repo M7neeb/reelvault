@@ -142,6 +142,7 @@ function ViewerPage({
   initialEditorTab,
   onSlideshow,
   onNearby,
+  onCreator,
   simkl,
   link = null,
   onLinkChanged,
@@ -770,86 +771,106 @@ function ViewerPage({
   const hasNext = !!next;
   const axis = useSharedValue(0); // 0 = not decided, 1 = sideways (paging), 2 = down (closing)
 
-  const pan = Gesture.Pan()
-    .minDistance(12)
-    .maxPointers(1)
-    .onStart(() => {
-      'worklet';
-      axis.value = 0;
-    })
-    .onUpdate((e) => {
-      'worklet';
-      if (axis.value === 0) axis.value = Math.abs(e.translationX) > Math.abs(e.translationY) ? 1 : e.translationY > 0 ? 2 : 0;
-      if (axis.value === 1) {
-        const x = e.translationX;
-        // Past the first or last video it only gives a little, like a rubber band.
-        tx.value = (x > 0 && !hasPrev) || (x < 0 && !hasNext) ? x * 0.22 : x;
-      } else if (axis.value === 2) {
-        ty.value = Math.max(0, e.translationY);
-        dx.value = e.translationX * 0.7;
-      }
-    })
-    .onEnd((e) => {
-      'worklet';
-      if (axis.value === 1) {
-        const dir = (e.translationX < -W * 0.22 || e.velocityX < -650) && hasNext ? 1 : (e.translationX > W * 0.22 || e.velocityX > 650) && hasPrev ? -1 : 0;
-        if (dir !== 0) {
-          tx.value = withTiming(-dir * (W + PAGE_GAP), { duration: DUR.base, easing: EASE_OUT }, (done) => {
-            if (done) scheduleOnRN(onStep, dir as 1 | -1);
-          });
-        } else tx.value = withSpring(0, SPRING);
-      } else if (axis.value === 2) {
-        if (e.translationY > 110 || e.velocityY > 900) {
-          ty.value = withTiming(H, { duration: DUR.base, easing: EASE_OUT }, (done) => {
-            if (done) scheduleOnRN(onClose);
-          });
-        } else {
-          ty.value = withSpring(0, SPRING);
-          dx.value = withSpring(0, SPRING);
+  // Built once (not on every render): the player re-renders four times a second while a video plays, and
+  // gestures made anew each time dropped a tap that began before a re-render. Handlers read the latest
+  // functions through `live`.
+  const live = useRef({ tapVideo, jump, holdFast, onStep, onClose, setLockHint, fillScreen });
+  live.current = { tapVideo, jump, holdFast, onStep, onClose, setLockHint, fillScreen };
+  const call = useMemo(
+    () => ({
+      tap: () => live.current.tapVideo(),
+      jump: (dir: -1 | 1) => live.current.jump(dir),
+      hold: (on: boolean) => live.current.holdFast(on),
+      step: (dir: 1 | -1) => live.current.onStep(dir),
+      close: () => live.current.onClose(),
+      lockHint: () => live.current.setLockHint(true),
+      pinch: (scale: number) => {
+        const filled = live.current.fillScreen;
+        if (scale > 1.12 && !filled) {
+          tick();
+          setFillScreen(true);
+          setToast('Zoomed to fill');
+        } else if (scale < 0.9 && filled) {
+          tick();
+          setFillScreen(false);
+          setToast('Whole video');
         }
-      }
-    });
+      },
+    }),
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const gestures = useMemo(() => {
+    const pan = Gesture.Pan()
+      .minDistance(12)
+      .maxPointers(1)
+      .onStart(() => {
+        'worklet';
+        axis.value = 0;
+      })
+      .onUpdate((e) => {
+        'worklet';
+        if (axis.value === 0) axis.value = Math.abs(e.translationX) > Math.abs(e.translationY) ? 1 : e.translationY > 0 ? 2 : 0;
+        if (axis.value === 1) {
+          const x = e.translationX;
+          // Past the first or last video it only gives a little, like a rubber band.
+          tx.value = (x > 0 && !hasPrev) || (x < 0 && !hasNext) ? x * 0.22 : x;
+        } else if (axis.value === 2) {
+          ty.value = Math.max(0, e.translationY);
+          dx.value = e.translationX * 0.7;
+        }
+      })
+      .onEnd((e) => {
+        'worklet';
+        if (axis.value === 1) {
+          const dir = (e.translationX < -W * 0.22 || e.velocityX < -650) && hasNext ? 1 : (e.translationX > W * 0.22 || e.velocityX > 650) && hasPrev ? -1 : 0;
+          if (dir !== 0) {
+            tx.value = withTiming(-dir * (W + PAGE_GAP), { duration: DUR.base, easing: EASE_OUT }, (done) => {
+              if (done) scheduleOnRN(call.step, dir as 1 | -1);
+            });
+          } else tx.value = withSpring(0, SPRING);
+        } else if (axis.value === 2) {
+          if (e.translationY > 110 || e.velocityY > 900) {
+            ty.value = withTiming(H, { duration: DUR.base, easing: EASE_OUT }, (done) => {
+              if (done) scheduleOnRN(call.close);
+            });
+          } else {
+            ty.value = withSpring(0, SPRING);
+            dx.value = withSpring(0, SPRING);
+          }
+        }
+      });
 
-  const singleTap = Gesture.Tap()
-    .runOnJS(true)
-    .maxDuration(260)
-    .onEnd((_e, ok) => {
-      if (ok) tapVideo();
-    });
-  const doubleTap = Gesture.Tap()
-    .runOnJS(true)
-    .numberOfTaps(2)
-    .maxDelay(240)
-    .onEnd((e, ok) => {
-      if (ok) jump(e.x < W / 2 ? -1 : 1);
-    });
-  const hold = Gesture.LongPress()
-    .runOnJS(true)
-    .minDuration(280)
-    .onStart((e) => {
-      if (e.x < W * 0.28 || e.x > W * 0.72) holdFast(true);
-    })
-    .onFinalize(() => holdFast(false));
-  const pinch = Gesture.Pinch()
-    .runOnJS(true)
-    .onEnd((e) => {
-      if (e.scale > 1.12 && !fillScreen) {
-        tick();
-        setFillScreen(true);
-        setToast('Zoomed to fill');
-      } else if (e.scale < 0.9 && fillScreen) {
-        tick();
-        setFillScreen(false);
-        setToast('Whole video');
-      }
-    });
-  // Locked: every touch only shows the unlock button.
-  const lockedTap = Gesture.Tap()
-    .runOnJS(true)
-    .onEnd((_e, ok) => {
-      if (ok) setLockHint(true);
-    });
-  const gestures = locked ? lockedTap : Gesture.Race(pinch, pan, hold, Gesture.Exclusive(doubleTap, singleTap));
+    const singleTap = Gesture.Tap()
+      .runOnJS(true)
+      .maxDuration(260)
+      .onEnd((_e, ok) => {
+        if (ok) call.tap();
+      });
+    const doubleTap = Gesture.Tap()
+      .runOnJS(true)
+      .numberOfTaps(2)
+      .maxDelay(240)
+      .onEnd((e, ok) => {
+        if (ok) call.jump(e.x < W / 2 ? -1 : 1);
+      });
+    const hold = Gesture.LongPress()
+      .runOnJS(true)
+      .minDuration(280)
+      .onStart((e) => {
+        if (e.x < W * 0.28 || e.x > W * 0.72) call.hold(true);
+      })
+      .onFinalize(() => call.hold(false));
+    const pinch = Gesture.Pinch()
+      .runOnJS(true)
+      .onEnd((e) => call.pinch(e.scale));
+    // Locked: every touch only shows the unlock button.
+    const lockedTap = Gesture.Tap()
+      .runOnJS(true)
+      .onEnd((_e, ok) => {
+        if (ok) call.lockHint();
+      });
+    return locked ? lockedTap : Gesture.Race(pinch, pan, hold, Gesture.Exclusive(doubleTap, singleTap));
+  }, [locked, hasPrev, hasNext, W, H]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rowStyle = useAnimatedStyle(() => {
     const pull = Math.min(1, ty.value / Math.max(1, H));
@@ -1408,6 +1429,27 @@ function ViewerPage({
                   </>
                 ) : (
                   <Text style={styles.infoMuted}>No Location Data</Text>
+                )}
+
+                {item.creators.length > 0 && (
+                  <>
+                    <Text style={styles.section}>Made by</Text>
+                    <View style={styles.pills}>
+                      {item.creators.map((c) => (
+                        <TouchableOpacity
+                          key={c}
+                          style={styles.statusChip}
+                          onPress={() => {
+                            onCreator?.(c);
+                            onClose();
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`All videos by ${c}`}>
+                          <Text style={styles.statusChipText}>@{c}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
                 )}
 
                 <Text style={styles.section}>Status</Text>
@@ -2054,6 +2096,8 @@ type ViewerProps = {
   onSlideshow: (item: VaultItem) => void;
   /** Show the videos filmed near this one. */
   onNearby: (item: VaultItem) => void;
+  /** Show everything this creator made. */
+  onCreator?: (name: string) => void;
   /** Simkl, for linking this video to a movie or episode and scrobbling it. */
   simkl?: SimklBridge;
   link?: VideoLink | null;

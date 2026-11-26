@@ -157,6 +157,8 @@ import { wifiBridge } from '@/features/vault/wifi';
 import { useInside, type InsideProgress } from '@/features/vault/scenes';
 import { endFractions, sharedEnding, type SceneRow } from '@/features/vault/sceneLogic';
 import { formatIntro, introOf, openingSeconds, parseIntro, partners, type Intro } from '@/features/vault/intro';
+import { addCreator, creatorIndex, deleteCreator, removeCreator, renameCreator } from '@/features/vault/creators';
+import { normCreator, suggestCreators } from '@/features/vault/creatorLogic';
 import { parseQuality } from '@/features/vault/smaller';
 import {
   clipboardUrl,
@@ -197,7 +199,8 @@ function toVaultItem(
   v: Video,
   counts: Record<string, number>,
   tagNamesById: Record<string, string[]>,
-  membership: Record<string, number[]>
+  membership: Record<string, number[]>,
+  creatorsById: Record<string, string[]> = {}
 ): VaultItem {
   return {
     id: v.id,
@@ -213,6 +216,7 @@ function toVaultItem(
     importedAt: v.importedAt,
     tagCount: counts[v.id] ?? 0,
     tagNames: tagNamesById[v.id] ?? [],
+    creators: creatorsById[v.id] ?? [],
     deletedAt: v.deletedAt,
     status: v.status,
     isPrivate: v.isPrivate,
@@ -262,6 +266,16 @@ function readFreeGb(): number | null {
 }
 
 
+const CREATOR_DISMISSED_KEY = 'creators.dismissed';
+function parseDismissed(json: string | null): string[] {
+  try {
+    const list = JSON.parse(json ?? '[]');
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Picture prints a second apart over a video's first minutes (for finding its intro). */
 function openingPrints(v: Video): Promise<string[]> {
   const secs = openingSeconds(v.durationMs);
@@ -289,6 +303,8 @@ export type VaultData = {
   viewOptions: ViewOptions;
   allTags: UiTag[];
   tagMap: Record<string, string[]>;
+  /** creator name -> live video ids. */
+  creatorMap: Record<string, string[]>;
   freeGb: number | null;
   busy: boolean;
   status: string;
@@ -412,6 +428,7 @@ export function useVaultData(): VaultData {
   const [deleted, setDeleted] = useState<Video[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [tagMap, setTagMap] = useState<Record<string, string[]>>({});
+  const [creatorMap, setCreatorMap] = useState<Record<string, string[]>>({});
   const [membership, setMembership] = useState<Record<string, number[]>>({});
   const [tags, setTags] = useState<Tag[]>([]);
   const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
@@ -477,10 +494,11 @@ export function useVaultData(): VaultData {
       );
     if (want.has('tags'))
       jobs.push(
-        Promise.all([tagCounts(), tagIndex(), listTags()]).then(([map, index, tagList]) => {
+        Promise.all([tagCounts(), tagIndex(), listTags(), creatorIndex().catch(() => ({}))]).then(([map, index, tagList, creators]) => {
           setCounts(map);
           setTagMap(index);
           setTags(tagList);
+          setCreatorMap(creators);
         })
       );
     if (want.has('albums'))
@@ -686,22 +704,27 @@ export function useVaultData(): VaultData {
     }
     return m;
   }, [tagMap]);
+  const creatorsById = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const [name, ids] of Object.entries(creatorMap)) for (const id of ids) (m[id] ??= []).push(name);
+    return m;
+  }, [creatorMap]);
 
   // A video that did not change keeps the same item (its tile is not redrawn after a rating elsewhere).
   const itemCache = useRef<{ key: unknown[]; map: WeakMap<Video, VaultItem> }>({ key: [], map: new WeakMap() });
   const items = useMemo(() => {
-    const key = [counts, tagNamesById, membership];
+    const key = [counts, tagNamesById, membership, creatorsById];
     if (itemCache.current.key.some((k, i) => k !== key[i]) || itemCache.current.key.length !== key.length) itemCache.current = { key, map: new WeakMap() };
     const c = itemCache.current.map;
     return videos.map((v) => {
       let it = c.get(v);
-      if (!it) c.set(v, (it = toVaultItem(v, counts, tagNamesById, membership)));
+      if (!it) c.set(v, (it = toVaultItem(v, counts, tagNamesById, membership, creatorsById)));
       return it;
     });
-  }, [videos, counts, tagNamesById, membership]);
+  }, [videos, counts, tagNamesById, membership, creatorsById]);
   const deletedItems = useMemo(
-    () => deleted.map((v) => toVaultItem(v, counts, tagNamesById, membership)),
-    [deleted, counts, tagNamesById, membership]
+    () => deleted.map((v) => toVaultItem(v, counts, tagNamesById, membership, creatorsById)),
+    [deleted, counts, tagNamesById, membership, creatorsById]
   );
   const duplicateGroups = useMemo(() => groupDuplicates(videos), [videos]);
 
@@ -955,7 +978,7 @@ export function useVaultData(): VaultData {
         void onImportFolder();
       },
       search: async (q) =>
-        (await searchVideos(q)).map((v) => toVaultItem(v, counts, tagNamesById, membership)),
+        (await searchVideos(q)).map((v) => toVaultItem(v, counts, tagNamesById, membership, creatorsById)),
       loadTags: async (id) => (await tagsForVideo(id)).map(asUiTag),
       loadFrames: async (item) => {
         const v = byId(item.id);
@@ -992,6 +1015,25 @@ export function useVaultData(): VaultData {
       },
       onRateMany: andPatch(setRatingMany, (ids, rating) => ({ ids, set: { rating } })),
       onAddTagMany: andReload(['tags'], addTagMany),
+      addCreator: andReload(['tags'], (ids: string[], name: string) => addCreator(ids, name)),
+      removeCreator: andReload(['tags'], (ids: string[], name: string) => removeCreator(ids, name)),
+      renameCreator: andReload(['tags'], (from: string, to: string) => renameCreator(from, to)),
+      deleteCreator: andReload(['tags'], (name: string) => deleteCreator(name)),
+      creatorSuggestions: async () => {
+        const dismissed = parseDismissed(await getSetting(CREATOR_DISMISSED_KEY));
+        const byVideo: Record<string, string[]> = {};
+        for (const [name, ids] of Object.entries(await creatorIndex())) for (const id of ids) (byVideo[id] ??= []).push(name);
+        return suggestCreators(
+          videosRef.current.filter((v) => !v.deletedAt && !v.isPrivate).map((v) => ({ id: v.id, filename: v.filename, creators: byVideo[v.id] ?? [] })),
+          dismissed
+        );
+      },
+      dismissCreatorSuggestion: async (name: string) => {
+        const n = normCreator(name);
+        if (!n) return;
+        const dismissed = parseDismissed(await getSetting(CREATOR_DISMISSED_KEY));
+        await setSetting(CREATOR_DISMISSED_KEY, JSON.stringify([...dismissed, n].slice(-500)));
+      },
       onSetStatus: andPatch(setStatusMany, (ids, status) => ({ ids, set: { status } })),
       onSetFlag: andPatch(setFlagMany, (ids, flag) => ({ ids, set: { flag } })),
       onSetTray: andPatch(setTrayMany, (ids, inTray) => ({ ids, set: { inTray } })),
@@ -1414,6 +1456,7 @@ export function useVaultData(): VaultData {
       viewOptions,
       allTags,
       tagMap,
+      creatorMap,
       freeGb,
       busy,
       status,
@@ -1430,6 +1473,6 @@ export function useVaultData(): VaultData {
       members,
     }),
     // prettier-ignore
-    [items, inside.prints, inside.rows, inside.version, inside.progress, deletedItems, duplicateGroups, smartFilters, albums, folders, viewOptions, allTags, tagMap, freeGb, busy, status, actions, duplicateAsk, resume, prefs, wrappedRequest, clearWrappedRequest, openRequest, clearOpenRequest, kept, series, members]
+    [items, inside.prints, inside.rows, inside.version, inside.progress, deletedItems, duplicateGroups, smartFilters, albums, folders, viewOptions, allTags, tagMap, creatorMap, freeGb, busy, status, actions, duplicateAsk, resume, prefs, wrappedRequest, clearWrappedRequest, openRequest, clearOpenRequest, kept, series, members]
   );
 }

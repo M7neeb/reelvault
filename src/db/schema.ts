@@ -656,4 +656,16 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_book_marks_book ON book_marks(book_id);
     `,
   },
+  {
+    version: 18,
+    sql: `
+      -- Creators: who made a video, kept apart from keywords. A video can have several.
+      CREATE TABLE IF NOT EXISTS video_creators (
+        video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+        name     TEXT NOT NULL,
+        PRIMARY KEY (video_id, name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_video_creators_name ON video_creators(name);
+    `,
+  },
 ];

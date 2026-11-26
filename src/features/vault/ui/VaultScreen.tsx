@@ -16,6 +16,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CreatorsSheet } from './creatorsUI';
+import { sameCreator } from '../creatorLogic';
 import Shelf, { type ShelfBox } from './shelf';
 import { AppState, ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import type { VideoLink } from '@/features/simkl/ui/types';
@@ -129,6 +131,7 @@ import { useAudioControlsOptional } from './audio/playback';
 
 const EMPTY_RESUME = new Map<string, number>();
 const EMPTY_OVERVIEW: OverviewData = { kept: [], series: [], members: [] };
+const EMPTY_CREATORS: Record<string, string[]> = {};
 
 /** Picks the light or dark colours, then renders the screen inside them. */
 export default function VaultScreen(props: VaultScreenProps) {
@@ -165,6 +168,7 @@ function VaultScreenBody({
   items,
   allTags,
   tagMap,
+  creatorMap = EMPTY_CREATORS,
   deletedItems,
   duplicateGroups,
   prints = NO_PRINTS,
@@ -280,6 +284,16 @@ function VaultScreenBody({
   }, []);
   const [bulkOpen, setBulkOpen] = useState(dev?.bulkOpen ?? false);
   const [settingsOpen, setSettingsOpen] = useState(dev?.settingsOpen ?? false);
+  const [creatorsOpen, setCreatorsOpen] = useState(!!dev?.creatorsOpen);
+  // How many creators your file names suggest, counted when the Library panel opens.
+  const [creatorSuggestCount, setCreatorSuggestCount] = useState(0);
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    actions
+      .creatorSuggestions()
+      .then((s) => setCreatorSuggestCount(s.length))
+      .catch(() => undefined);
+  }, [sidebarOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   const [trimFor, setTrimFor] = useState<VaultItem[] | null>(dev?.trimManyOpen ? items.filter((v) => !v.isPrivate && !v.deletedAt).slice(0, 8) : null);
   const [smallerFor, setSmallerFor] = useState<VaultItem[] | null>(
     dev?.smallerOpen && dev.selectedIds?.length ? items.filter((v) => (dev.selectedIds ?? []).includes(v.id)) : null
@@ -354,6 +368,8 @@ function VaultScreenBody({
   const [filter, setFilter] = useState<Filter>(
     dev?.albumId !== undefined
       ? { kind: 'album', id: dev.albumId }
+      : dev?.creator
+        ? { kind: 'creator', name: dev.creator }
       : dev?.filter
         ? { kind: dev.filter }
         : { kind: 'all' }
@@ -534,6 +550,13 @@ function VaultScreenBody({
       setPlaying(v);
       return;
     }
+    if (jump.kind === 'creator') {
+      setJump(null);
+      if (prefs.videosMode !== 'watch') switchMode('watch');
+      setPlaying(null);
+      pickFilter({ kind: 'creator', name: jump.name });
+      return;
+    }
     if (jump.kind === 'select') {
       setJump(null);
       if (prefs.videosMode !== 'watch') switchMode('watch');
@@ -585,6 +608,16 @@ function VaultScreenBody({
           ? mergeGroups(confirmByPictures(groupSimilar(publicItems), prints), groupByPictures(publicItems, prints))
           : groupSimilar(publicItems),
     [publicItems, prints, needSimilar]
+  );
+
+  // Creators with how many of your (non-private) videos each has, most first.
+  const creatorCounts = useMemo(
+    () =>
+      Object.entries(creatorMap)
+        .map(([name, ids]) => ({ name, count: ids.filter((id) => publicIds.has(id)).length }))
+        .filter((c) => c.count > 0)
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    [creatorMap, publicIds]
   );
 
   const tagCounts = useMemo(() => {
@@ -663,6 +696,8 @@ function VaultScreenBody({
         const ids = new Set(tagMap[filter.tag] ?? []);
         return pool.filter((v) => ids.has(v.id));
       }
+      case 'creator':
+        return pool.filter((v) => v.creators.some((c) => sameCreator(c, filter.name)));
       case 'status':
         return pool.filter((v) => v.status === filter.status);
       case 'smart': {
@@ -1502,7 +1537,7 @@ function VaultScreenBody({
           </ScrollView>
         </View>
       )}
-      {!results && !special && look !== 'simple' && shelfBoxes.length > 0 && (
+      {!results && !special && filter.kind === 'all' && look !== 'simple' && shelfBoxes.length > 0 && (
         <View style={styles.shelfWrap}>
           <Text style={styles.shelfTitle}>Your shelf</Text>
           <Shelf
@@ -1769,6 +1804,12 @@ function VaultScreenBody({
             setSidebarOpen(false);
             setKeywordsOpen(true);
           }}
+          creators={creatorCounts}
+          creatorSuggestions={creatorSuggestCount}
+          onManageCreators={() => {
+            setSidebarOpen(false);
+            setCreatorsOpen(true);
+          }}
           tidy={{
             untagged: triageQueues.tag.length,
             cold: triageQueues.keep.length,
@@ -1843,6 +1884,14 @@ function VaultScreenBody({
           onFlag={(f) => actions.onSetFlag(selected, f)}
           onAddTag={(name) => actions.onAddTagMany(selected, name)}
           onRemoveTag={(name) => actions.onRemoveTagMany(selected, name)}
+          creators={creatorCounts}
+          selectedCreators={(() => {
+            const m = new Map<string, number>();
+            for (const v of items) if (selected.includes(v.id)) for (const c of v.creators) m.set(c, (m.get(c) ?? 0) + 1);
+            return [...m.entries()].map(([name, n]) => ({ name, count: n })).sort((a, b) => b.count - a.count);
+          })()}
+          onAddCreator={(name) => actions.addCreator(selected, name)}
+          onRemoveCreator={(name) => actions.removeCreator(selected, name)}
           selectedTags={(() => {
             const m = new Map<string, number>();
             for (const v of items) if (selected.includes(v.id)) for (const t of v.tagNames) m.set(t, (m.get(t) ?? 0) + 1);
@@ -1875,6 +1924,23 @@ function VaultScreenBody({
               : undefined
           }
           onClose={() => setBulkOpen(false)}
+        />
+      )}
+
+      {creatorsOpen && (
+        <CreatorsSheet
+          creators={creatorCounts}
+          items={publicItems}
+          loadSuggestions={actions.creatorSuggestions}
+          onOpen={(name) => {
+            setCreatorsOpen(false);
+            pickFilter({ kind: 'creator', name });
+          }}
+          onAdd={(ids, name) => actions.addCreator(ids, name).catch(fail('CREATORS'))}
+          onDismiss={(name) => actions.dismissCreatorSuggestion(name).catch(fail('CREATORS'))}
+          onRename={(from, to) => actions.renameCreator(from, to).catch(fail('CREATORS'))}
+          onDelete={(name) => actions.deleteCreator(name).catch(fail('CREATORS'))}
+          onClose={() => setCreatorsOpen(false)}
         />
       )}
 
@@ -2247,6 +2313,10 @@ function VaultScreenBody({
           onNearby={(item) => {
             setPlaying(null);
             setFilter({ kind: 'nearby', id: item.id });
+          }}
+          onCreator={(name) => {
+            setPlaying(null);
+            pickFilter({ kind: 'creator', name });
           }}
           simkl={simkl}
           link={links.get(playing.id) ?? null}

@@ -31,6 +31,7 @@ export default function VideosRoute() {
         items={vault.items}
         allTags={vault.allTags}
         tagMap={vault.tagMap}
+        creatorMap={vault.creatorMap}
         deletedItems={vault.deletedItems}
         duplicateGroups={vault.duplicateGroups}
         prints={vault.prints}

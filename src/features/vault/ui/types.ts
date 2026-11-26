@@ -257,10 +257,12 @@ export type SmartRule = {
   filmedWithinDays?: number;
   /** Has (true) or doesn't have (false) each of these; left out = either. */
   has?: Partial<Record<HasKey, boolean>>;
+  /** Made by this creator (any case, with or without @). */
+  creator?: string;
 };
 
 /** Things a video has or doesn't have, for the filter editor. */
-export type HasKey = 'cover' | 'rating' | 'keywords' | 'album' | 'title' | 'notes' | 'series' | 'simkl' | 'watched' | 'onScreen' | 'location' | 'resume';
+export type HasKey = 'cover' | 'rating' | 'keywords' | 'album' | 'title' | 'notes' | 'series' | 'simkl' | 'watched' | 'onScreen' | 'location' | 'resume' | 'creator';
 
 export type SmartFilter = { id: number; name: string; rule: SmartRule; folderId: number | null };
 
@@ -336,6 +338,8 @@ export type VaultItem = {
   tagCount: number;
   /** Tag names on this video, used for client-side filtering in the UI. */
   tagNames: string[];
+  /** Who made it (Creators, kept apart from keywords). */
+  creators: string[];
   /** Set while the video is in Recently Deleted (ms since epoch). */
   deletedAt: number | null;
   status: UiStatus | null;
@@ -425,6 +429,15 @@ export type VaultActions = {
   /** Bulk edits for the selected videos. `null` status / rating 0 clears it. */
   onRateMany: (videoIds: string[], rating: number) => Promise<void>;
   onAddTagMany: (videoIds: string[], name: string) => Promise<void>;
+  /** Creators: who made a video, kept apart from keywords. */
+  addCreator: (videoIds: string[], name: string) => Promise<void>;
+  removeCreator: (videoIds: string[], name: string) => Promise<void>;
+  /** Renaming to a creator that exists merges the two. */
+  renameCreator: (from: string, to: string) => Promise<void>;
+  deleteCreator: (name: string) => Promise<void>;
+  /** Who your videos look like they are from, by their file names (never added without a tap). */
+  creatorSuggestions: () => Promise<{ name: string; ids: string[] }[]>;
+  dismissCreatorSuggestion: (name: string) => Promise<void>;
   onSetStatus: (videoIds: string[], status: UiStatus | null) => Promise<void>;
   onSetFlag: (videoIds: string[], flag: UiFlag) => Promise<void>;
   onSetTray: (videoIds: string[], inTray: boolean) => Promise<void>;
@@ -793,6 +806,8 @@ export type VaultScreenProps = {
   allTags: UiTag[];
   /** tag name -> video ids. Powers sidebar counts and tag filtering. */
   tagMap: Record<string, string[]>;
+  /** creator name -> video ids (Creators in the Library panel). */
+  creatorMap?: Record<string, string[]>;
   /** Videos in Recently Deleted, newest deletion first. Never part of `items`. */
   deletedItems: VaultItem[];
   /** Ids of videos with the same content, oldest import first in each group. */
@@ -862,6 +877,9 @@ export type VaultScreenProps = {
     /** Join videos with the first three videos picked. */
     joinOpen?: boolean;
     trimManyOpen?: boolean;
+    creatorsOpen?: boolean;
+    /** The grid opens on this creator. */
+    creator?: string;
     filterNowOpen?: boolean;
     clipsOpen?: boolean;
     gamesOpen?: boolean;

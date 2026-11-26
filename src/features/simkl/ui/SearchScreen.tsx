@@ -119,7 +119,11 @@ export default function SearchScreen({
   );
   // Words written on screen in your videos (searched once per query; the card and the list both use it).
   const onScreenFound = useMemo(
-    () => (local?.onScreen && live && live.length >= 2 && (scope === 'all' || scope === 'video' || scope === 'mine') ? local.onScreen(live) : null),
+    () => (local?.onScreen && live && live.length >= 2 && !live.startsWith('@') && (scope === 'all' || scope === 'video' || scope === 'mine') ? local.onScreen(live) : null),
+    [local, live, scope]
+  );
+  const creatorHits = useMemo(
+    () => (local?.creators && live && (scope === 'all' || scope === 'video' || scope === 'mine') ? local.creators(live) : []),
     [local, live, scope]
   );
   const searchFor = (q: string) => {
@@ -226,6 +230,28 @@ export default function SearchScreen({
         </ScrollView>
 
         {onScreenFound && <OnScreenCard local={localHere!} query={live!} found={onScreenFound} />}
+        {creatorHits.length > 0 && (
+          <Animated.View entering={enterUp(0)} style={styles.creatorRow}>
+            {creatorHits.map((c) => (
+              <TouchableOpacity
+                key={c.name}
+                style={styles.creatorChip}
+                onPress={() => {
+                  tick();
+                  if (live) localHere?.remember(live);
+                  localHere?.openCreator?.(c.name);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`All ${c.count} videos by ${c.name}`}>
+                <Icon name="person" size={14} color={p.accent} />
+                <Text style={styles.creatorName} numberOfLines={1}>
+                  @{c.name}
+                </Text>
+                <Text style={styles.creatorCount}>{c.count}</Text>
+              </TouchableOpacity>
+            ))}
+          </Animated.View>
+        )}
         {localHere && live && (
           <LocalResults
             key={`${scope}:${live}`}
@@ -458,6 +484,10 @@ const makeStyles = (p: Palette) =>
     onScreenIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: p.accentSoft },
     onScreenTitle: { color: p.text, fontSize: 15, fontWeight: '700' },
     onScreenSub: { color: p.textSecondary, fontSize: 13, marginTop: 2 },
+    creatorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginHorizontal: 16, marginTop: 12 },
+    creatorChip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 12, borderRadius: 10, backgroundColor: raised(p), maxWidth: '100%' },
+    creatorName: { color: p.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
+    creatorCount: { color: p.textSecondary, fontSize: 13, fontVariant: ['tabular-nums'] },
     onScreenTrack: { height: 4, borderRadius: 2, marginTop: 8, overflow: 'hidden', backgroundColor: p.scheme === 'light' ? p.card : p.circle },
     onScreenFill: { height: 4, borderRadius: 2, backgroundColor: p.accent },
     onScreenBtn: { height: 36, paddingHorizontal: 14, borderRadius: 18, backgroundColor: p.text, alignItems: 'center', justifyContent: 'center' },

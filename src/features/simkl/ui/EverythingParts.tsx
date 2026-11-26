@@ -37,6 +37,9 @@ export type LocalSearch = {
   remember: (q: string) => void;
   clearRecent: () => void;
   /** Videos with these words written on screen (what the look-inside scan read): how many, and how far the scan is. */
+  /** Creators whose name matches what you typed, with their video counts. */
+  creators?: (q: string) => { name: string; count: number }[];
+  openCreator?: (name: string) => void;
   /** null when this app build can't look inside videos. */
   onScreen?: (q: string) => { count: number; looked: number; total: number; running: boolean } | null;
   /** Opens Videos with all of them selected (to trim the start off them, for example). */

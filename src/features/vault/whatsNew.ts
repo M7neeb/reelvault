@@ -9,6 +9,16 @@ export const WHATS_NEW_KEY = 'whatsNew.seen';
 
 export const RELEASES: Release[] = [
   {
+    id: '2026-11-27',
+    title: 'Creators',
+    items: [
+      'Creators: who made a video, kept apart from your keywords. Select videos, Edit, Creator. Library panel, Creators shows them with their counts; tap one for all their videos.',
+      'Search @name on the Videos tab, or type a name in the Search tab. A video\'s Info shows who made it.',
+      'ReelVault reads creators from file names like "@name_123.mp4" or "name - title.mp4" and suggests them (Library panel, Creators, Manage). Nothing is added until you tap Add.',
+      'Tapping a playing video hides the controls again (and taps work in the slideshow and Memories while they play).',
+    ],
+  },
+  {
     id: '2026-11-26',
     title: 'A new look, and Find the intro',
     items: [

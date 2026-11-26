@@ -645,21 +645,29 @@ function Show({
     else setControls(true);
   };
 
-  const swipe = Gesture.Pan()
-    .activeOffsetY(20)
-    .onUpdate((e) => {
-      drag.value = Math.max(0, e.translationY);
-    })
-    .onEnd((e) => {
-      if (e.translationY > 140 || e.velocityY > 900) scheduleOnRN(onClose);
-      else drag.value = withTiming(0);
-    });
-  const tapG = Gesture.Tap()
-    .maxDuration(300)
-    .onEnd((e) => {
-      scheduleOnRN(tap, e.x);
-    });
-  const gestures = Gesture.Exclusive(swipe, tapG);
+  // Gestures built once: the show re-renders ten times a second (the progress bar), and gestures made
+  // anew on each render dropped taps. Handlers reach the latest functions through `live`.
+  const live = useRef({ tap, onClose });
+  live.current = { tap, onClose };
+  const gestures = useMemo(() => {
+    const closeNow = () => live.current.onClose();
+    const tapAt = (x: number) => live.current.tap(x);
+    const swipe = Gesture.Pan()
+      .activeOffsetY(20)
+      .onUpdate((e) => {
+        drag.value = Math.max(0, e.translationY);
+      })
+      .onEnd((e) => {
+        if (e.translationY > 140 || e.velocityY > 900) scheduleOnRN(closeNow);
+        else drag.value = withTiming(0);
+      });
+    const tapG = Gesture.Tap()
+      .maxDuration(300)
+      .onEnd((e) => {
+        scheduleOnRN(tapAt, e.x);
+      });
+    return Gesture.Exclusive(swipe, tapG);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stage = useAnimatedStyle(() => ({ transform: [{ translateY: drag.value }, { scale: 1 - Math.min(0.12, drag.value / 2400) }], borderRadius: drag.value > 4 ? 24 : 0 }));
   const layerStyle = (slot: Slot) =>

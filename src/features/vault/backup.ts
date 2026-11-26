@@ -35,6 +35,7 @@ import { shareFile } from './share';
 import { toCsv } from './sheetExport';
 import { statusLabel, type UiStatus } from './ui/types';
 import { addTagToVideo, listTags } from './tags';
+import { addCreator } from './creators';
 
 /** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
 function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
@@ -92,6 +93,7 @@ async function buildBackup(): Promise<{ json: string; videos: number }> {
   const albumRows = await db.getAllAsync<{ video_id: string; name: string }>(
     `SELECT av.video_id, a.name FROM album_videos av JOIN albums a ON a.id = av.album_id WHERE a.is_private = 0;`
   );
+  const creatorRows = await db.getAllAsync<{ video_id: string; name: string }>('SELECT video_id, name FROM video_creators;').catch(() => []);
   const folders = await listFolders();
   const folderName = (id: number | null) => folders.find((f) => f.id === id)?.name ?? null;
   const albums = (await listAlbums()).filter((a) => a.is_private === 0);
@@ -142,6 +144,7 @@ async function buildBackup(): Promise<{ json: string; videos: number }> {
   };
   const tagsBy = group(tagRows);
   const albumsBy = group(albumRows);
+  const creatorsBy = group(creatorRows);
 
   const backup: Backup = {
     kind: BACKUP_KIND,
@@ -159,6 +162,7 @@ async function buildBackup(): Promise<{ json: string; videos: number }> {
       createdAt: v.created_at,
       keywords: tagsBy.get(v.id) ?? [],
       albums: albumsBy.get(v.id) ?? [],
+      creators: creatorsBy.get(v.id) ?? [],
       id: v.id,
       inTray: v.in_tray === 1,
       plays: (playsBy.get(v.id) ?? []).map((x): [number, number] => [x.started_at, x.watched_ms]),
@@ -248,6 +252,7 @@ export async function exportSpreadsheet(): Promise<number> {
   const albumRows = await db.getAllAsync<{ video_id: string; name: string }>(
     'SELECT av.video_id, a.name FROM album_videos av JOIN albums a ON a.id = av.album_id WHERE a.is_private = 0;'
   );
+  const creatorRows = await db.getAllAsync<{ video_id: string; name: string }>('SELECT video_id, name FROM video_creators;').catch(() => []);
   const playRows = await db.getAllAsync<{ video_id: string; n: number; ms: number }>(
     'SELECT video_id, COUNT(*) AS n, COALESCE(SUM(watched_ms), 0) AS ms FROM vault_plays GROUP BY video_id;'
   );
@@ -255,6 +260,8 @@ export async function exportSpreadsheet(): Promise<number> {
   for (const t of tagRows) pushTo(tagsBy, t.video_id, t.name);
   const albumsBy = new Map<string, string[]>();
   for (const a of albumRows) pushTo(albumsBy, a.video_id, a.name);
+  const creatorsBy = new Map<string, string[]>();
+  for (const c of creatorRows) pushTo(creatorsBy, c.video_id, c.name);
   const playsBy = new Map(playRows.map((r) => [r.video_id, r]));
   const csv = toCsv(
     rows.map((v) => ({
@@ -269,6 +276,7 @@ export async function exportSpreadsheet(): Promise<number> {
       status: v.status ? statusLabel(v.status as UiStatus) : null,
       keywords: tagsBy.get(v.id) ?? [],
       albums: albumsBy.get(v.id) ?? [],
+      creators: creatorsBy.get(v.id) ?? [],
       caption: v.notes,
       plays: playsBy.get(v.id)?.n ?? 0,
       watchedMs: playsBy.get(v.id)?.ms ?? 0,
@@ -374,6 +382,7 @@ export async function importLibraryInfo(uri?: string): Promise<{ matched: number
       [v.title, v.notes, v.rating ?? 0, v.status, v.flag ?? 0, v.createdAt, videoId]
     );
     for (const k of v.keywords ?? []) await addTagToVideo(videoId, k);
+    for (const c of Array.isArray(v.creators) ? v.creators.filter((x) => typeof x === 'string') : []) await addCreator([videoId], c);
     const ids = (v.albums ?? []).map((n) => albumIds.get(n)).filter((id): id is number => id !== undefined);
     if (ids.length) await addToAlbums([videoId], ids);
     if (v.inTray) await db.runAsync('UPDATE videos SET in_tray = 1 WHERE id = ?;', [videoId]);

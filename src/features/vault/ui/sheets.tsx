@@ -400,8 +400,18 @@ export function BulkEditSheet({
   onPrivate,
   onMakeSmaller,
   onJoin,
+  creators = [],
+  selectedCreators = [],
+  onAddCreator,
+  onRemoveCreator,
   onClose,
 }: {
+  /** Every creator you use, most videos first (quick picks). */
+  creators?: { name: string; count: number }[];
+  /** Creators on the selected videos, with how many of them have each. */
+  selectedCreators?: { name: string; count: number }[];
+  onAddCreator?: (name: string) => Promise<void>;
+  onRemoveCreator?: (name: string) => Promise<void>;
   /** Join the picked videos into one (this app build can, and two or more are picked). */
   onJoin?: () => void;
   count: number;
@@ -447,6 +457,15 @@ export function BulkEditSheet({
   }
 
   const [gone, setGone] = useState<string[]>([]);
+  const [creatorDraft, setCreatorDraft] = useState('');
+  const [goneCreators, setGoneCreators] = useState<string[]>([]);
+  function addCreatorNamed(name: string) {
+    const n = name.replace(/^\s*@+/, '').trim();
+    if (!n || !onAddCreator) return;
+    setCreatorDraft('');
+    setGoneCreators((g) => g.filter((x) => x.toLowerCase() !== n.toLowerCase()));
+    void run(`Added @${n}`, onAddCreator(n));
+  }
   function addTag(name: string) {
     // "beach, summer; family" adds three at once.
     const names = [...new Set(name.split(/[,;]/).map((x) => x.trim()).filter(Boolean))];
@@ -565,6 +584,59 @@ export function BulkEditSheet({
           ))}
         </Wrap>
       </Section>
+
+      {onAddCreator && (
+        <Section label="Creator">
+          {onRemoveCreator && selectedCreators.filter((c) => !goneCreators.includes(c.name)).length > 0 && (
+            <>
+              <Text style={styles.hintSmall}>On these videos - tap to take one off all of them</Text>
+              <Wrap>
+                {selectedCreators
+                  .filter((c) => !goneCreators.includes(c.name))
+                  .map((c) => (
+                    <Chip
+                      key={c.name}
+                      label={`@${c.name}  ${c.count}/${count}  ✕`}
+                      danger
+                      onPress={() => {
+                        setGoneCreators((g) => [...g, c.name]);
+                        void run(`Removed @${c.name}`, onRemoveCreator(c.name));
+                      }}
+                    />
+                  ))}
+              </Wrap>
+            </>
+          )}
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.input}
+              placeholder="who made these videos…"
+              placeholderTextColor={p.textMuted}
+              value={creatorDraft}
+              onChangeText={setCreatorDraft}
+              onSubmitEditing={() => addCreatorNamed(creatorDraft)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              keyboardAppearance={p.scheme}
+            />
+            <TouchableOpacity style={styles.primary} onPress={() => addCreatorNamed(creatorDraft)}>
+              <Text style={styles.primaryText}>Add</Text>
+            </TouchableOpacity>
+          </View>
+          {creators.length > 0 && (
+            <Wrap>
+              {creators
+                .filter((c) => !creatorDraft.trim() || c.name.toLowerCase().includes(creatorDraft.replace(/^@/, '').trim().toLowerCase()))
+                .slice(0, 24)
+                .map((c) => (
+                  <Chip key={c.name} label={`@${c.name}`} onPress={() => addCreatorNamed(c.name)} />
+                ))}
+            </Wrap>
+          )}
+          <Text style={styles.hintSmall}>Kept apart from your keywords. Search with @name.</Text>
+        </Section>
+      )}
 
       <Section label="Title and caption">
         <View style={styles.inputRow}>
@@ -723,6 +795,7 @@ const HAS_ROWS: { key: HasKey; label: string }[] = [
   { key: 'keywords', label: 'Keywords' },
   { key: 'album', label: 'In an album' },
   { key: 'series', label: 'In a series' },
+  { key: 'creator', label: 'Creator' },
   { key: 'title', label: 'Title' },
   { key: 'notes', label: 'Notes' },
   { key: 'watched', label: 'Watched' },

@@ -19,6 +19,7 @@ import type {
   VaultSort,
   ViewOptions,
 } from './types';
+import { creatorMatches, normCreator } from '../creatorLogic.ts';
 
 /** Adds to a list in a map in place (copying the list each time gets slow with thousands of items). */
 function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
@@ -52,6 +53,7 @@ type RuleTarget = {
   albumIds?: number[];
   meta?: UiMeta | null;
   inTray?: boolean;
+  creators?: string[];
   /** A cover was set (picked by you, or the best frame picked by the app). */
   customCover?: boolean;
 };
@@ -135,6 +137,8 @@ export function hasThing(item: RuleTarget, key: HasKey, watch: WatchInfo = WATCH
       return !!item.meta?.location;
     case 'resume':
       return info.resume.has(id);
+    case 'creator':
+      return (item.creators?.length ?? 0) > 0;
   }
 }
 
@@ -145,6 +149,7 @@ export function matchesRule(item: RuleTarget, rule: SmartRule, watch: WatchInfo 
     }
   }
   if (rule.anyTags?.length && !rule.anyTags.some((t) => item.tagNames.includes(t))) return false;
+  if (rule.creator && !(item.creators ?? []).some((c) => creatorMatches(c, rule.creator!))) return false;
   if (rule.watched || rule.minPlays || rule.notWatchedDays || rule.watchedWithinDays) {
     const w = item.id ? watch.get(item.id) : undefined;
     const plays = w?.plays ?? 0;
@@ -242,6 +247,7 @@ const HAS_WORDS: Record<HasKey, string> = {
   onScreen: 'text on screen',
   location: 'location',
   resume: 'half watched',
+  creator: 'creator',
 };
 
 export function describeRule(rule: SmartRule): string {
@@ -270,6 +276,7 @@ export function describeRule(rule: SmartRule): string {
     if (want !== undefined) parts.push(`${want ? 'with' : 'no'} ${HAS_WORDS[key]}`);
   }
   if (rule.anyTags?.length) parts.push(rule.anyTags.map((t) => `#${t}`).join(' or '));
+  if (rule.creator) parts.push(`@${rule.creator}`);
   if (rule.watched) parts.push(rule.watched === 'never' ? 'never watched' : 'watched');
   if (rule.minPlays) parts.push(`played ${rule.minPlays}+ times`);
   if (rule.notWatchedDays) parts.push(`not watched in ${rule.notWatchedDays} days`);
@@ -335,6 +342,10 @@ export function parseRule(json: string): SmartRule {
     if (tags.length) rule.anyTags = tags;
   }
   if (r.watched === 'never' || r.watched === 'watched') rule.watched = r.watched;
+  if (typeof r.creator === 'string') {
+    const c = normCreator(r.creator);
+    if (c) rule.creator = c;
+  }
   if (r.has && typeof r.has === 'object') {
     const has: Partial<Record<HasKey, boolean>> = {};
     for (const [key, want] of Object.entries(r.has as Record<string, unknown>)) {

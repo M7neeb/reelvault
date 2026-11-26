@@ -137,6 +137,11 @@ export type SidebarProps = {
   onTagOptions: (tag: UiTag) => void;
   /** Open the keyword manager. */
   onManageKeywords?: () => void;
+  /** Creators with their video counts, most first. */
+  creators?: { name: string; count: number }[];
+  /** How many creators your file names suggest (0 hides the row). */
+  creatorSuggestions?: number;
+  onManageCreators?: () => void;
   /** Tidy up: quick tagging (untagged count) and keep or delete (rarely watched count). */
   tidy?: { untagged: number; cold: number; onQuickTag: () => void; onKeepOrDelete: () => void };
   onCalendar: () => void;
@@ -410,6 +415,38 @@ export default function Sidebar(props: SidebarProps) {
                 );
               })}
             </View>
+          )}
+
+          {props.onManageCreators && (
+            <>
+              <Heading title="Creators" action={{ label: 'Manage', onPress: props.onManageCreators, a11y: 'Manage creators' }} />
+              {!props.creators?.length ? (
+                <Text style={styles.muted}>Who made your videos, apart from keywords. Select videos, Edit, Creator.</Text>
+              ) : (
+                <View style={styles.chips}>
+                  {props.creators.map((c) => {
+                    const on = sameFilter({ kind: 'creator', name: c.name }, filter);
+                    return (
+                      <TouchableOpacity
+                        key={c.name}
+                        style={[styles.chip, on && styles.chipOn]}
+                        onPress={() => onPick({ kind: 'creator', name: c.name })}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`Creator ${c.name}, ${c.count}`}>
+                        <Text style={[styles.chipText, on && styles.chipTextOn]} numberOfLines={1}>
+                          @{c.name}
+                        </Text>
+                        <Text style={[styles.chipCount, on && styles.chipTextOn]}>{c.count}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              {!!props.creatorSuggestions && (
+                <ActionRow label={`${props.creatorSuggestions} suggested from file names`} icon="person" onPress={props.onManageCreators} />
+              )}
+            </>
           )}
 
           {props.tidy && (props.tidy.untagged > 0 || props.tidy.cold > 0) && (

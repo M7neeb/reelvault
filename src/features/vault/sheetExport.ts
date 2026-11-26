@@ -16,6 +16,7 @@ export type SheetRow = {
   status: string | null;
   keywords: string[];
   albums: string[];
+  creators?: string[];
   caption: string | null;
   plays: number;
   watchedMs: number;
@@ -33,6 +34,7 @@ export const SHEET_COLUMNS = [
   'Status',
   'Keywords',
   'Albums',
+  'Creators',
   'Caption',
   'Times watched',
   'Minutes watched',
@@ -80,6 +82,7 @@ export function toCsv(rows: SheetRow[]): string {
         csvCell(r.status),
         csvCell(r.keywords.join('; ')),
         csvCell(r.albums.join('; ')),
+        csvCell((r.creators ?? []).join('; ')),
         csvCell(r.caption),
         csvCell(r.plays || null),
         csvCell(r.watchedMs ? Math.round(r.watchedMs / 60000) : null),

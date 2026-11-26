@@ -11,7 +11,9 @@ export type JumpRequest =
   | { kind: 'manga'; id: string; /** true = carry on reading; false = its page. */ read: boolean }
   | { kind: 'books'; id: string }
   /** Show the videos with this written on screen, all selected (to trim or edit them together). */
-  | { kind: 'select'; onScreen: string };
+  | { kind: 'select'; onScreen: string }
+  /** Everything one creator made. */
+  | { kind: 'creator'; name: string };
 
 let pending: JumpRequest | null = null;
 const listeners = new Set<(r: JumpRequest) => void>();

@@ -90,6 +90,13 @@ export function parseSearch(query: string, tags: string[], now: number): ParsedS
     const next = tokens[i + 1]?.quoted ? '' : (tokens[i + 1]?.w.toLowerCase() ?? '');
     const two = `${w} ${next}`;
 
+    // Creators: @name (kept apart from keywords).
+    if (w.startsWith('@') && w.length > 1) {
+      rule.creator = raw.slice(1);
+      chips.push({ key: 'creator', label: `@${raw.slice(1)}` });
+      continue;
+    }
+
     // Keywords: #tag, or a word that is one of your keywords.
     if (w.startsWith('#') && w.length > 1) {
       addTag(tagByLower.get(w.slice(1)) ?? raw.slice(1));
