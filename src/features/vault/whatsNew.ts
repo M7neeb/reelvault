@@ -9,6 +9,14 @@ export const WHATS_NEW_KEY = 'whatsNew.seen';
 
 export const RELEASES: Release[] = [
   {
+    id: '2026-11-28',
+    title: 'Rank videos play again',
+    items: [
+      'Rank videos: both clips play again, and the grid\'s previews pause while you rank.',
+      'Each clip has a speaker button for its sound. Turning one on mutes the other.',
+    ],
+  },
+  {
     id: '2026-11-27',
     title: 'Creators',
     items: [

@@ -383,6 +383,8 @@ function VaultScreenBody({
   const [playing, setPlaying] = useState<VaultItem | null>(
     () => items.find((i) => i.id === dev?.viewerId) ?? null
   );
+  // The grid's previews pause under any page that plays its own videos; left running they took the phone's video decoders.
+  const gridPlays = prefs.gridPreview && enableVideo && !playing && !slideshow && !insights && !rankOpen && !clipsOpen && !gamesOpen && !triage;
   // A video and an audiobook never play at once: opening a video pauses the audio.
   const audioPlayback = useAudioControlsOptional();
   useEffect(() => {
@@ -1665,7 +1667,7 @@ function VaultScreenBody({
           seriesOf={seriesOf}
           onPinchSize={look === 'simple' || look === 'compact' ? undefined : pinchSize}
           onScrollExtra={onGridScroll}
-          livePreview={prefs.gridPreview && enableVideo && !playing && !slideshow && !insights}
+          livePreview={gridPlays}
         />
       )}
 

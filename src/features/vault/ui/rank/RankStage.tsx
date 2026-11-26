@@ -1,7 +1,7 @@
 /**
  * The rounds of Rank your favourites: two at a time on black, tap the one you
- * like more. Videos are stacked and play muted from their cover moment;
- * posters sit side by side. Either video opens big, with sound and the
+ * like more. Videos are stacked and play muted from their cover moment (the
+ * speaker button gives one of them sound); posters sit side by side. Either video opens big, with sound and the
  * normal controls, and can be picked from there.
  */
 
@@ -21,40 +21,34 @@ import { fmtRating } from './rankTypes';
 type Side = 'a' | 'b';
 
 function useLoopingPlayer(uri: string | null | undefined, startMs: number | null | undefined, muted: boolean, play: boolean) {
+  // Start in the setup, like the grid's previews: waiting for "ready" first left
+  // the round on its covers when that event had already gone by.
   const player = useVideoPlayer(uri ?? null, (pl) => {
     pl.loop = true;
     pl.muted = muted;
+    // Two clips at once, and the grid's previews: share the sound instead of stopping each other.
+    pl.audioMixingMode = 'mixWithOthers';
+    if (startMs && startMs > 0) pl.currentTime = startMs / 1000;
+    if (play) pl.play();
   });
-  const started = useRef(false);
   useEffect(() => {
     if (!uri) return;
-    const go = () => {
-      if (started.current) return;
-      started.current = true;
-      if (startMs && startMs > 0) player.currentTime = startMs / 1000;
-      if (play) player.play();
-    };
-    if (player.status === 'readyToPlay') go();
-    const sub = player.addListener('statusChange', ({ status }) => {
-      if (status === 'readyToPlay') go();
-    });
-    return () => sub.remove();
-  }, [player, uri, startMs, play]);
-  useEffect(() => {
-    if (!started.current) return;
     if (play) player.play();
     else player.pause();
-  }, [play, player]);
+  }, [play, player, uri]);
+  useEffect(() => {
+    player.muted = muted;
+  }, [muted, player]);
   return player;
 }
 
-function VideoPane({ item, play }: { item: RankCandidate; play: boolean }) {
+function VideoPane({ item, play, muted }: { item: RankCandidate; play: boolean; muted: boolean }) {
   const styles = useStyles(makeStyles);
-  const player = useLoopingPlayer(item.uri, item.startMs, true, play);
+  const player = useLoopingPlayer(item.uri, item.startMs, muted, play);
   return (
     <>
       {item.thumb ? <Image source={item.thumb} style={styles.fill} contentFit="cover" /> : null}
-      {play && item.uri ? <VideoView pointerEvents="none" player={player} style={styles.fill} contentFit="cover" nativeControls={false} /> : null}
+      {item.uri ? <VideoView pointerEvents="none" player={player} style={[styles.fill, !play && styles.hidden]} contentFit="cover" nativeControls={false} allowsPictureInPicture={false} /> : null}
     </>
   );
 }
@@ -68,6 +62,8 @@ function Pane({
   width,
   height,
   renderArt,
+  sound,
+  onSound,
   onPick,
   onOpen,
 }: {
@@ -80,6 +76,9 @@ function Pane({
   width: number;
   height: number;
   renderArt?: (c: RankCandidate, w: number, h: number) => ReactNode;
+  /** This one plays with sound (only one at a time). */
+  sound: boolean;
+  onSound?: () => void;
   onPick: () => void;
   onOpen?: () => void;
 }) {
@@ -100,7 +99,7 @@ function Pane({
       <TouchableOpacity activeOpacity={0.85} onPress={onPick} style={videos ? styles.videoPane : styles.posterPane} accessibilityRole="button" accessibilityLabel={`Pick ${label}`}>
         {videos ? (
           <>
-            <VideoPane item={item} play={play} />
+            <VideoPane item={item} play={play} muted={!sound} />
             <View style={styles.videoInfo} pointerEvents="none">
               <Text style={styles.videoTitle} numberOfLines={1}>
                 {item.title}
@@ -112,6 +111,16 @@ function Pane({
             <View style={[styles.score, !item.rating && styles.scoreNone]} pointerEvents="none">
               <Text style={[styles.scoreText, !item.rating && styles.scoreNoneText]}>{item.rating ? fmtRating(item.rating) : 'New'}</Text>
             </View>
+            {onSound && (
+              <TouchableOpacity
+                style={[styles.expand, styles.soundBtn, sound && styles.soundOn]}
+                onPress={onSound}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={sound ? `Mute ${item.title}` : `Sound on for ${item.title}`}>
+                <Icon name={sound ? 'sound' : 'muted'} size={16} color={sound ? '#000' : '#fff'} />
+              </TouchableOpacity>
+            )}
             {onOpen && (
               <TouchableOpacity style={styles.expand} onPress={onOpen} hitSlop={10} accessibilityLabel={`Open ${item.title} big, with sound`}>
                 <Icon name="fullScreen" size={15} color="#fff" weight="bold" />
@@ -207,12 +216,14 @@ export default function RankStage({
   const { width, height } = useWindowDimensions();
   const [picked, setPicked] = useState<Side | null>(null);
   const [big, setBig] = useState<Side | null>(null);
+  const [sound, setSound] = useState<Side | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [a, b] = pair;
 
   useEffect(() => {
     setPicked(null);
     setBig(null);
+    setSound(null);
   }, [a.id, b.id]);
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
@@ -276,6 +287,8 @@ export default function RankStage({
                 width={paneW}
                 height={paneH}
                 renderArt={renderArt}
+                sound={play && sound === s}
+                onSound={play && item.uri ? () => setSound((now) => (now === s ? null : s)) : undefined}
                 onPick={() => choose(s)}
                 onOpen={videos && enableVideo && item.uri ? () => setBig(s) : undefined}
               />
@@ -331,6 +344,9 @@ const makeStyles = (_p: Palette) =>
     scoreText: { color: '#000', fontSize: 14, fontWeight: '900', fontVariant: ['tabular-nums'] },
     scoreNone: { backgroundColor: 'rgba(0,0,0,0.6)' },
     scoreNoneText: { color: '#fff', fontWeight: '700' },
+    hidden: { opacity: 0 },
+    soundBtn: { right: 52 },
+    soundOn: { backgroundColor: '#fff' },
     expand: { position: 'absolute', top: 10, right: 10, width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
     ring: { ...{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }, borderRadius: 20, borderWidth: 3, borderColor: '#fff' },
     bar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 14 },
