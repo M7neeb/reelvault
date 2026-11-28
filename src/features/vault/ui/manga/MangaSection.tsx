@@ -15,11 +15,12 @@ import MangaDashboard, { type MangaInsightsTab } from './MangaDashboard';
 import type { MixVideos } from './MangaWrapped';
 import MangaFeed, { type FeedTab } from './MangaFeed';
 import MangaDetail from './MangaDetail';
+import MangaGames from './MangaGames';
 import MangaReader from './MangaReader';
 import MangaScreen from './MangaScreen';
 import type { MangaData } from './mangaTypes';
 
-export type MangaDev = { feed?: FeedTab; dashboard?: boolean; dashTab?: MangaInsightsTab; downloadsOpen?: boolean; detail?: boolean; reader?: boolean; deleted?: boolean; browse?: 'sources' | 'extensions'; source?: string; openKey?: string; form?: 'server' | 'repo' | 'languages'; /** Which series the reader opens (default: the first). */ seriesId?: string };
+export type MangaDev = { feed?: FeedTab; dashboard?: boolean; games?: boolean; dashTab?: MangaInsightsTab; downloadsOpen?: boolean; detail?: boolean; reader?: boolean; deleted?: boolean; browse?: 'sources' | 'extensions'; source?: string; openKey?: string; form?: 'server' | 'repo' | 'languages'; /** Which series the reader opens (default: the first). */ seriesId?: string };
 
 export default function MangaSection({
   data,
@@ -29,9 +30,12 @@ export default function MangaSection({
   openRequest,
   onOpenHandled,
   videos,
+  games,
   dev,
 }: {
   data: MangaData;
+  /** Where game scores and the streak are kept (shared with the video games). */
+  games?: { load: () => Promise<string | null>; save: (json: string) => Promise<void> };
   /** Your videos, for the Videos + Manga Wrapped. */
   videos?: MixVideos | null;
   onMode: (m: VideosMode) => void;
@@ -58,6 +62,7 @@ export default function MangaSection({
   const read = (seriesId: string, c: MangaChapter, fromStart = false) => setReading({ seriesId, chapterId: c.id, fromStart });
   const [browseOpen, setBrowseOpen] = useState(!!dev?.browse);
   const [dashOpen, setDashOpen] = useState(!!dev?.dashboard);
+  const [gamesOpen, setGamesOpen] = useState(!!dev?.games);
   const [feed, setFeed] = useState<FeedTab | null>(dev?.feed ?? null);
   const [dlOpen, setDlOpen] = useState(!!dev?.downloadsOpen);
 
@@ -117,6 +122,7 @@ export default function MangaSection({
         onMode={onMode}
         onBrowse={() => setBrowseOpen(true)}
         onDashboard={() => setDashOpen(true)}
+        onGames={games ? () => setGamesOpen(true) : undefined}
         onFeed={setFeed}
         onDownloads={() => setDlOpen(true)}
         downloads={data.downloads}
@@ -158,6 +164,18 @@ export default function MangaSection({
             read(seriesId, c);
           }}
           onClose={() => setFeed(null)}
+        />
+      )}
+      {gamesOpen && games && !detail && (
+        <MangaGames
+          items={data.items}
+          actions={data.actions}
+          games={games}
+          onOpen={(s) => {
+            setGamesOpen(false);
+            setDetailId(s.id);
+          }}
+          onClose={() => setGamesOpen(false)}
         />
       )}
       {dashOpen && !detail && (

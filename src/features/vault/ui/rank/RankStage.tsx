@@ -42,7 +42,8 @@ function useLoopingPlayer(uri: string | null | undefined, startMs: number | null
   return player;
 }
 
-function VideoPane({ item, play, muted }: { item: RankCandidate; play: boolean; muted: boolean }) {
+/** A clip playing silently in a loop from its start moment, over its cover (also used by the Knockout cup). */
+export function VideoPane({ item, play, muted }: { item: Pick<RankCandidate, 'uri' | 'startMs' | 'thumb'>; play: boolean; muted: boolean }) {
   const styles = useStyles(makeStyles);
   const player = useLoopingPlayer(item.uri, item.startMs, muted, play);
   return (

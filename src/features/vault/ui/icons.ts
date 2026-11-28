@@ -61,6 +61,7 @@ export const ICONS = {
   sync: { sf: 'arrow.triangle.2.circlepath', ion: 'sync' },
   info: { sf: 'info.circle', ion: 'information-circle-outline' },
   sort: { sf: 'arrow.up.arrow.down', ion: 'swap-vertical' },
+  quote: { sf: 'quote.opening', ion: 'chatbox-ellipses-outline' },
   edit: { sf: 'square.and.pencil', ion: 'create-outline' },
   options: { sf: 'slider.horizontal.3', ion: 'options-outline' },
   lock: { sf: 'lock.fill', ion: 'lock-closed' },

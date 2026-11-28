@@ -416,6 +416,8 @@ export type VaultActions = {
   loadTags: (videoId: string) => Promise<UiTag[]>;
   /** Filmstrip frames for the scrubber (device: generated + cached; preview: placeholders). */
   loadFrames: (item: VaultItem) => Promise<ThumbSource[]>;
+  /** One sharp frame of a video at a moment, for the games (null when it can't be read). */
+  gameFrame?: (item: VaultItem, atMs: number) => Promise<ThumbSource | null>;
   onRate: (videoId: string, rating: number) => Promise<void>;
   onAddTag: (videoId: string, name: string) => Promise<void>;
   onRemoveTag: (videoId: string, tagId: number) => Promise<void>;

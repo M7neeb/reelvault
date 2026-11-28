@@ -1,7 +1,8 @@
 /**
- * Games with your own library: Which episode is this? (a still from one of
- * your series), Higher or lower (your ratings) and Name that show (a Simkl
- * poster coming into focus). Best scores and a daily streak are kept.
+ * Games with your own library: Knockout cup (a bracket of your videos), Zoom
+ * detective, Put it in order, Who said that (words read off the screen),
+ * Which episode is this?, Higher or lower (your ratings) and Name that show
+ * (a Simkl poster coming into focus). Best scores and a daily streak are kept.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,6 +11,9 @@ import { Image } from 'expo-image';
 
 import { posterUrl, type SimklItem } from '@/features/simkl/logic';
 import { emptyGames, episodeRound, higherLowerPair, parseGames, recordGame, showRound, type GameKind, type GamesState } from '../games';
+import { orderRound, saidRound, zoomRound } from '../gameRules';
+import type { SceneRow } from '../sceneLogic';
+import { CupGame, OrderGame, SaidGame, useBestBefore, ZoomGame, type CupEntry } from './gamesKit';
 import { friendlyName } from '../names';
 import EmptyState from './EmptyState';
 import { success, tick, warn } from './haptics';
@@ -27,19 +31,31 @@ type Props = {
   actions: VaultActions;
   /** Your Simkl titles (for Name that show); null while loading or not signed in. */
   loadTitles?: () => Promise<SimklItem[]>;
+  /** Clips play in the Knockout cup (off in the browser preview). */
+  enableVideo?: boolean;
+  /** Words read off the videos' screens, for Who said that. */
+  sceneRows?: { current: SceneRow[] };
+  /** Plays a video (the cup's champion). */
+  onOpen?: (v: VaultItem) => void;
   onClose: () => void;
 };
 
-const GAMES: { kind: GameKind; icon: IconName; tint: string; title: string; sub: string }[] = [
+type GameKindHere = Exclude<GameKind, 'mangaCup' | 'mangaZoom' | 'mangaOrder'>;
+
+const GAMES: { kind: GameKindHere; icon: IconName; tint: string; title: string; sub: string }[] = [
+  { kind: 'cup', icon: 'trophy', tint: '#FF5A36', title: 'Knockout cup', sub: '16 of your videos, two at a time, until one is left.' },
+  { kind: 'zoom', icon: 'search', tint: '#30D158', title: 'Zoom detective', sub: 'A close-up zooms out. Name it before it is whole.' },
+  { kind: 'order', icon: 'sort', tint: '#64D2FF', title: 'Put it in order', sub: 'Four moments of one video, shuffled. Tap them in order.' },
+  { kind: 'said', icon: 'quote', tint: '#FFD60A', title: 'Who said that', sub: 'Words from a video\'s screen. Which video?' },
   { kind: 'episode', icon: 'videos', tint: '#0A84FF', title: 'Which episode is this?', sub: 'A still from one of your series. Pick the episode.' },
   { kind: 'higher', icon: 'star', tint: '#FF9F0A', title: 'Higher or lower', sub: 'Did you rate the next video higher or lower?' },
   { kind: 'show', icon: 'tv', tint: '#BF5AF2', title: 'Name that show', sub: 'A poster comes into focus. Name it fast.' },
 ];
 
-export default function GamesModal({ items, overview, actions, loadTitles, onClose }: Props) {
+export default function GamesModal({ items, overview, actions, loadTitles, enableVideo = true, sceneRows, onOpen, onClose }: Props) {
   const styles = useStyles(makeStyles);
   const [state, setState] = useState<GamesState>(emptyGames());
-  const [playing, setPlaying] = useState<GameKind | null>(null);
+  const [playing, setPlaying] = useState<GameKindHere | null>(null);
   const [titles, setTitles] = useState<SimklItem[] | null>(null);
 
   useEffect(() => {
@@ -70,15 +86,96 @@ export default function GamesModal({ items, overview, actions, loadTitles, onClo
   const rated = useMemo(() => [...byId.values()].filter((v) => v.rating > 0), [byId]);
   const shows = useMemo(() => (titles ?? []).filter((t) => t.poster && t.status !== 'plantowatch'), [titles]);
 
-  const can: Record<GameKind, boolean> = {
+  const all = useMemo(() => [...byId.values()], [byId]);
+  const long = useMemo(() => all.filter((v) => (v.durationMs ?? 0) >= 20_000), [all]);
+  const rows = sceneRows?.current ?? [];
+  const saidReady = useMemo(() => saidRound(rows.filter((r) => byId.has(r.videoId))) !== null, [rows, byId]);
+
+  const can: Record<GameKindHere, boolean> = {
+    cup: all.length >= 4,
+    zoom: all.length >= 4,
+    order: long.length >= 1,
+    said: saidReady,
     episode: series.length > 0,
     higher: new Set(rated.map((v) => v.rating)).size >= 2,
     show: shows.length >= 4,
   };
-  const why: Record<GameKind, string> = {
+  const why: Record<GameKindHere, string> = {
+    cup: 'Needs four or more videos.',
+    zoom: 'Needs four or more videos.',
+    order: 'Needs a video of 20 seconds or more.',
+    said: 'Needs text read off your videos\' screens. Search for a word on screen to start the reading.',
     episode: 'Needs a series with two or more episodes (Overview).',
     higher: 'Needs videos with at least two different ratings.',
     show: titles === null ? 'Loading your Simkl titles…' : 'Needs four or more titles on your Simkl.',
+  };
+
+  // ── the rounds of the new games ──
+  const entries = useMemo(
+    () =>
+      new Map<string, CupEntry>(
+        all.map((v) => [
+          v.id,
+          { id: v.id, title: friendlyName(v), sub: v.rating ? `Rated ${v.rating}` : undefined, pic: v.thumbSource, uri: v.uri, startMs: v.durationMs && v.durationMs >= 6000 ? Math.round(v.durationMs * 0.3) : 0 },
+        ])
+      ),
+    [all]
+  );
+  const pools = useMemo(() => {
+    const ids = (list: VaultItem[]) => list.map((v) => v.id);
+    const tags = new Map<string, string[]>();
+    for (const v of all) for (const t of v.tagNames) tags.set(t, [...(tags.get(t) ?? []), v.id]);
+    return [
+      { key: 'all', label: 'All videos', ids: ids(all) },
+      { key: 'fav', label: 'Rated 8+', ids: ids(all.filter((v) => v.rating >= 8)) },
+      { key: 'unrated', label: 'Not rated yet', ids: ids(all.filter((v) => !v.rating)) },
+      ...[...tags.entries()]
+        .filter(([, list]) => list.length >= 4)
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 8)
+        .map(([t, list]) => ({ key: `tag:${t}`, label: `#${t}`, ids: list })),
+    ].filter((x) => x.key === 'all' || x.ids.length >= 4);
+  }, [all]);
+
+  /** A sharp frame from the middle part of a video (not the opening most episodes share), or its cover. */
+  const frameOf = async (v: VaultItem) => {
+    const d = v.durationMs ?? 0;
+    const at = d > 4000 ? Math.round(d * (0.2 + Math.random() * 0.65)) : 0;
+    return (await actions.gameFrame?.(v, at).catch(() => null)) ?? v.thumbSource;
+  };
+  const makeZoom = async () => {
+    // Series when there are four: name the series; otherwise name the video.
+    if (series.length >= 4) {
+      const r = zoomRound(series.map((x) => x.name));
+      const s = r && series.find((x) => x.name === r.answer);
+      const v = s && byId.get(s.episodes[Math.floor(Math.random() * s.episodes.length)]);
+      if (!r || !v) return null;
+      return { pic: await frameOf(v), answer: r.answer, options: r.options.map((o) => ({ key: o, label: o })), focus: r.focus };
+    }
+    const r = zoomRound(all.map((v) => v.id));
+    const v = r && byId.get(r.answer);
+    if (!r || !v) return null;
+    return { pic: await frameOf(v), answer: r.answer, options: r.options.map((id) => ({ key: id, label: friendlyName(byId.get(id)!) })), focus: r.focus };
+  };
+  const makeOrder = async () => {
+    const v = long[Math.floor(Math.random() * long.length)];
+    if (!v) return null;
+    const frames = await actions.loadFrames(v).catch(() => []);
+    const r = orderRound(frames.length);
+    if (!r) return null;
+    return { title: friendlyName(v), pics: r.shown.map((i) => ({ key: i, pic: frames[i] })), truth: r.truth };
+  };
+  const makeSaid = async () => {
+    const r = saidRound(rows.filter((x) => byId.has(x.videoId)));
+    if (!r) return null;
+    const mins = Math.floor(r.atMs / 60000);
+    const secs = String(Math.floor((r.atMs % 60000) / 1000)).padStart(2, '0');
+    return {
+      quote: r.quote,
+      answer: r.answer,
+      sub: `On screen at ${mins}:${secs}`,
+      options: r.options.map((id) => ({ key: id, label: friendlyName(byId.get(id)!), pic: byId.get(id)!.thumbSource })),
+    };
   };
 
   const finish = (kind: GameKind, score: number) => {
@@ -88,25 +185,45 @@ export default function GamesModal({ items, overview, actions, loadTitles, onClo
   };
 
   return (
-    <SheetFrame page title="Games" onClose={playing ? () => setPlaying(null) : onClose}>
+    <SheetFrame page title={GAMES.find((g) => g.kind === playing)?.title ?? 'Games'} onClose={playing ? () => setPlaying(null) : onClose}>
       {!playing ? (
         <View style={styles.body}>
           <Text style={styles.lead}>
             {state.streak > 1 ? `${state.streak} days in a row. Play one today to keep it going.` : 'Little games with your own videos and shows. Play one a day for a streak.'}
           </Text>
-          <Rows>
-            {GAMES.map((g) => (
-              <Row
-                key={g.kind}
-                icon={g.icon}
-                tint={g.tint}
-                title={g.title}
-                sub={can[g.kind] ? `${g.sub}${state.best[g.kind] ? ` Best: ${state.best[g.kind]}` : ''}` : why[g.kind]}
-                onPress={can[g.kind] ? () => setPlaying(g.kind) : undefined}
-              />
-            ))}
-          </Rows>
+          {[
+            { label: 'Games', list: GAMES.slice(0, 4) },
+            { label: 'Quick rounds', list: GAMES.slice(4) },
+          ].map((group) => (
+            <Rows key={group.label} label={group.label}>
+              {group.list.map((g) => (
+                <Row
+                  key={g.kind}
+                  icon={g.icon}
+                  tint={g.tint}
+                  title={g.title}
+                  sub={can[g.kind] ? `${g.sub}${state.best[g.kind] ? (g.kind === 'cup' ? ` Cups played: ${state.best.cup}` : ` Best: ${state.best[g.kind]}`) : ''}` : why[g.kind]}
+                  onPress={can[g.kind] ? () => setPlaying(g.kind) : undefined}
+                />
+              ))}
+            </Rows>
+          ))}
         </View>
+      ) : playing === 'cup' ? (
+        <CupGame
+          entries={entries}
+          pools={pools}
+          videos
+          enableVideo={enableVideo}
+          onFinished={() => finish('cup', state.best.cup + 1)}
+          onOpen={onOpen ? (id) => byId.get(id) && onOpen(byId.get(id)!) : undefined}
+        />
+      ) : playing === 'zoom' ? (
+        <ZoomGame make={makeZoom} aspect={1} best={state.best.zoom} intro={series.length >= 4 ? 'Which series is this from?' : 'Which video is this?'} onDone={(s) => finish('zoom', s)} />
+      ) : playing === 'order' ? (
+        <OrderGame make={makeOrder} aspect={1} best={state.best.order} onDone={(s) => finish('order', s)} />
+      ) : playing === 'said' ? (
+        <SaidGame make={makeSaid} best={state.best.said} onDone={(s) => finish('said', s)} />
       ) : playing === 'episode' ? (
         <EpisodeGame series={series} byId={byId} actions={actions} best={state.best.episode} onDone={(s) => finish('episode', s)} />
       ) : playing === 'higher' ? (
@@ -183,6 +300,7 @@ function EpisodeGame({
   const [round, setRound] = useState(0);
   const [score, setScore] = useState(0);
   const [over, setOver] = useState(false);
+  const before = useBestBefore(best, over);
   const [q, setQ] = useState(() => episodeRound(series));
   const [still, setStill] = useState<ThumbSource | null>(null);
   const { picked, answer } = useAnswer((right) => {
@@ -218,7 +336,7 @@ function EpisodeGame({
     return (
       <Done
         score={score}
-        best={best}
+        best={before}
         outOf={ROUNDS}
         onAgain={() => {
           setOver(false);
@@ -251,6 +369,7 @@ function HigherGame({ rated, best, onDone }: { rated: VaultItem[]; best: number;
   const [pair, setPair] = useState(() => higherLowerPair(rated));
   const [score, setScore] = useState(0);
   const [over, setOver] = useState(false);
+  const before = useBestBefore(best, over);
   const { picked, answer } = useAnswer((right) => {
     if (!right) {
       setOver(true);
@@ -267,7 +386,7 @@ function HigherGame({ rated, best, onDone }: { rated: VaultItem[]; best: number;
     return (
       <Done
         score={score}
-        best={best}
+        best={before}
         onAgain={() => {
           setOver(false);
           setScore(0);
@@ -309,6 +428,7 @@ function ShowGame({ shows, best, onDone }: { shows: SimklItem[]; best: number; o
   const [round, setRound] = useState(0);
   const [score, setScore] = useState(0);
   const [over, setOver] = useState(false);
+  const before = useBestBefore(best, over);
   const [q, setQ] = useState(() => showRound(shows));
   const [blur, setBlur] = useState(40);
   const byId = useMemo(() => new Map(shows.map((s) => [s.simklId, s])), [shows]);
@@ -333,7 +453,7 @@ function ShowGame({ shows, best, onDone }: { shows: SimklItem[]; best: number; o
     return (
       <Done
         score={score}
-        best={best}
+        best={before}
         outOf={ROUNDS}
         onAgain={() => {
           setOver(false);

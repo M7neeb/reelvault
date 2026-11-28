@@ -85,6 +85,7 @@ export default function MangaScreen({
   onMode,
   onBrowse,
   onDashboard,
+  onGames,
   onFeed,
   onDownloads,
   downloads,
@@ -105,6 +106,8 @@ export default function MangaScreen({
   /** Sources, servers and extensions. */
   onBrowse: () => void;
   onDashboard: () => void;
+  /** Cup, Zoom detective, pages in order. */
+  onGames?: () => void;
   /** Updates (new chapters) or History (what you read). */
   onFeed: (tab: 'updates' | 'history') => void;
   onDownloads: () => void;
@@ -297,6 +300,7 @@ export default function MangaScreen({
     ...(items.some((s) => s.sourceId) ? [{ label: 'Updates', hint: 'New chapters, newest first', onPress: () => onFeed('updates') }] : []),
     ...(items.some((s) => s.chapters.some((c) => c.readAt)) ? [{ label: 'History', hint: 'What you read, by day', onPress: () => onFeed('history') }] : []),
     { label: 'Reading stats and Wrapped', onPress: onDashboard },
+    ...(onGames ? [{ label: 'Games', hint: 'Knockout cup, Zoom detective, pages in order', onPress: onGames }] : []),
     { label: `Downloads${downloads.queue.length ? ` · ${downloads.queue.length}` : ''}`, onPress: onDownloads },
     ...(items.some((s) => s.sourceId && !s.sourceId.startsWith('tachi:')) ? [{ label: 'Download everything', hint: 'Every chapter not on the phone yet', onPress: () => setTimeout(() => setMenu('download-all'), 250) }] : []),
     ...(items.some((s) => s.sourceId?.startsWith('tachi:') || /^server:[^:]+:library$/.test(s.sourceId ?? '')) ? [{ label: 'Find backup titles', hint: 'On your Suwayomi server, extensions or MangaDex; fixes linked ones too', onPress: () => actions.autoLink().catch(failed) }] : []),

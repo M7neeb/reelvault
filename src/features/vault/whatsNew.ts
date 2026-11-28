@@ -9,6 +9,17 @@ export const WHATS_NEW_KEY = 'whatsNew.seen';
 
 export const RELEASES: Release[] = [
   {
+    id: '2026-11-28c',
+    title: 'New games',
+    items: [
+      'Knockout cup: 8 or 16 of your videos in a bracket, two playing at a time, until one is champion. Pick who plays: all, rated 8+, not rated yet, or a keyword.',
+      'Zoom detective: a close-up zooms out over 8 seconds. Name the video or series; the quicker, the more points.',
+      'Put it in order: four moments of one video, shuffled. Tap them in the order they come.',
+      'Who said that: words ReelVault read off a video\'s screen. Which video were they on?',
+      'Manga has its own Games in the Manga menu: a cup of covers, Zoom detective with pages, and pages in order.',
+    ],
+  },
+  {
     id: '2026-11-28b',
     title: 'The player, HashPhotos style',
     items: [

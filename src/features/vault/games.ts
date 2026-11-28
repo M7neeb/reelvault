@@ -4,10 +4,12 @@
  * best scores, the daily streak), so it runs in Node tests.
  */
 
-export type GameKind = 'episode' | 'higher' | 'show';
+export const GAME_KINDS = ['episode', 'higher', 'show', 'cup', 'zoom', 'order', 'said', 'mangaCup', 'mangaZoom', 'mangaOrder'] as const;
+export type GameKind = (typeof GAME_KINDS)[number];
+/** `best` is the best score; for the cups, how many you have played. */
 export type GamesState = { best: Record<GameKind, number>; streak: number; lastDay: string | null };
 
-export const emptyGames = (): GamesState => ({ best: { episode: 0, higher: 0, show: 0 }, streak: 0, lastDay: null });
+export const emptyGames = (): GamesState => ({ best: Object.fromEntries(GAME_KINDS.map((k) => [k, 0])) as Record<GameKind, number>, streak: 0, lastDay: null });
 
 const dayKey = (ms: number) => {
   const d = new Date(ms);
@@ -21,7 +23,7 @@ export function parseGames(json: string | null): GamesState {
     if (!r || typeof r !== 'object') return emptyGames();
     const n = (x: unknown) => (Number.isInteger(x) && (x as number) >= 0 ? (x as number) : 0);
     return {
-      best: { episode: n(r.best?.episode), higher: n(r.best?.higher), show: n(r.best?.show) },
+      best: Object.fromEntries(GAME_KINDS.map((k) => [k, n(r.best?.[k])])) as Record<GameKind, number>,
       streak: n(r.streak),
       lastDay: typeof r.lastDay === 'string' ? r.lastDay : null,
     };

@@ -2025,6 +2025,9 @@ function VaultScreenBody({
           overview={overview}
           actions={actions}
           loadTitles={simkl?.connected ? () => simkl.insights().then((r) => r.items) : undefined}
+          enableVideo={enableVideo}
+          sceneRows={sceneRows}
+          onOpen={(v) => setPlaying(v)}
           onClose={() => setGamesOpen(false)}
         />
       )}
@@ -2184,6 +2187,7 @@ function VaultScreenBody({
           <MangaSection
             data={manga}
             videos={mixVideos}
+            games={{ load: actions.loadGames, save: actions.saveGames }}
             onMode={switchMode}
             showPrivate={privateOpen}
             onUnlockPrivate={() => void requestUnlock(() => undefined)}

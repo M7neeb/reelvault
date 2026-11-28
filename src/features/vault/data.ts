@@ -10,9 +10,10 @@ import { parseSlideshow } from './slideshowPlan';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Appearance, Linking } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { Paths } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 
 import { purgeExpired, purgeVideos, restore, trashVideos } from '@/features/vault/actions';
+import { frameTo } from '@/features/vault/frames';
 import { isCustomMemory } from '@/features/vault/memories';
 import {
   addToAlbums,
@@ -283,6 +284,10 @@ function openingPrints(v: Video): Promise<string[]> {
   if (!secs.length || !ReelVaultMedia?.videoPrints) return Promise.resolve([]);
   return ReelVaultMedia.videoPrints(v.uri, secs.map((t) => t / d));
 }
+
+/** The big frames games show (Zoom detective), reused in turn. */
+const gameFiles: (File | null)[] = [null, null, null, null, null, null];
+let gameSlot = 0;
 
 export type VaultData = {
   items: VaultItem[];
@@ -983,6 +988,22 @@ export function useVaultData(): VaultData {
       loadFrames: async (item) => {
         const v = byId(item.id);
         return v ? ensureFilmstrip(v) : [];
+      },
+      gameFrame: async (item, atMs) => {
+        const v = byId(item.id);
+        if (!v) return null;
+        // A few files in turn, so a game never fills the cache; a new name each time so the picture isn't an old one.
+        gameSlot = (gameSlot + 1) % gameFiles.length;
+        const old = gameFiles[gameSlot];
+        try {
+          if (old?.exists) old.delete();
+        } catch {
+          // the system clears the cache anyway
+        }
+        const file = new File(Paths.cache, `game-${gameSlot}-${Date.now()}.jpg`);
+        gameFiles[gameSlot] = file;
+        const ok = await frameTo(v.uri, atMs, file, 900).catch(() => null);
+        return ok && file.exists ? file.uri : null;
       },
       onRate: andPatch((id: string, rating: number) => saveRating(id, rating), (id, rating) => ({ ids: [id], set: { rating } })),
       onAddTag: andReload(['tags'], (id: string, name: string) => addTagToVideo(id, name)),

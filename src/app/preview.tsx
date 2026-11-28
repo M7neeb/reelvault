@@ -313,6 +313,17 @@ const noop = async () => {};
 
 const first = FIXTURE_ITEMS[0].id;
 
+/** Words "read off the screen" of a few fixture videos, for Who said that and on-screen search. */
+const PREVIEW_SCENES = {
+  current: [
+    'Previously on Harbour Lights',
+    'The night the ferry never came back',
+    'Happy birthday to the best sister ever',
+    'Lecture three: the shape of the market',
+    'Sunset over the old pier tonight',
+  ].map((words, i) => ({ videoId: FIXTURE_ITEMS[i % FIXTURE_ITEMS.length].id, atMs: 12_000 * (i + 1), labels: '', words })),
+};
+
 /** Every surface the preview can open on first render. */
 const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = {
   grid: {},
@@ -404,6 +415,7 @@ const VIEWS: Record<string, NonNullable<VaultScreenProps['devInitialState']>> = 
   'manga-repo': { manga: { browse: 'extensions', form: 'repo' } },
   'manga-addserver': { manga: { browse: 'sources', form: 'server' } },
   'manga-stats': { manga: { dashboard: true } },
+  'manga-games': { manga: { games: true } },
   'manga-history2': { manga: { dashboard: true, dashTab: 'history' } },
   'manga-memories': { manga: { dashboard: true, dashTab: 'memories' } },
   'manga-wrapped': { manga: { dashboard: true, dashTab: 'wrapped' } },
@@ -780,6 +792,7 @@ export default function PreviewRoute() {
           status=""
           actions={actions}
           enableVideo={false}
+          sceneRows={PREVIEW_SCENES}
       simkl={bridge}
       prefs={prefs}
       wrappedRequest={view === 'wrapped-story'}
