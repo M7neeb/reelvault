@@ -9,6 +9,16 @@ export const WHATS_NEW_KEY = 'whatsNew.seen';
 
 export const RELEASES: Release[] = [
   {
+    id: '2026-11-28b',
+    title: 'The player, HashPhotos style',
+    items: [
+      'Tapping a playing video hides the controls now. On the iPhone the tap was cancelled while it waited to see if it was a double tap. The manga reader\'s tap had the same problem and works now too.',
+      'The film strip slides under a fixed white line, like HashPhotos. Drag the film to move through the video.',
+      'Pick, reject and five stars in one bar, with More and Delete beside it. Tap the left half of a star for a half star (an odd rating).',
+      'Bigger buttons at the top, and Add To on the right.',
+    ],
+  },
+  {
     id: '2026-11-28',
     title: 'Rank videos play again',
     items: [

@@ -25,3 +25,12 @@ for (const file of PLAYING_SCREENS) {
     assert.equal(inside.length, all.length, 'no player gesture is created outside the memo');
   });
 }
+
+test('FilmScrubber: the scrub drag is built once, so a drag survives the player redrawing', () => {
+  const src = readFileSync(new URL('../src/features/vault/ui/FilmScrubber.tsx', import.meta.url), 'utf8');
+  const start = src.indexOf('const pan = useMemo(');
+  assert.ok(start >= 0, 'the pan gesture is made inside useMemo');
+  const all = src.match(/Gesture\.Pan\(\)/g) ?? [];
+  const inside = src.slice(start, src.indexOf('}, []);', start)).match(/Gesture\.Pan\(\)/g) ?? [];
+  assert.equal(inside.length, all.length);
+});

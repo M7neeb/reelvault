@@ -840,9 +840,11 @@ function ViewerPage({
         }
       });
 
+    // No maxDuration: on the iPhone its timer outlives the finger and switched this tap off while it
+    // waited out the double tap. A long press is the hold gesture's, which wins the race at 280 ms.
     const singleTap = Gesture.Tap()
       .runOnJS(true)
-      .maxDuration(260)
+      .maxDistance(12)
       .onEnd((_e, ok) => {
         if (ok) call.tap();
       });
@@ -1133,7 +1135,7 @@ function ViewerPage({
             <Animated.View entering={fadeIn} exiting={FadeOut.duration(DUR.fast)} style={[styles.headerWrap, chromeFade]} pointerEvents="box-none" onTouchStart={poke}>
               <Fade color="0,0,0" from={0} to={0.55} reverse style={[fill, { bottom: -30 }]} />
               <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: insets.left + 8, paddingRight: insets.right + 8 }]} pointerEvents="box-none">
-                <IconButton icon="back" label="Back" clear color="#fff" onPress={onDismiss} size={38} />
+                <IconButton icon="back" label="Back" clear color="#fff" onPress={onDismiss} size={overlay ? 38 : 44} />
 
                 <View style={styles.titleWrap} pointerEvents="none">
                   <Text style={styles.titleDate} numberOfLines={1}>
@@ -1148,14 +1150,14 @@ function ViewerPage({
                       <AirPlayButton style={{ width: 24, height: 24 }} tint="#ffffff" activeTint={p.accent} />
                     </View>
                   )}
-                  <IconButton icon="info" label="Info" clear color="#fff" size={38} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
+                  <IconButton icon="info" label="Info" clear color="#fff" size={overlay ? 38 : 44} tint={infoOpen ? p.accent : undefined} onPress={() => setInfoOpen((v) => !v)} />
                   {!overlay && (
                     <IconButton
                       icon="options"
                       label="Edit: trim, crop, resize"
                       clear
                       color="#fff"
-                      size={38}
+                      size={44}
                       onPress={() => {
                         if (player.playing) player.pause();
                         setEditorTab('trim');
@@ -1166,16 +1168,6 @@ function ViewerPage({
               </View>
               {!overlay && (
                 <View style={styles.pillRow} pointerEvents="box-none">
-                  <TouchableOpacity style={styles.addToPill} onPress={() => setAlbumsOpen(true)} accessibilityLabel="Add to an album">
-                    <Text style={styles.addToText} numberOfLines={1}>
-                      {albumIds.length === 0
-                        ? 'Add To'
-                        : albumIds.length === 1
-                          ? (albums.find((a) => a.id === albumIds[0])?.name ?? '1 album')
-                          : `In ${albumIds.length} albums`}
-                    </Text>
-                    <Icon name="down" size={11} color="#fff" />
-                  </TouchableOpacity>
                   {link && (
                     <TouchableOpacity style={styles.linkPill} onPress={() => setLinkOpen(true)} accessibilityLabel="Linked to Simkl">
                       <Icon name="tv" size={12} color="#fff" />
@@ -1186,6 +1178,16 @@ function ViewerPage({
                       </Text>
                     </TouchableOpacity>
                   )}
+                  <TouchableOpacity style={styles.addToPill} onPress={() => setAlbumsOpen(true)} accessibilityRole="button" accessibilityLabel="Add to an album">
+                    <Text style={styles.addToText} numberOfLines={1}>
+                      {albumIds.length === 0
+                        ? 'Add To'
+                        : albumIds.length === 1
+                          ? (albums.find((a) => a.id === albumIds[0])?.name ?? '1 album')
+                          : `In ${albumIds.length} albums`}
+                    </Text>
+                    <Icon name="down" size={12} color="#fff" weight="bold" />
+                  </TouchableOpacity>
                 </View>
               )}
             </Animated.View>
@@ -1223,32 +1225,20 @@ function ViewerPage({
                 </View>
               )}
 
-              {/* time, small, over the bar (tap: time left or the length) */}
-              {!overlay && (
-              <TouchableOpacity style={bs.timeRow} onPress={() => setOpt({ remaining: !opts.remaining })} hitSlop={6} accessibilityLabel="Show the time left or the length">
-                <Text style={bs.timeText}>
-                  {fmtDuration(elapsed * 1000) ?? '0:00'}
-                  {'  /  '}
-                  {opts.remaining ? `−${fmtDuration(Math.max(0, totalSec - elapsed) * 1000) ?? '0:00'}` : (fmtDuration(totalSec * 1000) ?? '--:--')}
-                  {opts.speed !== 1 ? `   ${opts.speed}×` : ''}
-                  {opts.endLoop ? '   ↻' : ''}
-                </Text>
-              </TouchableOpacity>
-              )}
-
-              {/* the player bar: play · film strip · sound · player menu */}
+              {/* the player bar, as in HashPhotos: play · the film sliding under a fixed playhead · sound · more */}
               <View style={[bs.capsule, overlay && bs.capsuleOver]}>
-                <TouchableOpacity style={bs.capBtn} onPress={togglePlay} hitSlop={6} accessibilityLabel={ended ? 'Replay' : playing ? 'Pause' : 'Play'}>
-                  <Icon name={ended ? 'rewatch' : playing ? 'pause' : 'play'} size={20} color={bp.text} />
+                <TouchableOpacity style={bs.capBtn} onPress={togglePlay} accessibilityRole="button" accessibilityLabel={ended ? 'Replay' : playing ? 'Pause' : 'Play'}>
+                  <Icon name={ended ? 'rewatch' : playing ? 'pause' : 'play'} size={22} color={bp.text} />
                 </TouchableOpacity>
                 <FilmScrubber
+                  centered
                   fraction={progress}
                   durationSec={totalSec}
                   frames={frames}
                   cover={item.thumbSource}
                   marks={marks.map((m) => m.atMs)}
                   markColor={bp.rating}
-                  height={overlay ? 30 : 38}
+                  height={overlay ? 32 : 40}
                   onStart={scrubStart}
                   onMove={scrubMove}
                   onEnd={scrubEnd}
@@ -1261,16 +1251,16 @@ function ViewerPage({
                   </TouchableOpacity>
                 )}
                 {enableVideo && (
-                  <TouchableOpacity style={bs.capBtn} onPress={toggleMute} hitSlop={6} accessibilityLabel={muted ? 'Sound on' : 'Mute'}>
-                    <Icon name={muted ? 'muted' : 'sound'} size={18} color={muted ? bp.accent : bp.text} />
+                  <TouchableOpacity style={bs.capBtn} onPress={toggleMute} accessibilityRole="button" accessibilityLabel={muted ? 'Sound on' : 'Mute'}>
+                    <Icon name={muted ? 'muted' : 'sound'} size={20} color={muted ? bp.accent : bp.text} />
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity style={bs.capBtn} onPress={() => setPlayerMenu(true)} hitSlop={6} accessibilityLabel="Player: speed, loop, bookmarks and more">
-                  <Icon name="more" size={18} color={bp.text} />
+                <TouchableOpacity style={bs.capBtn} onPress={() => setPlayerMenu(true)} accessibilityRole="button" accessibilityLabel="Player: speed, loop, bookmarks and more">
+                  <Icon name="moreCircle" size={22} color={bp.text} />
                 </TouchableOpacity>
               </View>
 
-              {/* the videos around this one (HashPhotos' strip): tap to go there */}
+              {/* the videos around this one: tap to go there */}
               {!overlay && strip.length > 1 && (
                 <ScrollView
                   horizontal
@@ -1292,27 +1282,47 @@ function ViewerPage({
                 </ScrollView>
               )}
 
-              {/* the rating bar: pick · reject · stars · more · delete */}
+              {/* pick · reject · five stars (a half star is an odd rating) in one bar, then more and delete */}
               {!overlay && (
-                <View style={[bs.toolbar, { marginBottom: insets.bottom + 8 }]}>
-                  <TouchableOpacity style={bs.tool} onPress={() => void onFlag(1)} accessibilityLabel="Pick">
-                    <Icon name="flag" size={18} color={flag === 1 ? '#30d158' : bp.textSecondary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={bs.tool} onPress={() => void onFlag(-1)} accessibilityLabel="Reject">
-                    <Icon name="close" size={18} color={flag === -1 ? '#ff453a' : bp.textSecondary} weight="bold" />
-                  </TouchableOpacity>
-                  <View style={bs.stars}>
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                      <TouchableOpacity key={n} onPress={() => onRate(n)} onLongPress={() => setPickerOpen(true)} hitSlop={4} accessibilityLabel={`Rate ${n}`}>
-                        <Text style={[bs.star, n <= rating && bs.starOn]}>{n <= rating ? '★' : '☆'}</Text>
-                      </TouchableOpacity>
-                    ))}
+                <View style={[bs.toolRow, { marginBottom: insets.bottom + 6 }]}>
+                  <View style={bs.toolbar}>
+                    <TouchableOpacity style={bs.tool} onPress={() => void onFlag(1)} accessibilityRole="button" accessibilityState={{ selected: flag === 1 }} accessibilityLabel="Pick">
+                      <Icon name={flag === 1 ? 'flag' : 'flagOutline'} size={22} color={flag === 1 ? '#30d158' : bp.text} />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={bs.tool} onPress={() => void onFlag(-1)} accessibilityRole="button" accessibilityState={{ selected: flag === -1 }} accessibilityLabel="Reject">
+                      <Icon name="flagSlash" size={22} color={flag === -1 ? '#ff453a' : bp.text} />
+                    </TouchableOpacity>
+                    <View style={bs.stars}>
+                      {[1, 2, 3, 4, 5].map((k) => {
+                        const full = rating >= k * 2;
+                        const half = !full && rating === k * 2 - 1;
+                        return (
+                          // Each star is two halves: the left gives the odd number (a half star), the right the even one.
+                          <View key={k} style={bs.starHit}>
+                            <Icon name={full ? 'star' : half ? 'starHalf' : 'starOff'} size={22} color={full || half ? bp.rating : bp.textSecondary} />
+                            <View style={bs.halves}>
+                              {[k * 2 - 1, k * 2].map((n) => (
+                                <TouchableOpacity
+                                  key={n}
+                                  style={bs.half}
+                                  onPress={() => onRate(n)}
+                                  onLongPress={() => setPickerOpen(true)}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Rate ${n}`}
+                                  accessibilityState={{ selected: rating === n }}
+                                />
+                              ))}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
-                  <TouchableOpacity style={bs.tool} onPress={() => setMenuOpen(true)} accessibilityLabel="More">
-                    <Icon name="more" size={18} color={bp.textSecondary} />
+                  <TouchableOpacity style={bs.roundTool} onPress={() => setMenuOpen(true)} accessibilityRole="button" accessibilityLabel="More">
+                    <Icon name="moreCircle" size={24} color={bp.text} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={bs.tool} onPress={confirmDelete} accessibilityLabel="Delete">
-                    <Icon name="trash" size={18} color={bp.dangerText} />
+                  <TouchableOpacity style={bs.roundTool} onPress={confirmDelete} accessibilityRole="button" accessibilityLabel="Delete">
+                    <Icon name="trash" size={22} color={bp.text} />
                   </TouchableOpacity>
                 </View>
               )}
@@ -2318,24 +2328,14 @@ const makeStyles = (p: Palette) =>
     titleTime: { color: 'rgba(255,255,255,0.75)', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.45)', textShadowRadius: 6 },
     headerRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
     airplay: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-    pillRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
-    addToPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      maxWidth: 200,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-    },
-    addToText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+    pillRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 4 },
+    addToPill: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '50%', height: 34, paddingHorizontal: 14, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(28,28,30,0.9)' },
+    addToText: { color: '#fff', fontSize: 15, fontWeight: '600', flexShrink: 1 },
     albumHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 },
     albumHeadTitle: { color: p.text, fontSize: 17, fontWeight: '800' },
     albumDone: { color: p.link, fontSize: 16, fontWeight: '700' },
     linkPill: {
-      alignSelf: 'center',
-      maxWidth: '60%',
+      maxWidth: '50%',
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
@@ -2380,44 +2380,22 @@ const makeStyles = (p: Palette) =>
 
     bottom: { backgroundColor: p.viewerBar },
     bottomOver: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: 'transparent' },
-    capsuleOver: { backgroundColor: 'rgba(22,22,26,0.78)', marginHorizontal: 0 },
     note: { color: p.link, fontSize: 12, textAlign: 'center', paddingTop: 8 },
-    timeRow: { alignSelf: 'center', paddingTop: 6, paddingBottom: 4 },
-    timeText: { color: p.textSecondary, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
-    capsule: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginHorizontal: 10,
-      paddingHorizontal: 6,
-      borderRadius: 14,
-      backgroundColor: p.card,
-    },
+    capsule: { flexDirection: 'row', alignItems: 'center', gap: 4, marginHorizontal: 10, marginTop: 8, paddingHorizontal: 4, height: 56, borderRadius: 28, backgroundColor: p.card },
+    capsuleOver: { backgroundColor: 'rgba(22,22,26,0.82)', marginHorizontal: 0, marginTop: 0 },
     capTime: { color: p.text, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'], paddingLeft: 4 },
-    capBtn: { width: 34, height: 40, alignItems: 'center', justifyContent: 'center' },
-    neighbours: { gap: NB_GAP, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 8, alignItems: 'center' },
-    nb: { width: NB_W, height: NB_W, borderRadius: 3, backgroundColor: p.tile, opacity: 0.75 },
-    nbOn: { width: NB_ON, height: NB_W + 6, borderRadius: 4, opacity: 1, borderWidth: 2, borderColor: p.text },
-
-    toolbar: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginHorizontal: 10,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      gap: 8,
-      borderRadius: 14,
-      backgroundColor: p.card,
-    },
-    tool: { paddingVertical: 4, paddingHorizontal: 2 },
-    toolIcon: { color: p.textSoft, fontSize: 17, fontWeight: '600' },
-    toolPick: { color: '#34c759' },
-    toolReject: { color: '#ff453a' },
-    toolDanger: { color: p.dangerText, fontSize: 17, fontWeight: '700' },
-    stars: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 },
-    starsOver: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', gap: 7 },
-    star: { color: p.starOff, fontSize: 14 },
-    starOn: { color: p.rating },
+    capBtn: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },
+    neighbours: { gap: NB_GAP, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10, alignItems: 'center' },
+    nb: { width: NB_W, height: NB_W + 6, borderRadius: 4, backgroundColor: p.tile, opacity: 0.8 },
+    nbOn: { width: NB_ON, height: NB_W + 10, borderRadius: 5, opacity: 1 },
+    toolRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 10 },
+    toolbar: { flex: 1, flexDirection: 'row', alignItems: 'center', height: 56, paddingHorizontal: 6, borderRadius: 28, backgroundColor: p.card },
+    tool: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },
+    stars: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingRight: 4 },
+    starHit: { flex: 1, maxWidth: 36, height: 48, alignItems: 'center', justifyContent: 'center' },
+    halves: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, flexDirection: 'row' },
+    half: { flex: 1 },
+    roundTool: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card },
 
     infoRoot: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
     infoBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: p.backdrop },

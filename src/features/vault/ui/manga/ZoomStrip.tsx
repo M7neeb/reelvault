@@ -164,8 +164,8 @@ export default function ZoomStrip({
       })
       .simultaneousWithExternalGesture(native);
     // One tap shows or hides the controls; not when it only stopped the strip scrolling.
+    // No maxDuration: on the iPhone it runs on past the lift and cancels this tap while it waits out the double tap.
     const single = Gesture.Tap()
-      .maxDuration(250)
       .maxDistance(10)
       .runOnJS(true)
       .onEnd((_e, ok) => {

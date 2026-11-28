@@ -1,13 +1,14 @@
 /**
  * The playback bar as a film strip, like HashPhotos: the video's frames side by
  * side, with a white playhead over them and bookmark ticks along the bottom.
- * Drag anywhere to scrub, tap to jump. While your finger is down the playhead
+ * Drag anywhere to scrub, tap to jump. `centered`: the playhead stays in the
+ * middle and the strip slides under it (drag the film itself; a tap does not jump). While your finger is down the playhead
  * grows and a time bubble follows it. Slide your finger up off the bar for
  * fine scrubbing: it moves at half, a quarter, then a tenth of the speed. VoiceOver gets an adjustable control
  * that moves 10 seconds at a time.
  */
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Text, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -28,6 +29,7 @@ export default function FilmScrubber({
   marks = [],
   markColor,
   height = 38,
+  centered = false,
   onStart,
   onMove,
   onEnd,
@@ -42,6 +44,7 @@ export default function FilmScrubber({
   marks?: number[];
   markColor: string;
   height?: number;
+  centered?: boolean;
   onStart: () => void;
   onMove: (fraction: number) => void;
   onEnd: (fraction: number) => void;
@@ -56,61 +59,74 @@ export default function FilmScrubber({
   const [speed, setSpeed] = useState(1);
 
   const shown = drag ?? clamp01(fraction);
-  const at = (x: number) => clamp01(x / Math.max(1, widthRef.current));
+  // Centred: the strip is a little over twice the bar, so a drag across the bar moves about half the video.
+  const stripW = Math.max(1, width * 2.2);
+  const live = useRef({ shown, centered, stripW, onStart, onMove, onEnd });
+  live.current = { shown, centered, stripW, onStart, onMove, onEnd };
 
-  const pan = Gesture.Pan()
-    .runOnJS(true)
-    .minDistance(0)
-    .hitSlop({ top: 12, bottom: 12, left: 4, right: 4 })
-    .shouldCancelWhenOutside(false)
-    .onBegin((e) => {
-      const f = at(e.x);
-      anchor.current = { x: e.x, f, speed: 1 };
-      setSpeed(1);
-      active.value = withTiming(1, { duration: DUR.fast, easing: EASE_OUT });
-      setDrag(f);
-      onStart();
-      onMove(f);
-    })
-    .onUpdate((e) => {
-      const dy = Math.abs(e.translationY);
-      const sp = dy > 140 ? 0.1 : dy > 80 ? 0.25 : dy > 40 ? 0.5 : 1;
+  // Built once: the player re-renders several times a second, and a gesture made fresh each render is swapped mid-drag.
+  const pan = useMemo(() => {
+    const posOf = (x: number) => {
       const a = anchor.current;
-      if (sp !== a.speed) {
-        // Re-anchor where the finger is, so changing speed never jumps.
-        a.f = clamp01(a.f + ((e.x - a.x) / Math.max(1, widthRef.current)) * a.speed);
-        a.x = e.x;
-        a.speed = sp;
-        setSpeed(sp);
-        tick();
-      }
-      const f = clamp01(a.f + ((e.x - a.x) / Math.max(1, widthRef.current)) * a.speed);
-      setDrag(f);
-      onMove(f);
-      // A light tick every 10% so you can feel where you are.
-      const step = Math.floor(f * 10);
-      if (step !== lastTick.current) {
-        lastTick.current = step;
-        tick();
-      }
-    })
-    .onFinalize((e) => {
-      const a = anchor.current;
-      const f = clamp01(a.f + ((e.x - a.x) / Math.max(1, widthRef.current)) * a.speed);
-      setSpeed(1);
-      active.value = withTiming(0, { duration: DUR.base, easing: EASE_OUT });
-      lastTick.current = -1;
-      setDrag(null);
-      onEnd(f);
-    });
+      const L = live.current;
+      return L.centered
+        ? clamp01(a.f - ((x - a.x) / L.stripW) * a.speed)
+        : clamp01(a.f + ((x - a.x) / Math.max(1, widthRef.current)) * a.speed);
+    };
+    return Gesture.Pan()
+      .runOnJS(true)
+      .minDistance(0)
+      .hitSlop({ top: 12, bottom: 12, left: 4, right: 4 })
+      .shouldCancelWhenOutside(false)
+      .onBegin((e) => {
+        const L = live.current;
+        const f = L.centered ? L.shown : clamp01(e.x / Math.max(1, widthRef.current));
+        anchor.current = { x: e.x, f, speed: 1 };
+        setSpeed(1);
+        active.value = withTiming(1, { duration: DUR.fast, easing: EASE_OUT });
+        setDrag(f);
+        L.onStart();
+        L.onMove(f);
+      })
+      .onUpdate((e) => {
+        const dy = Math.abs(e.translationY);
+        const sp = dy > 140 ? 0.1 : dy > 80 ? 0.25 : dy > 40 ? 0.5 : 1;
+        const a = anchor.current;
+        if (sp !== a.speed) {
+          // Re-anchor where the finger is, so changing speed never jumps.
+          a.f = posOf(e.x);
+          a.x = e.x;
+          a.speed = sp;
+          setSpeed(sp);
+          tick();
+        }
+        const f = posOf(e.x);
+        setDrag(f);
+        live.current.onMove(f);
+        // A light tick every 10% so you can feel where you are.
+        const step = Math.floor(f * 10);
+        if (step !== lastTick.current) {
+          lastTick.current = step;
+          tick();
+        }
+      })
+      .onFinalize((e) => {
+        const f = posOf(e.x);
+        setSpeed(1);
+        active.value = withTiming(0, { duration: DUR.base, easing: EASE_OUT });
+        lastTick.current = -1;
+        setDrag(null);
+        live.current.onEnd(f);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const headStyle = useAnimatedStyle(() => ({ transform: [{ scaleX: 1 + active.value * 0.6 }, { scaleY: 1 + active.value * 0.18 }] }));
   const bubbleStyle = useAnimatedStyle(() => ({ opacity: active.value, transform: [{ translateY: (1 - active.value) * 6 }] }));
 
-  const x = shown * Math.max(0, width);
+  const x = centered ? width / 2 : shown * Math.max(0, width);
   const step = Math.max(1, Math.min(10, durationSec / 10));
   // As many frames as fit at roughly the strip's height, picked evenly from the ones there are.
-  const slots = width > 0 ? Math.max(1, Math.round(width / (height * 0.8))) : 0;
+  const slots = width > 0 ? Math.max(1, Math.round((centered ? stripW : width) / (height * 0.8))) : 0;
   const pics: (ThumbSource | undefined)[] = Array.from({ length: slots }, (_, i) =>
     frames.length ? frames[Math.min(frames.length - 1, Math.floor(((i + 0.5) / slots) * frames.length))] : cover
   );
@@ -134,12 +150,27 @@ export default function FilmScrubber({
           onStart();
           onEnd(f);
         }}>
-        <View style={{ height, borderRadius: 7, overflow: 'hidden', flexDirection: 'row', backgroundColor: 'rgba(127,127,127,0.25)' }} pointerEvents="none">
-          {pics.map((src, i) => (
-            <Image key={i} source={src} style={{ flex: 1, height }} contentFit="cover" transition={0} />
-          ))}
-        </View>
+        {centered ? (
+          <View style={{ height, borderRadius: 7, overflow: 'hidden', backgroundColor: 'rgba(127,127,127,0.18)' }} pointerEvents="none">
+            <View style={{ position: 'absolute', top: 0, left: width / 2 - shown * stripW, width: stripW, height, flexDirection: 'row' }}>
+              {pics.map((src, i) => (
+                <Image key={i} source={src} style={{ flex: 1, height }} contentFit="cover" transition={0} />
+              ))}
+              {durationSec > 0 &&
+                marks.map((m) => (
+                  <View key={m} style={{ position: 'absolute', bottom: 2, left: clamp01(m / 1000 / durationSec) * stripW - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: markColor }} />
+                ))}
+            </View>
+          </View>
+        ) : (
+          <View style={{ height, borderRadius: 7, overflow: 'hidden', flexDirection: 'row', backgroundColor: 'rgba(127,127,127,0.25)' }} pointerEvents="none">
+            {pics.map((src, i) => (
+              <Image key={i} source={src} style={{ flex: 1, height }} contentFit="cover" transition={0} />
+            ))}
+          </View>
+        )}
         {durationSec > 0 &&
+          !centered &&
           marks.map((m) => (
             <View
               key={m}
